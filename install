@@ -1,0 +1,12 @@
+#!/bin/sh
+
+PROG=rarebyte
+DIR="$HOME"/.local/bin
+if ! [ -d "$DIR" ]; then
+	echo "$HOME/.local/bin is not a directory."
+	exit 1
+fi
+cp $PROG "$DIR"
+cp $PROG-sort "$DIR"
+echo "Installed $PROG to $DIR"
+echo "Installed $PROG-sort to $DIR"

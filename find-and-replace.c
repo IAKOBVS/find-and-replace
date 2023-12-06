@@ -67,19 +67,11 @@ process_file(jstr_ty *R buf,
              const char *R rplc,
              const size_t rplc_len)
 {
-	if (jstr_chk(jstrio_readfile_len_j(buf, fname, file_size)))
+	if (jstr_chk(jstrio_freadfile_len_j(buf, fname, file_size)))
 		goto err;
 	if (jstr_chk(jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len)))
 		goto err;
 	const int read = getc(stdin);
-	jstrio_println(buf);
-	printf("Replacing FIND with REPLACE in File:%s\n"
-	       "Find:%s\n"
-	       "Replace:%s\n"
-	       "Are you sure (Y/n)?",
-	       fname,
-	       find,
-	       rplc);
 	if ((char)read != 'Y')
 		exit(EXIT_FAILURE);
 	if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_WRONLY)))
@@ -97,6 +89,8 @@ typedef struct args_ty {
 	size_t rplc_len;
 	size_t find_len;
 } args_ty;
+
+#if 0
 
 static JSTRIO_FTW_FUNC(callback_file, ftw, args)
 {
@@ -129,11 +123,13 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
+#endif
+
 int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
-		PRINTERR("Usage: %s <find> <replace> <file/dir> <other files/dirs> ...\n", argv[0]);
+		PRINTERR("Usage: %s <find> <replace> <file> <other files> ...\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 	jstr_ty buf = JSTR_INIT;
@@ -148,10 +144,8 @@ main(int argc, char **argv)
 			continue;
 		if (IS_REG(st.st_mode))
 			DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, FIND, find_len, RPLC, rplc_len)));
-		else if (IS_DIR(st.st_mode))
-			DIE_IF(jstr_chk(process_dir(&buf, ARG, FIND, find_len, RPLC, rplc_len)));
 		else
-			PRINTERR("%s is neither a regular file nor a directory.\n", ARG);
+			PRINTERR("stat() failed on %s.\n", ARG);
 	}
 	jstr_free_j(&buf);
 	return EXIT_SUCCESS;

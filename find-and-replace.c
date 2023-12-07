@@ -39,8 +39,8 @@
 #define unlikely(x) jstr_unlikely(x)
 #define IS_REG(x)   S_ISREG(x)
 #define IS_DIR(x)   S_ISDIR(x)
-#define FIND        argv[2]
-#define RPLC        argv[3]
+#define FIND        argv[1]
+#define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
 static jstr_ret_ty

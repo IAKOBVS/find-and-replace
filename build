@@ -3,4 +3,5 @@
 PROG=find-and-replace
 FLAGS='-O3 -Wall -Wextra -Wpedantic'
 #shellcheck disable=SC2086
-cc $PROG.c -o $PROG $FLAGS
+cc $PROG.c -o $PROG $FLAGS || exit
+echo "cc $PROG.c -o $PROG $FLAGS"

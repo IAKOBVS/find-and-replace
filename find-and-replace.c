@@ -44,15 +44,6 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
-#if 0
-
-typedef struct g_ty {
-	int no_backup;
-} g_ty;
-g_ty GLOBAL;
-
-#endif
-
 JSTR_FUNC
 JSTR_ATTR_INLINE
 static jstr_ret_ty
@@ -70,10 +61,14 @@ err:
 	return JSTR_RET_ERR - 1;
 }
 
-JSTR_FUNC
-JSTR_ATTR_INLINE
+static void
+backup_make(char *R dst, const char *R src)
+{
+	jstr_strcpy_len(jstr_mempcpy(dst, src, jstr_strnlen(src, JSTRIO_NAME_MAX)), ".bak", sizeof(".bak") - 1);
+}
+
 static int
-file_exists(const char *fname)
+file_exists(const char *R fname)
 {
 	return access(fname, F_OK) == 0;
 }
@@ -92,11 +87,10 @@ process_file(jstr_ty *R buf,
 	if (jstr_chk(jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len)))
 		goto err;
 	char bak[JSTRIO_NAME_MAX + 4 + 1];
-	memcpy(bak, fname, jstr_strnlen(fname, JSTRIO_NAME_MAX));
-	jstr_strcpy_len(bak + JSTRIO_NAME_MAX, ".bak", sizeof(".bak") - 1);
-	if (file_exists(bak))
+	backup_make(bak, fname);
+	if (jstr_unlikely(file_exists(bak)))
 		goto err;
-	if (jstr_chk(jstrio_writefile_len_j(buf, bak, O_WRONLY)))
+	if (jstr_chk(jstrio_writefile_len_j(buf, bak, O_CREAT)))
 		goto err;
 	return JSTR_RET_SUCC;
 err:

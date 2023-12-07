@@ -1,6 +1,6 @@
 #!/bin/sh
 
-PROG=rarebyte
+PROG=find-and-replace
 DIR="$HOME"/.local/bin
 if ! [ -d "$DIR" ]; then
 	echo "$HOME/.local/bin is not a directory."

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023 James Tirta Halim <tirtajames45 at gmail dot com>
    This file is part of find-and-replace.
 

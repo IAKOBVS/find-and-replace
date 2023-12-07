@@ -131,7 +131,7 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	jstr_ty buf = JSTR_INIT;
-	DIE_IF(jstr_reserve_j(&buf, 4096) == JSTR_RET_ERR);
+	DIE_IF(jstr_chk(jstr_reserve_j(&buf, 4096)));
 	struct stat st;
 	const size_t find_len = strlen(FIND);
 	const size_t rplc_len = strlen(RPLC);

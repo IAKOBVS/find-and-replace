@@ -71,9 +71,6 @@ process_file(jstr_ty *R buf,
 		goto err;
 	if (jstr_chk(jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len)))
 		goto err;
-	const int c = getc(stdin);
-	if (jstr_unlikely(c == EOF))
-		goto err;
 	if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_WRONLY)))
 		goto err;
 	return JSTR_RET_SUCC;

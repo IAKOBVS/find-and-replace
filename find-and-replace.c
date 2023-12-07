@@ -44,6 +44,17 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
+#if 0
+
+typedef struct g_ty {
+	int no_backup;
+} g_ty;
+g_ty GLOBAL;
+
+#endif
+
+JSTR_FUNC
+JSTR_ATTR_INLINE
 static jstr_ret_ty
 STAT(const char *R file,
      struct stat *R buf)
@@ -59,6 +70,14 @@ err:
 	return JSTR_RET_ERR - 1;
 }
 
+JSTR_FUNC
+JSTR_ATTR_INLINE
+static int
+file_exists(const char *fname)
+{
+	return access(fname, F_OK) == 0;
+}
+
 static jstr_ret_ty
 process_file(jstr_ty *R buf,
              const char *R fname,
@@ -68,11 +87,16 @@ process_file(jstr_ty *R buf,
              const char *R rplc,
              const size_t rplc_len)
 {
-	if (jstr_chk(jstrio_freadfile_len_j(buf, fname, file_size)))
+	if (jstr_chk(jstrio_readfile_len_j(buf, fname, file_size)))
 		goto err;
 	if (jstr_chk(jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len)))
 		goto err;
-	if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_WRONLY)))
+	char bak[JSTRIO_NAME_MAX + 4 + 1];
+	memcpy(bak, fname, jstr_strnlen(fname, JSTRIO_NAME_MAX));
+	jstr_strcpy_len(bak + JSTRIO_NAME_MAX, ".bak", sizeof(".bak") - 1);
+	if (file_exists(bak))
+		goto err;
+	if (jstr_chk(jstrio_writefile_len_j(buf, bak, O_WRONLY)))
 		goto err;
 	return JSTR_RET_SUCC;
 err:

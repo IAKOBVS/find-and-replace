@@ -90,7 +90,9 @@ process_file(jstr_ty *R buf,
 	backup_make(bak, fname);
 	if (jstr_unlikely(file_exists(bak)))
 		goto err;
-	if (jstr_chk(jstrio_writefile_len_j(buf, bak, O_CREAT)))
+	if (jstr_unlikely(rename(fname, bak)))
+		goto err;
+	if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_CREAT)))
 		goto err;
 	return JSTR_RET_SUCC;
 err:

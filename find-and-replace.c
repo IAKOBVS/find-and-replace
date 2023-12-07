@@ -44,6 +44,8 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
+int g_no_backup;
+
 JSTR_FUNC
 JSTR_ATTR_INLINE
 static jstr_ret_ty

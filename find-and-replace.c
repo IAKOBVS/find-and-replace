@@ -79,6 +79,8 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
+#if 0
+
 typedef struct args_ty {
 	jstr_ty *buf;
 	const char *find;
@@ -86,8 +88,6 @@ typedef struct args_ty {
 	size_t rplc_len;
 	size_t find_len;
 } args_ty;
-
-#if 0
 
 static JSTRIO_FTW_FUNC(callback_file, ftw, args)
 {

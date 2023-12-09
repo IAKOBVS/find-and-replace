@@ -147,19 +147,25 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
+#define SPC_OP  "  "
+#define SPC_OP2 SPC_OP SPC_OP
+
 int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
 		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
-		         "FIND and REPLACE shall be placed in that order.\n"
-		         "\n"
 		         "Options:\n"
-		         "-i, -i.bak\n"
-		         "Instead of printing to stdout, replace the files in-place.\n"
-		         "If .bak is provided, backup the original file prefixed with .bak.\n"
-		         "-r\n"
-		         "Recurse on the arguments given if they are directories.\n",
+		         "  -i, -i.bak\n"
+		         "    Instead of printing to stdout, replace the files in-place.\n"
+		         "    If .bak is provided, backup the original file prefixed with .bak.\n"
+		         "  -r\n"
+		         "    Recurse on the arguments given if they are directories.\n"
+		         "  -name pattern\n"
+		         "    File to match when -r is used. Pattern is a wildcard.\n"
+		         "    If -name is used without -r, behavior is undefined.\n"
+		         "\n"
+		         "FIND and REPLACE shall be placed in that exact order.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}

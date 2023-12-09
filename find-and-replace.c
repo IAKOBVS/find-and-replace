@@ -159,7 +159,7 @@ main(int argc, char **argv)
 		         "  -r\n"
 		         "    Recurse on the arguments given if they are directories.\n"
 		         "  -name pattern\n"
-		         "    File to match when -r is used. Pattern is a wildcard.\n"
+		         "    Files to match when -r is used. Pattern is a wildcard.\n"
 		         "    If -name is used without -r, behavior is undefined.\n"
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n",

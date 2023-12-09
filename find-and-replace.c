@@ -44,7 +44,16 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
-int g_no_backup;
+typedef enum {
+	PRINT_STDOUT = 0,
+	PRINT_FILE,
+	PRINT_FILE_BACKUP,
+} print_mode_ty;
+
+typedef struct global_ty {
+	int print_mode;
+} global_ty;
+global_ty G = { 0 };
 
 JSTR_FUNC
 JSTR_ATTR_INLINE
@@ -84,21 +93,28 @@ process_file(jstr_ty *R buf,
              const char *R rplc,
              const size_t rplc_len)
 {
-	if (jstr_chk(jstrio_readfile_len_j(buf, fname, file_size)))
+	if (jstr_chk(jstrio_freadfile_len_j(buf, fname, "r", file_size)))
 		goto err;
 	const size_t changed = jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len);
 	if (changed == (size_t)-1)
 		goto err;
 	if (changed == 0)
 		return JSTR_RET_SUCC;
-	char bak[JSTRIO_NAME_MAX + 4 + 1];
-	backup_make(bak, fname);
-	if (jstr_unlikely(file_exists(bak)))
-		goto err;
-	if (jstr_unlikely(rename(fname, bak)))
-		goto err;
-	if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_CREAT)))
-		goto err;
+	if (G.print_mode == PRINT_STDOUT) {
+		jstrio_fwrite(buf->data, 1, buf->size, stdout);
+		if (buf->size && *(buf->data + buf->size - 1) != '\n')
+			jstrio_putchar('\n');
+	} else {
+		char bak[JSTRIO_NAME_MAX + 4 + 1];
+		backup_make(bak, fname);
+		if (jstr_unlikely(file_exists(bak)))
+			goto err;
+		if (G.print_mode == PRINT_FILE_BACKUP)
+			if (jstr_unlikely(rename(fname, bak)))
+				goto err;
+		if (jstr_chk(jstrio_fwritefile_len_j(buf, fname, "w")))
+			goto err;
+	}
 	return JSTR_RET_SUCC;
 err:
 	DIE();
@@ -152,7 +168,14 @@ int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
-		PRINTERR("Usage: %s <find> <replace> <file> <other files> ...\n", argv[0]);
+		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
+		         "FIND and REPLACE shall be placed in that order.\n"
+		         "\n"
+		         "Options:\n"
+		         "-i, -i.bak\n"
+		         "Instead of printing to stdout, replace the files in-place.\n"
+		         "If .bak is provided, backup the original file prefixed with .bak.\n",
+		         argv[0]);
 		return EXIT_FAILURE;
 	}
 	jstr_ty buf = JSTR_INIT;
@@ -160,7 +183,16 @@ main(int argc, char **argv)
 	struct stat st;
 	const size_t find_len = strlen(FIND);
 	const size_t rplc_len = strlen(RPLC);
-	for (unsigned int i = 1; argv[i]; ++i) {
+	for (unsigned int i = 3; argv[i]; ++i) {
+		if (G.print_mode == 0) {
+			if (!strcmp(argv[i], "-i.bak")) {
+				G.print_mode = PRINT_FILE_BACKUP;
+				continue;
+			} else if (!strcmp(argv[i], "-i")) {
+				G.print_mode = PRINT_FILE;
+				continue;
+			}
+		}
 		int ret = STAT(ARG, &st);
 		DIE_IF(ret == JSTR_RET_ERR);
 		if (ret != JSTR_RET_SUCC)

@@ -172,7 +172,8 @@ main(int argc, char **argv)
 	const size_t find_len = strlen(FIND);
 	const size_t rplc_len = strlen(RPLC);
 	for (unsigned int i = 3; ARG; ++i) {
-		if (G.print_mode == 0) {
+		switch (argv[i][0]) {
+		case '-': /* flag */
 			if (!jstr_strcmpeq_loop(ARG, "-i.bak")) {
 				G.print_mode = PRINT_FILE_BACKUP;
 				continue;
@@ -180,14 +181,10 @@ main(int argc, char **argv)
 				G.print_mode = PRINT_FILE;
 				continue;
 			}
-		}
-		if (G.recursive == 0) {
 			if (!jstr_strcmpeq_loop(ARG, "-r")) {
 				G.recursive = 1;
 				continue;
 			}
-		}
-		if (G.file_pattern == NULL) {
 			if (!jstr_strcmpeq_loop(ARG, "-name")) {
 				++i;
 				if (jstr_nullchk(ARG))
@@ -195,21 +192,22 @@ main(int argc, char **argv)
 				G.file_pattern = ARG;
 				continue;
 			}
-		}
-		int ret = STAT(ARG, &st);
-		DIE_IF(ret == JSTR_RET_ERR);
-		if (ret != JSTR_RET_SUCC)
-			continue;
-		if (IS_REG(st.st_mode)) {
-			DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, FIND, find_len, RPLC, rplc_len)));
-		} else if (IS_DIR(st.st_mode)) {
-			if (G.recursive) {
-				args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
-				DIE_IF(!jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern, 0)));
+		default:;
+			const int ret = STAT(ARG, &st);
+			DIE_IF(ret == JSTR_RET_ERR);
+			if (ret != JSTR_RET_SUCC)
+				continue;
+			if (IS_REG(st.st_mode)) {
+				DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, FIND, find_len, RPLC, rplc_len)));
+			} else if (IS_DIR(st.st_mode)) {
+				if (G.recursive) {
+					args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
+					DIE_IF(!jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern, 0)));
+				}
+			} else {
+				PRINTERR("stat() failed on %s.\n", ARG);
+				exit(EXIT_FAILURE);
 			}
-		} else {
-			PRINTERR("stat() failed on %s.\n", ARG);
-			exit(EXIT_FAILURE);
 		}
 	}
 	jstr_free_j(&buf);

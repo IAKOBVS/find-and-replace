@@ -44,7 +44,16 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
-int g_no_backup;
+typedef enum {
+	PRINT_STDOUT = 0,
+	PRINT_FILE,
+	PRINT_FILE_BACKUP,
+} print_mode_ty;
+
+typedef struct global_ty {
+	int print_mode;
+} global_ty;
+global_ty G = { 0 };
 
 JSTR_FUNC
 JSTR_ATTR_INLINE
@@ -64,7 +73,7 @@ err:
 }
 
 static void
-backup_make(char *R dst, const char *R src)
+print_mode_make(char *R dst, const char *R src)
 {
 	jstr_strcpy_len(jstr_mempcpy(dst, src, jstr_strnlen(src, JSTRIO_NAME_MAX)), ".bak", sizeof(".bak") - 1);
 }
@@ -84,18 +93,28 @@ process_file(jstr_ty *R buf,
              const char *R rplc,
              const size_t rplc_len)
 {
-	if (jstr_chk(jstrio_readfile_len_j(buf, fname, file_size)))
+	if (jstr_chk(jstrio_freadfile_len_j(buf, fname, "r", file_size)))
 		goto err;
-	if (jstr_chk(jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len)))
+	const size_t changed = jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len);
+	if (jstr_unlikely(changed == (size_t)-1))
 		goto err;
+	if (changed == 0)
+		return JSTR_RET_SUCC;
 	char bak[JSTRIO_NAME_MAX + 4 + 1];
-	backup_make(bak, fname);
+	print_mode_make(bak, fname);
 	if (jstr_unlikely(file_exists(bak)))
 		goto err;
-	if (jstr_unlikely(rename(fname, bak)))
-		goto err;
-	if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_CREAT)))
-		goto err;
+	if (G.print_mode == PRINT_STDOUT) {
+		jstrio_fwrite(buf->data, 1, buf->size, stdout);
+		if (buf->size && *(buf->data + buf->size - 1) != '\n')
+			jstrio_putchar('\n');
+	} else {
+		if (G.print_mode == PRINT_FILE_BACKUP)
+			if (jstr_unlikely(rename(fname, bak)))
+				goto err;
+		if (jstr_chk(jstrio_fwritefile_len_j(buf, fname, "w")))
+			goto err;
+	}
 	return JSTR_RET_SUCC;
 err:
 	DIE();
@@ -157,7 +176,16 @@ main(int argc, char **argv)
 	struct stat st;
 	const size_t find_len = strlen(FIND);
 	const size_t rplc_len = strlen(RPLC);
-	for (unsigned int i = 1; argv[i]; ++i) {
+	for (unsigned int i = 3; argv[i]; ++i) {
+		if (G.print_mode == 0) {
+			if (!strcmp(argv[i], "-i.bak")) {
+				G.print_mode = PRINT_FILE_BACKUP;
+				continue;
+			} else if (!strcmp(argv[i], "-i")) {
+				G.print_mode = PRINT_FILE;
+				continue;
+			}
+		}
 		int ret = STAT(ARG, &st);
 		DIE_IF(ret == JSTR_RET_ERR);
 		if (ret != JSTR_RET_SUCC)

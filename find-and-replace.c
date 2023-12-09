@@ -147,6 +147,8 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
+#define STRCMP(s1, s2) jstr_strcmpeq_loop(s1, s2)
+
 int
 main(int argc, char **argv)
 {
@@ -174,18 +176,18 @@ main(int argc, char **argv)
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */
-			if (!jstr_strcmpeq_loop(ARG, "-i.bak")) {
+			if (!STRCMP(ARG, "-i.bak")) {
 				G.print_mode = PRINT_FILE_BACKUP;
 				continue;
-			} else if (!jstr_strcmpeq_loop(ARG, "-i")) {
+			} else if (!STRCMP(ARG, "-i")) {
 				G.print_mode = PRINT_FILE;
 				continue;
 			}
-			if (!jstr_strcmpeq_loop(ARG, "-r")) {
+			if (!STRCMP(ARG, "-r")) {
 				G.recursive = 1;
 				continue;
 			}
-			if (!jstr_strcmpeq_loop(ARG, "-name")) {
+			if (!STRCMP(ARG, "-name")) {
 				++i;
 				if (jstr_nullchk(ARG))
 					jstr_errdie("No argument after -name flag.");

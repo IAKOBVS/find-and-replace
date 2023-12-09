@@ -113,13 +113,14 @@ process_file(jstr_ty *R buf,
 		if (buf->size && *(buf->data + buf->size - 1) != '\n')
 			jstrio_putchar('\n');
 	} else {
-		char bak[JSTRIO_NAME_MAX + 4 + 1];
-		backup_make(bak, fname);
-		if (jstr_unlikely(file_exists(bak)))
-			goto err;
-		if (G.print_mode == PRINT_FILE_BACKUP)
+		if (G.print_mode == PRINT_FILE_BACKUP) {
+			char bak[JSTRIO_NAME_MAX + 4 + 1];
+			backup_make(bak, fname);
+			if (jstr_unlikely(file_exists(bak)))
+				goto err;
 			if (jstr_unlikely(rename(fname, bak)))
 				goto err;
+		}
 		if (jstr_chk(jstrio_fwritefile_len_j(buf, fname, "w")))
 			goto err;
 	}

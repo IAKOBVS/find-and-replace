@@ -72,7 +72,7 @@ backup_make(char *R dst, const char *R src)
 static int
 file_exists(const char *R fname)
 {
-	return access(fname, F_OK) == 0;
+	return access(fname, F_OK | W_OK | R_OK) == 0;
 }
 
 static jstr_ret_ty
@@ -86,8 +86,11 @@ process_file(jstr_ty *R buf,
 {
 	if (jstr_chk(jstrio_readfile_len_j(buf, fname, file_size)))
 		goto err;
-	if (jstr_chk(jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len)))
+	const size_t changed = jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len);
+	if (changed == (size_t)-1)
 		goto err;
+	if (changed == 0)
+		return JSTR_RET_SUCC;
 	char bak[JSTRIO_NAME_MAX + 4 + 1];
 	backup_make(bak, fname);
 	if (jstr_unlikely(file_exists(bak)))

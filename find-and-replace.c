@@ -147,9 +147,6 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
-#define SPC_OP  "  "
-#define SPC_OP2 SPC_OP SPC_OP
-
 int
 main(int argc, char **argv)
 {

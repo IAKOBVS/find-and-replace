@@ -192,6 +192,7 @@ main(int argc, char **argv)
 				G.file_pattern = ARG;
 				continue;
 			}
+			break;
 		default:;
 			const int ret = STAT(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR);
@@ -208,6 +209,7 @@ main(int argc, char **argv)
 				PRINTERR("stat() failed on %s.\n", ARG);
 				exit(EXIT_FAILURE);
 			}
+			break;
 		}
 	}
 	jstr_free_j(&buf);

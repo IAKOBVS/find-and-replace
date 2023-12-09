@@ -100,15 +100,15 @@ process_file(jstr_ty *R buf,
 		goto err;
 	if (changed == 0)
 		return JSTR_RET_SUCC;
-	char bak[JSTRIO_NAME_MAX + 4 + 1];
-	print_mode_make(bak, fname);
-	if (jstr_unlikely(file_exists(bak)))
-		goto err;
 	if (G.print_mode == PRINT_STDOUT) {
 		jstrio_fwrite(buf->data, 1, buf->size, stdout);
 		if (buf->size && *(buf->data + buf->size - 1) != '\n')
 			jstrio_putchar('\n');
 	} else {
+		char bak[JSTRIO_NAME_MAX + 4 + 1];
+		print_mode_make(bak, fname);
+		if (jstr_unlikely(file_exists(bak)))
+			goto err;
 		if (G.print_mode == PRINT_FILE_BACKUP)
 			if (jstr_unlikely(rename(fname, bak)))
 				goto err;
@@ -168,7 +168,14 @@ int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
-		PRINTERR("Usage: %s <find> <replace> <file> <other files> ...\n", argv[0]);
+		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
+		         "FIND and REPLACE shall be placed in that order.\n"
+		         "\n"
+		         "Options:\n"
+		         "-i, -i.bak\n"
+		         "Instead of printing to stdout, replace the files in-place.\n"
+		         "If .bak is provided, backup the original file prefixed with .bak.\n",
+		         argv[0]);
 		return EXIT_FAILURE;
 	}
 	jstr_ty buf = JSTR_INIT;

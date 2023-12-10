@@ -179,21 +179,15 @@ main(int argc, char **argv)
 		case '-': /* flag */
 			if (!STRCMP(ARG, "-i.bak")) {
 				G.print_mode = PRINT_FILE_BACKUP;
-				continue;
 			} else if (!STRCMP(ARG, "-i")) {
 				G.print_mode = PRINT_FILE;
-				continue;
-			}
-			if (!STRCMP(ARG, "-r")) {
+			} else if (!STRCMP(ARG, "-r")) {
 				G.recursive = 1;
-				continue;
-			}
-			if (!STRCMP(ARG, "-name")) {
+			} else if (!STRCMP(ARG, "-name")) {
 				++i;
 				if (jstr_nullchk(ARG))
 					jstr_errdie("No argument after -name flag.");
 				G.file_pattern = ARG;
-				continue;
 			}
 			break;
 		default:;

@@ -1,7 +1,11 @@
 #!/bin/sh
 
 PROG=find-and-replace
-FLAGS='-O3 -Wall -Wextra -Wpedantic'
+FLAGS='-O3'
+CC=$(readlink "$(command -v cc)")
+if [ "$CC" = 'gcc' ] || [ "$CC" = 'clang' ]; then
+	FLAGS="$FLAGS -march=native -Wall -Wextra -Wpedantic"
+fi
 #shellcheck disable=SC2086
 cc $PROG.c -o $PROG $FLAGS || exit
 echo "cc $PROG.c -o $PROG $FLAGS"

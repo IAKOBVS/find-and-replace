@@ -215,7 +215,7 @@ main(int argc, char **argv)
 				if (G.recursive) {
 					args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
 					matcher_args_ty m = { G.file_pattern };
-					DIE_IF(!jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
+					DIE_IF(jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
 				}
 			} else {
 				PRINTERR("stat() failed on %s.\n", ARG);

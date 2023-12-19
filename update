@@ -1,2 +1,2 @@
 #!/bin/sh
-./jstring/update && ./build
+./jstring/update

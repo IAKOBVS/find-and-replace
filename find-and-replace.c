@@ -27,6 +27,7 @@
 
 #include "./jstring/jstr/jstr.h"
 #include "./jstring/jstr/jstr-io.h"
+#include <fnmatch.h>
 
 #define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
 #define DIE_IF_PRINT(x, msg)              \
@@ -148,6 +149,19 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
+typedef struct matcher_args_ty {
+	const char *pattern;
+} matcher_args_ty;
+
+static JSTRIO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
+{
+	matcher_args_ty *a = (matcher_args_ty *)args;
+	if (fnmatch(a->pattern, fname, 0))
+		return 1;
+	return 0;
+	(void)fname_len;
+}
+
 #define STRCMP(s1, s2) jstr_strcmpeq_loop(s1, s2)
 
 int
@@ -200,7 +214,8 @@ main(int argc, char **argv)
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
-					DIE_IF(!jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern, 0)));
+					matcher_args_ty m = { G.file_pattern };
+					DIE_IF(!jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
 				}
 			} else {
 				PRINTERR("stat() failed on %s.\n", ARG);

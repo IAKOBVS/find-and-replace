@@ -213,7 +213,7 @@ main(int argc, char **argv)
 				DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, FIND, find_len, RPLC, rplc_len)));
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
-					args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
+					const args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
 					matcher_args_ty m = { G.file_pattern };
 					DIE_IF(jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
 				}

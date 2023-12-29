@@ -186,8 +186,13 @@ main(int argc, char **argv)
 	jstr_ty buf = JSTR_INIT;
 	DIE_IF(jstr_chk(jstr_reserve_j(&buf, 4096)));
 	struct stat st;
-	const size_t find_len = strlen(FIND);
-	const size_t rplc_len = strlen(RPLC);
+	int ret;
+	args_ty a;
+	a.find = FIND;
+	a.find_len = strlen(a.find);
+	a.rplc = RPLC;
+	a.rplc_len = strlen(a.rplc);
+	matcher_args_ty m = { G.file_pattern };
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */
@@ -205,16 +210,15 @@ main(int argc, char **argv)
 			}
 			break;
 		default:;
-			const int ret = STAT(ARG, &st);
+			ret = STAT(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR);
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {
-				DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, FIND, find_len, RPLC, rplc_len)));
+				DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, a.find, a.find_len, a.rplc, a.rplc_len)));
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
-					const args_ty a = { &buf, FIND, find_len, RPLC, rplc_len };
-					matcher_args_ty m = { G.file_pattern };
+					a.buf = &buf;
 					DIE_IF(jstr_chk(jstrio_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
 				}
 			} else {

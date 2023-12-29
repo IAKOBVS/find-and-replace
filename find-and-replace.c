@@ -162,8 +162,6 @@ static JSTRIO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 	(void)fname_len;
 }
 
-#define STRCMP(s1, s2) jstr_strcmpeq_loop(s1, s2)
-
 int
 main(int argc, char **argv)
 {
@@ -196,13 +194,13 @@ main(int argc, char **argv)
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */
-			if (!STRCMP(ARG, "-i.bak")) {
+			if (!strcmp(ARG, "-i.bak")) {
 				G.print_mode = PRINT_FILE_BACKUP;
-			} else if (!STRCMP(ARG, "-i")) {
+			} else if (!strcmp(ARG, "-i")) {
 				G.print_mode = PRINT_FILE;
-			} else if (!STRCMP(ARG, "-r")) {
+			} else if (!strcmp(ARG, "-r")) {
 				G.recursive = 1;
-			} else if (!STRCMP(ARG, "-name")) {
+			} else if (!strcmp(ARG, "-name")) {
 				++i;
 				if (jstr_nullchk(ARG))
 					jstr_errdie("No argument after -name flag.");

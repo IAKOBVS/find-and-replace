@@ -90,7 +90,7 @@ file_exists(const char *R fname)
 static jstr_ret_ty
 process_file(jstr_ty *R buf,
              const char *R fname,
-             const size_t file_size,
+             const struct stat *st,
              const char *R find,
              const size_t find_len,
              const char *R rplc,
@@ -99,7 +99,7 @@ process_file(jstr_ty *R buf,
 	jstrio_ft_ty ft = jstrio_exttype(buf->data, buf->size);
 	if (ft == JSTRIO_FT_BINARY)
 		return JSTR_RET_SUCC;
-	if (jstr_chk(jstrio_readfile_len_j(buf, fname, 0, file_size)))
+	if (jstr_chk(jstrio_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
 		goto err;
 	if (ft == JSTRIO_FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
@@ -122,7 +122,7 @@ process_file(jstr_ty *R buf,
 			if (jstr_unlikely(rename(fname, bak)))
 				goto err;
 		}
-		if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_CREAT)))
+		if (jstr_chk(jstrio_fwritefile_len_j(buf, fname, "w")))
 			goto err;
 	}
 	return JSTR_RET_SUCC;
@@ -142,7 +142,7 @@ typedef struct args_ty {
 static JSTRIO_FTW_FUNC(callback_file, ftw, args)
 {
 	const args_ty *const a = args;
-	if (jstr_chk(process_file(a->buf, ftw->dirpath, (size_t)ftw->st->st_size, a->find, a->find_len, a->rplc, a->rplc_len)))
+	if (jstr_chk(process_file(a->buf, ftw->dirpath, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
 		goto err;
 	return JSTR_RET_SUCC;
 err:
@@ -215,7 +215,7 @@ main(int argc, char **argv)
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {
-				DIE_IF(jstr_chk(process_file(&buf, ARG, (size_t)st.st_size, a.find, a.find_len, a.rplc, a.rplc_len)));
+				DIE_IF(jstr_chk(process_file(&buf, ARG, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;

@@ -99,7 +99,7 @@ process_file(jstr_ty *R buf,
 	jstrio_ft_ty ft = jstrio_exttype(buf->data, buf->size);
 	if (ft == JSTRIO_FT_BINARY)
 		return JSTR_RET_SUCC;
-	if (jstr_chk(jstrio_freadfile_len_j(buf, fname, "r", file_size)))
+	if (jstr_chk(jstrio_readfile_len_j(buf, fname, 0, file_size)))
 		goto err;
 	if (ft == JSTRIO_FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
@@ -122,7 +122,7 @@ process_file(jstr_ty *R buf,
 			if (jstr_unlikely(rename(fname, bak)))
 				goto err;
 		}
-		if (jstr_chk(jstrio_fwritefile_len_j(buf, fname, "w")))
+		if (jstr_chk(jstrio_writefile_len_j(buf, fname, 0)))
 			goto err;
 	}
 	return JSTR_RET_SUCC;
@@ -186,11 +186,12 @@ main(int argc, char **argv)
 	struct stat st;
 	int ret;
 	args_ty a;
+	matcher_args_ty m;
 	a.find = FIND;
 	a.find_len = strlen(a.find);
 	a.rplc = RPLC;
 	a.rplc_len = strlen(a.rplc);
-	matcher_args_ty m;
+	m.pattern = NULL;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */

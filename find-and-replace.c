@@ -122,7 +122,7 @@ process_file(jstr_ty *R buf,
 			if (jstr_unlikely(rename(fname, bak)))
 				goto err;
 		}
-		if (jstr_chk(jstrio_writefile_len_j(buf, fname, 0)))
+		if (jstr_chk(jstrio_writefile_len_j(buf, fname, O_CREAT)))
 			goto err;
 	}
 	return JSTR_RET_SUCC;

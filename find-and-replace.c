@@ -190,7 +190,7 @@ main(int argc, char **argv)
 	a.find_len = strlen(a.find);
 	a.rplc = RPLC;
 	a.rplc_len = strlen(a.rplc);
-	matcher_args_ty m = { G.file_pattern };
+	matcher_args_ty m;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */
@@ -205,6 +205,7 @@ main(int argc, char **argv)
 				if (jstr_nullchk(ARG))
 					jstr_errdie("No argument after -name flag.");
 				G.file_pattern = ARG;
+				m.pattern = G.file_pattern;
 			}
 			break;
 		default:;

@@ -68,10 +68,8 @@ STAT(const char *R file,
 		goto err;
 	return JSTR_RET_SUCC;
 err:
-	if (errno == EINVAL) {
-		DIE();
+	if (errno == EINVAL)
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
 	return JSTR_RET_ERR - 1;
 }
 
@@ -100,13 +98,13 @@ process_file(jstr_ty *R buf,
 	if (ft == JSTRIO_FT_BINARY)
 		return JSTR_RET_SUCC;
 	if (jstr_chk(jstrio_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
-		goto err;
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (ft == JSTRIO_FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
 	const size_t changed = jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len);
 	if (changed == (size_t)-1)
-		goto err;
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (changed == 0)
 		return JSTR_RET_SUCC;
 	if (G.print_mode == PRINT_STDOUT) {
@@ -118,17 +116,14 @@ process_file(jstr_ty *R buf,
 			char bak[JSTRIO_NAME_MAX + 4 + 1];
 			backup_make(bak, fname);
 			if (jstr_unlikely(file_exists(bak)))
-				goto err;
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			if (jstr_unlikely(rename(fname, bak)))
-				goto err;
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		if (jstr_chk(jstrio_fwritefile_len_j(buf, fname, "w")))
-			goto err;
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	return JSTR_RET_SUCC;
-err:
-	DIE();
-	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
 typedef struct args_ty {
@@ -143,10 +138,8 @@ static JSTRIO_FTW_FUNC(callback_file, ftw, args)
 {
 	const args_ty *const a = args;
 	if (jstr_chk(process_file(a->buf, ftw->dirpath, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
-		goto err;
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	return JSTR_RET_SUCC;
-err:
-	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
 typedef struct matcher_args_ty {

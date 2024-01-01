@@ -170,7 +170,8 @@ main(int argc, char **argv)
 		         "    File pattern to match when -r is used. Pattern is a wildcard.\n"
 		         "    If -name is used without -r, behavior is undefined.\n"
 		         "\n"
-		         "FIND and REPLACE shall be placed in that exact order.\n",
+		         "FIND and REPLACE shall be placed in that exact order.\n"
+			 "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}

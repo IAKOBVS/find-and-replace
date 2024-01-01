@@ -1,2 +1,2 @@
 #!/bin/sh
-./jstring/update
+cd ./jstring && git restore . && ./update

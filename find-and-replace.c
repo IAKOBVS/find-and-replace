@@ -180,10 +180,10 @@ main(int argc, char **argv)
 	int ret;
 	args_ty a;
 	matcher_args_ty m;
-	a.find = FIND;
-	a.find_len = strlen(a.find);
-	a.rplc = RPLC;
-	a.rplc_len = strlen(a.rplc);
+	a.find = (const char *)FIND;
+	a.rplc = (const char *)RPLC;
+	a.find_len = JSTR_PTR_DIFF(jstr_unescape_p(FIND), FIND);
+	a.rplc_len = JSTR_PTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.pattern = NULL;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {

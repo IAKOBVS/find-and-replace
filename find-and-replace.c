@@ -172,7 +172,9 @@ main(int argc, char **argv)
 		         "    If -name is used without -r, behavior is undefined.\n"
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
-			 "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n",
+			 "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
+			 "\n"
+			 "Filenames shall not start with - as they will be interpreted as a flag.",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}

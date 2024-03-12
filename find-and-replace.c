@@ -28,7 +28,6 @@
 #include "./jstring/jstr/jstr.h"
 #include "./jstring/jstr/jstr-io.h"
 #include <fnmatch.h>
-#include <ftw.h>
 
 #define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
 #define DIE_IF_PRINT(x, msg)              \

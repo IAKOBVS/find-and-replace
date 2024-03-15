@@ -25,8 +25,8 @@
 #define JSTR_PANIC                1
 #define JSTR_USE_UNLOCKED_IO_READ 1
 
-#include "./jstring/jstr/jstr.h"
-#include "./jstring/jstr/jstr-io.h"
+#include <jstr/jstr.h>
+#include <jstr/jstr-io.h>
 #include <fnmatch.h>
 
 #define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
@@ -86,7 +86,8 @@ file_exists(const char *R fname)
 }
 
 static jstr_ret_ty
-process_file(jstr_ty *R buf,
+process_file(const jstr_twoway_ty *R t,
+	     jstr_ty *R buf,
              const char *R fname,
              const struct stat *st,
              const char *R find,
@@ -102,7 +103,7 @@ process_file(jstr_ty *R buf,
 	if (ft == JSTRIO_FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
-	const size_t changed = jstr_rplcall_len_j(buf, find, find_len, rplc, rplc_len);
+	const size_t changed = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
 	if (changed == (size_t)-1)
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (changed == 0)
@@ -132,12 +133,13 @@ typedef struct args_ty {
 	size_t find_len;
 	const char *rplc;
 	size_t rplc_len;
+	const jstr_twoway_ty *t;
 } args_ty;
 
 static JSTRIO_FTW_FUNC(callback_file, ftw, args)
 {
 	const args_ty *const a = args;
-	if (jstr_chk(process_file(a->buf, ftw->dirpath, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
+	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	return JSTR_RET_SUCC;
 }
@@ -188,6 +190,9 @@ main(int argc, char **argv)
 	a.find_len = JSTR_PTR_DIFF(jstr_unescape_p(FIND), FIND);
 	a.rplc_len = JSTR_PTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.pattern = NULL;
+	jstr_twoway_ty t;
+	jstr_memmem_comp(&t, a.find, a.find_len);
+	a.t = &t;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */
@@ -211,7 +216,7 @@ main(int argc, char **argv)
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {
-				DIE_IF(jstr_chk(process_file(&buf, ARG, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
+				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;

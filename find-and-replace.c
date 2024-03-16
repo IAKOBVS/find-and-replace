@@ -76,7 +76,7 @@ err:
 static void
 backup_make(char *R dst, const char *R src)
 {
-	jstr_strcpy_len(jstr_mempcpy(dst, src, jstr_strnlen(src, JSTRIO_NAME_MAX)), ".bak", sizeof(".bak") - 1);
+	jstr_strcpy_len(jstr_mempcpy(dst, src, jstr_strnlen(src, JSTR_IO_NAME_MAX)), ".bak", sizeof(".bak") - 1);
 }
 
 static int
@@ -96,11 +96,11 @@ process_file(const jstr_twoway_ty *R t,
              const size_t rplc_len)
 {
 	jstr_io_ft_ty ft = jstr_io_exttype(buf->data, buf->size);
-	if (ft == JSTRIO_FT_BINARY)
+	if (ft == JSTR_IO_FT_BINARY)
 		return JSTR_RET_SUCC;
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (ft == JSTRIO_FT_UNKNOWN)
+	if (ft == JSTR_IO_FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
 	const size_t changed = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
@@ -114,7 +114,7 @@ process_file(const jstr_twoway_ty *R t,
 			jstr_io_putchar('\n');
 	} else {
 		if (G.print_mode == PRINT_FILE_BACKUP) {
-			char bak[JSTRIO_NAME_MAX + 4 + 1];
+			char bak[JSTR_IO_NAME_MAX + 4 + 1];
 			backup_make(bak, fname);
 			if (jstr_unlikely(file_exists(bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -136,7 +136,7 @@ typedef struct args_ty {
 	const jstr_twoway_ty *t;
 } args_ty;
 
-static JSTRIO_FTW_FUNC(callback_file, ftw, args)
+static JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 {
 	const args_ty *const a = args;
 	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
@@ -148,7 +148,7 @@ typedef struct matcher_args_ty {
 	const char *pattern;
 } matcher_args_ty;
 
-static JSTRIO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
+static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 {
 	matcher_args_ty *a = (matcher_args_ty *)args;
 	if (fnmatch(a->pattern, fname, 0))
@@ -220,7 +220,7 @@ main(int argc, char **argv)
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;
-					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTRIO_FTW_REG | JSTRIO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
+					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
 				}
 			} else {
 				PRINTERR("stat() failed on %s.\n", ARG);

@@ -45,6 +45,8 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
+#define DO_FREE 0
+
 typedef enum {
 	PRINT_STDOUT = 0,
 	PRINT_FILE,
@@ -229,7 +231,9 @@ main(int argc, char **argv)
 			break;
 		}
 	}
+#if DO_FREE /* We don't need to free since we're exiting. */
 	jstr_free_j(&buf);
+#endif
 	return EXIT_SUCCESS;
 	(void)argc;
 }

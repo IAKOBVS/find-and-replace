@@ -27,6 +27,7 @@
 
 #include <jstr/jstr.h>
 #include <jstr/jstr-io.h>
+#include <jstr/jstr-regex.h>
 #include <fnmatch.h>
 
 #define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
@@ -57,6 +58,10 @@ typedef struct global_ty {
 	const char *file_pattern;
 	int print_mode;
 	int recursive;
+	regex_t regex;
+	int compiled;
+	int regex_use;
+	int cflags;
 } global_ty;
 global_ty G = { 0 };
 
@@ -64,7 +69,7 @@ JSTR_FUNC
 JSTR_ATTR_INLINE
 static jstr_ret_ty
 xstat(const char *R file,
-     struct stat *R buf)
+      struct stat *R buf)
 {
 	if (unlikely(stat(file, buf)))
 		goto err;
@@ -89,7 +94,7 @@ file_exists(const char *R fname)
 
 static jstr_ret_ty
 process_file(const jstr_twoway_ty *R t,
-	     jstr_ty *R buf,
+             jstr_ty *R buf,
              const char *R fname,
              const struct stat *st,
              const char *R find,
@@ -105,10 +110,21 @@ process_file(const jstr_twoway_ty *R t,
 	if (ft == JSTR_IO_FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
-	const size_t changed = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
-	if (changed == (size_t)-1)
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (changed == 0)
+	size_t changed;
+	if (G.regex_use) {
+		const jstr_re_off_ty c = jstr_re_rplcall_len_j(&G.regex, buf, rplc, rplc_len, G.cflags);
+		if (jstr_re_chk(c)) {
+			jstr_re_errdie(-c, &G.regex);
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		}
+		changed = (size_t)c;
+	} else {
+		const size_t c = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
+		if (jstr_unlikely(c == (size_t)-1))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		changed = c;
+	}
+	if (!changed)
 		return JSTR_RET_SUCC;
 	if (G.print_mode == PRINT_STDOUT) {
 		jstr_io_fwrite(buf->data, 1, buf->size, stdout);
@@ -173,11 +189,20 @@ main(int argc, char **argv)
 		         "  -name pattern\n"
 		         "    File pattern to match when -r is used. Pattern is a wildcard.\n"
 		         "    If -name is used without -r, behavior is undefined.\n"
+		         "  -regex\n"
+		         "    Treat FIND as a regex pattern.\n"
+		         "  -E\n"
+		         "    Use POSIX Extended Regular Expressions syntax.\n"
+		         "    REG_EXTENDED is passed as the cflag to regexec.\n"
+		         "  -icase\n"
+		         "    Ignore case if FIND is a regex pattern.\n"
+		         "    REG_ICASE is passed as the cflag to regexec.\n"
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
-			 "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
-			 "\n"
-			 "Filenames shall not start with - as they will be interpreted as a flag.",
+		         "OPTIONS shall be placed before FILES.\n"
+		         "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
+		         "\n"
+		         "Filenames shall not start with - as they will be interpreted as a flag.",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}
@@ -189,21 +214,27 @@ main(int argc, char **argv)
 	matcher_args_ty m;
 	a.find = (const char *)FIND;
 	a.rplc = (const char *)RPLC;
-	a.find_len = JSTR_PTR_DIFF(jstr_unescape_p(FIND), FIND);
-	a.rplc_len = JSTR_PTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
+	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.pattern = NULL;
 	jstr_twoway_ty t;
-	jstr_memmem_comp(&t, a.find, a.find_len);
 	a.t = &t;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (argv[i][0]) {
 		case '-': /* flag */
-			if (!strcmp(ARG, "-i.bak")) {
-				G.print_mode = PRINT_FILE_BACKUP;
-			} else if (!strcmp(ARG, "-i")) {
+			if (!strcmp(ARG, "-i")) {
 				G.print_mode = PRINT_FILE;
+			} else if (!strcmp(ARG, "-i.bak")) {
+				G.print_mode = PRINT_FILE_BACKUP;
 			} else if (!strcmp(ARG, "-r")) {
 				G.recursive = 1;
+			} else if (!strcmp(ARG, "-regex")) {
+				G.regex_use = 1;
+				jstr_re_comp(&G.regex, a.find, G.cflags);
+			} else if (!strcmp(ARG, "-icase")) {
+				G.cflags |= JSTR_RE_CF_ICASE;
+			} else if (!strcmp(ARG, "-E")) {
+				G.cflags |= JSTR_RE_CF_EXTENDED;
 			} else if (!strcmp(ARG, "-name")) {
 				++i;
 				if (jstr_nullchk(ARG))
@@ -213,6 +244,13 @@ main(int argc, char **argv)
 			}
 			break;
 		default:;
+			if (!G.compiled) {
+				if (G.regex_use)
+					jstr_re_comp(&G.regex, a.find, G.cflags);
+				else
+					jstr_memmem_comp(&t, a.find, a.find_len);
+				G.compiled = 1;
+			}
 			ret = xstat(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR);
 			if (ret != JSTR_RET_SUCC)

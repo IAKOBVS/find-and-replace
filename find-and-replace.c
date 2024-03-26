@@ -24,13 +24,10 @@
 
 #define JSTR_PANIC                1
 #define JSTR_USE_UNLOCKED_IO_READ 1
-#define REGEX_IS_IMPLEMENTED      0
 
 #include <jstr/jstr.h>
 #include <jstr/jstr-io.h>
-#if REGEX_IS_IMPLEMENTED
-#	include <jstr/jstr-regex.h>
-#endif
+#include <jstr/jstr-regex.h>
 #include <fnmatch.h>
 
 #define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
@@ -62,11 +59,9 @@ typedef struct global_ty {
 	int print_mode;
 	int recursive;
 	int compiled;
-#if REGEX_IS_IMPLEMENTED
 	regex_t regex;
 	int regex_use;
 	int cflags;
-#endif
 } global_ty;
 global_ty G = { 0 };
 
@@ -116,7 +111,6 @@ process_file(const jstr_twoway_ty *R t,
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
 	size_t changed;
-#if REGEX_IS_IMPLEMENTED
 	if (G.regex_use) {
 		const jstr_re_off_ty c = jstr_re_rplcall_len_j(&G.regex, buf, rplc, rplc_len, G.cflags);
 		if (jstr_re_chk(c)) {
@@ -124,9 +118,7 @@ process_file(const jstr_twoway_ty *R t,
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		changed = (size_t)c;
-	} else
-#endif
-	{
+	} else {
 		const size_t c = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
 		if (jstr_unlikely(c == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -197,7 +189,6 @@ main(int argc, char **argv)
 		         "  -name pattern\n"
 		         "    File pattern to match when -r is used. Pattern is a wildcard.\n"
 		         "    If -name is used without -r, behavior is undefined.\n"
-#if REGEX_IS_IMPLEMENTED
 		         "  -regex\n"
 		         "    Treat FIND as a regex pattern.\n"
 		         "  -E\n"
@@ -206,7 +197,6 @@ main(int argc, char **argv)
 		         "  -icase\n"
 		         "    Ignore case if FIND is a regex pattern.\n"
 		         "    REG_ICASE is passed as the cflag to regexec.\n"
-#endif
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
 		         "OPTIONS shall be placed before FILES.\n"
@@ -238,14 +228,12 @@ main(int argc, char **argv)
 				G.print_mode = PRINT_FILE_BACKUP;
 			} else if (!strcmp(ARG, "-r")) {
 				G.recursive = 1;
-#if REGEX_IS_IMPLEMENTED
 			} else if (!strcmp(ARG, "-regex")) {
 				G.regex_use = 1;
 			} else if (!strcmp(ARG, "-icase")) {
 				G.cflags |= JSTR_RE_CF_ICASE;
 			} else if (!strcmp(ARG, "-E")) {
 				G.cflags |= JSTR_RE_CF_EXTENDED;
-#endif
 			} else if (!strcmp(ARG, "-name")) {
 				++i;
 				if (jstr_nullchk(ARG))
@@ -256,11 +244,9 @@ main(int argc, char **argv)
 			break;
 		default:;
 			if (!G.compiled) {
-#if REGEX_IS_IMPLEMENTED
 				if (G.regex_use)
 					jstr_re_comp(&G.regex, a.find, G.cflags);
 				else
-#endif
 					jstr_memmem_comp(&t, a.find, a.find_len);
 				G.compiled = 1;
 			}

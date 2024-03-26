@@ -28,7 +28,9 @@
 
 #include <jstr/jstr.h>
 #include <jstr/jstr-io.h>
-/* #include <jstr/jstr-regex.h> */
+#if REGEX_IS_IMPLEMENTED
+#	include <jstr/jstr-regex.h>
+#endif
 #include <fnmatch.h>
 
 #define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
@@ -195,6 +197,7 @@ main(int argc, char **argv)
 		         "  -name pattern\n"
 		         "    File pattern to match when -r is used. Pattern is a wildcard.\n"
 		         "    If -name is used without -r, behavior is undefined.\n"
+#if REGEX_IS_IMPLEMENTED
 		         "  -regex\n"
 		         "    Treat FIND as a regex pattern.\n"
 		         "  -E\n"
@@ -203,6 +206,7 @@ main(int argc, char **argv)
 		         "  -icase\n"
 		         "    Ignore case if FIND is a regex pattern.\n"
 		         "    REG_ICASE is passed as the cflag to regexec.\n"
+#endif
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
 		         "OPTIONS shall be placed before FILES.\n"

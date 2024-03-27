@@ -92,27 +92,58 @@ file_exists(const char *R fname)
 	return access(fname, F_OK | W_OK | R_OK) == 0;
 }
 
+typedef enum {
+	/* Unknown file type. */
+	FT_UNKNOWN = 0,
+#define FT_UNKNOWN FT_UNKNOWN
+	/* Text file type. */
+	FT_TEXT,
+#define FT_TEXT FT_TEXT
+	/* Binary file type. */
+	FT_BINARY
+#define FT_BINARY FT_BINARY
+} ft_ty;
+
+static ft_ty
+exttype(const char *fname, size_t fname_len)
+{
+	fname = jstr_memrchr(fname, '.', fname_len);
+	if (fname != NULL && *++fname != '\0') {
+		const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" };
+		const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" };
+		unsigned int i;
+		for (i = 0; i < sizeof(textv) / sizeof(*textv); ++i)
+			if (!jstr_strcmpeq_loop(fname, textv[i]))
+				return FT_TEXT;
+		for (i = 0; i < sizeof(binv) / sizeof(*binv); ++i)
+			if (!jstr_strcmpeq_loop(fname, binv[i]))
+				return FT_TEXT;
+	}
+	return FT_UNKNOWN;
+}
+
 static jstr_ret_ty
 process_file(const jstr_twoway_ty *R t,
              jstr_ty *R buf,
              const char *R fname,
+             size_t fname_len,
              const struct stat *st,
              const char *R find,
              const size_t find_len,
              const char *R rplc,
              const size_t rplc_len)
 {
-	jstr_io_ft_ty ft = jstr_io_exttype(buf->data, buf->size);
-	if (ft == JSTR_IO_FT_BINARY)
+	const ft_ty ft = exttype(fname, fname_len);
+	if (ft == FT_BINARY)
 		return JSTR_RET_SUCC;
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (ft == JSTR_IO_FT_UNKNOWN)
+	if (ft == FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
 	size_t changed;
 	if (G.regex_use) {
-		const jstr_re_off_ty c = jstr_re_rplcall_len_j(&G.regex, buf, rplc, rplc_len, G.cflags);
+		const jstr_re_off_ty c = jstr_re_rplcall_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags);
 		if (jstr_re_chk(c)) {
 			jstr_re_errdie(-c, &G.regex);
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -157,7 +188,7 @@ typedef struct args_ty {
 static JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 {
 	const args_ty *const a = args;
-	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
+	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->dirpath_len, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	return JSTR_RET_SUCC;
 }
@@ -255,7 +286,7 @@ main(int argc, char **argv)
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {
-				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
+				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, strlen(ARG), &st, a.find, a.find_len, a.rplc, a.rplc_len)));
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;

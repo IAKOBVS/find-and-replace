@@ -109,8 +109,8 @@ exttype(const char *fname, size_t fname_len)
 {
 	fname = jstr_memrchr(fname, '.', fname_len);
 	if (fname != NULL && *++fname != '\0') {
-		const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" };
-		const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" };
+		static const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" };
+		static const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" };
 		unsigned int i;
 		for (i = 0; i < sizeof(textv) / sizeof(*textv); ++i)
 			if (!jstr_strcmpeq_loop(fname, textv[i]))

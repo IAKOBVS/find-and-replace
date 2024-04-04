@@ -271,7 +271,7 @@ main(int argc, char **argv)
 		default:;
 			if (!G.compiled) {
 				if (G.regex_use) {
-					int ret = jstr_re_comp(&G.regex, a.find, G.cflags);
+					ret = jstr_re_comp(&G.regex, a.find, G.cflags);
 					if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR))
 						jstr_re_errdie(-ret, &G.regex);
 				} else {

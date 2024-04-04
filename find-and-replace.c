@@ -75,7 +75,7 @@ xstat(const char *R file,
 		goto err;
 	return JSTR_RET_SUCC;
 err:
-	if (errno == EINVAL)
+	if (jstr_unlikely(errno == EINVAL))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	return JSTR_RET_ERR - 1;
 }

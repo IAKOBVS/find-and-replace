@@ -141,22 +141,17 @@ process_file(const jstr_twoway_ty *R t,
 	if (ft == FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, 64, buf->size))
 			return JSTR_RET_SUCC;
-	size_t changed;
 	if (G.regex_use) {
-		const jstr_re_off_ty c = jstr_re_rplcall_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags);
-		if (jstr_re_chk(c)) {
-			jstr_re_errdie(-c, &G.regex);
+		const jstr_re_off_ty ret = jstr_re_rplcall_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10);
+		if (jstr_re_chk(ret)) {
+			jstr_re_errdie(-ret, &G.regex);
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
-		changed = (size_t)c;
 	} else {
-		const size_t c = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
-		if (jstr_unlikely(c == (size_t)-1))
+		const size_t ret = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
+		if (jstr_unlikely(ret == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		changed = c;
 	}
-	if (!changed)
-		return JSTR_RET_SUCC;
 	if (G.print_mode == PRINT_STDOUT) {
 		jstr_io_fwrite(buf->data, 1, buf->size, stdout);
 		if (buf->size && *(buf->data + buf->size - 1) != '\n')
@@ -275,10 +270,13 @@ main(int argc, char **argv)
 			break;
 		default:;
 			if (!G.compiled) {
-				if (G.regex_use)
-					jstr_re_comp(&G.regex, a.find, G.cflags);
-				else
+				if (G.regex_use) {
+					int ret = jstr_re_comp(&G.regex, a.find, G.cflags);
+					if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR))
+						jstr_re_errdie(-ret, &G.regex);
+				} else {
 					jstr_memmem_comp(&t, a.find, a.find_len);
+				}
 				G.compiled = 1;
 			}
 			ret = xstat(ARG, &st);

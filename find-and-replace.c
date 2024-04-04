@@ -225,10 +225,15 @@ main(int argc, char **argv)
 		         "    REG_ICASE is passed as the cflag to regexec.\n"
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
+			 "\n"
 		         "OPTIONS shall be placed before FILES.\n"
+			 "\n"
 		         "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
-		         "\n"
-		         "Filenames shall not start with - as they will be interpreted as a flag.",
+			 "Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n"
+			 "For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n"
+			 "you would do with sed.\n"
+			 "\n"
+		         "Filenames shall not start with - as they will be interpreted as a flag.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}

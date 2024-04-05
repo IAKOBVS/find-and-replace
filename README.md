@@ -1,6 +1,6 @@
 # find-and-replace
 
-like sed but defaults to literal strings instead of regexes.
+Like sed but defaults to literal strings instead of regexes.
 
 ## Installation:
 

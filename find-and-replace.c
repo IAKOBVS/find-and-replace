@@ -214,7 +214,7 @@ main(int argc, char **argv)
 		         "    Replace files in-place. The default is printing to stdout.\n"
 		         "    If .bak is provided, backup the original file prefixed with .bak.\n"
 		         "  -r\n"
-		         "    Recurse on the arguments given if they are directories.\n"
+		         "    Recurse on the directories in FILES.\n"
 		         "  -name pattern\n"
 		         "    File pattern to match when -r is used. Pattern is a wildcard.\n"
 		         "    If -name is used without -r, behavior is undefined.\n"

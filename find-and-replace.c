@@ -165,6 +165,9 @@ process_file(const jstr_twoway_ty *R t,
 			if (jstr_unlikely(rename(fname, bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
+		/* FIXME: use write instead of fwrite. Currently,
+		 * fwrite is used because write will create an
+		 * executable file for whatever reason. */
 		if (jstr_chk(jstr_io_fwritefile_len_j(buf, fname, "w")))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}

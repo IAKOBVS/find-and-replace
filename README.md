@@ -1,6 +1,6 @@
 # find-and-replace
 
-Like sed but defaults to literal strings instead of regexes and substitution is done on the whole file instead of line-by-line.
+Like sed but defaults to literal strings instead of regexes and substitutions are done on the whole file instead of line-by-line.
 
 ## Installation:
 

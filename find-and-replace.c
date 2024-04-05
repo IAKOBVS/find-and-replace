@@ -139,7 +139,7 @@ process_file(const jstr_twoway_ty *R t,
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (ft == FT_UNKNOWN)
-		if (jstr_isbinary(buf->data, 64, buf->size))
+		if (jstr_isbinary(buf->data, buf->size, 64))
 			return JSTR_RET_SUCC;
 	if (G.regex_use) {
 		const jstr_re_off_ty ret = jstr_re_rplcall_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10);
@@ -165,10 +165,7 @@ process_file(const jstr_twoway_ty *R t,
 			if (jstr_unlikely(rename(fname, bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
-		/* FIXME: use write instead of fwrite. Currently,
-		 * fwrite is used because write will create an
-		 * executable file for whatever reason. */
-		if (jstr_chk(jstr_io_fwritefile_len_j(buf, fname, "w")))
+		if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	return JSTR_RET_SUCC;

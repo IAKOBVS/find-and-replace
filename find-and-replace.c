@@ -46,6 +46,8 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
+#define BAK_PREFIX ".bak"
+
 #define DO_FREE 0
 
 typedef enum {
@@ -140,7 +142,7 @@ process_file(const jstr_twoway_ty *R t,
 		const jstr_re_off_ty ret = jstr_re_rplcall_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10);
 		if (jstr_re_chk(ret)) {
 			jstr_re_errdie(-ret, &G.regex);
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
+			return JSTR_RET_ERR;
 		}
 	} else {
 		const size_t ret = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
@@ -153,12 +155,16 @@ process_file(const jstr_twoway_ty *R t,
 			jstr_io_putchar('\n');
 	} else {
 		if (G.print_mode == PRINT_FILE_BACKUP) {
-			if (jstr_unlikely(fname_len + sizeof(".bak") - 1 >= sizeof(G.bak)))
-				jstr_err("Filename length is too large to create a backup file.");
+			if (jstr_unlikely(fname_len + sizeof(BAK_PREFIX) - 1 >= sizeof(G.bak))) {
+				jstr_errdie("Filename length is too large to create a backup file prefixed with " BAK_PREFIX ".");
+				return JSTR_RET_ERR;
+			}
 			char *p = jstr_mempcpy(G.bak, fname, fname_len);
-			jstr_strcpy_len(p, ".bak", sizeof(".bak") - 1);
-			if (jstr_unlikely(file_exists(G.bak)))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			jstr_strcpy_len(p, BAK_PREFIX, sizeof(BAK_PREFIX) - 1);
+			if (jstr_unlikely(file_exists(G.bak))) {
+				jstr_errdie("Can't make a backup file because the filename prefixed with " BAK_PREFIX " already exists.");
+				return JSTR_RET_ERR;
+			}
 			if (jstr_unlikely(rename(fname, G.bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}

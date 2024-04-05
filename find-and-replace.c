@@ -62,6 +62,7 @@ typedef struct global_ty {
 	regex_t regex;
 	int regex_use;
 	int cflags;
+	char bak[JSTR_IO_PATH_MAX];
 } global_ty;
 global_ty G = { 0 };
 
@@ -78,12 +79,6 @@ err:
 	if (jstr_unlikely(errno == EINVAL))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	return JSTR_RET_ERR - 1;
-}
-
-static void
-backup_make(char *R dst, const char *R src)
-{
-	jstr_strcpy_len(jstr_mempcpy(dst, src, jstr_strnlen(src, JSTR_IO_NAME_MAX)), ".bak", sizeof(".bak") - 1);
 }
 
 static int
@@ -158,11 +153,13 @@ process_file(const jstr_twoway_ty *R t,
 			jstr_io_putchar('\n');
 	} else {
 		if (G.print_mode == PRINT_FILE_BACKUP) {
-			char bak[JSTR_IO_NAME_MAX + 4 + 1];
-			backup_make(bak, fname);
-			if (jstr_unlikely(file_exists(bak)))
+			if (jstr_unlikely(fname_len + sizeof(".bak") - 1 >= sizeof(G.bak)))
+				jstr_err("Filename length is too large to create a backup file.");
+			char *p = jstr_mempcpy(G.bak, fname, fname_len);
+			jstr_strcpy_len(p, ".bak", sizeof(".bak") - 1);
+			if (jstr_unlikely(file_exists(G.bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			if (jstr_unlikely(rename(fname, bak)))
+			if (jstr_unlikely(rename(fname, G.bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))

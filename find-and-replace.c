@@ -46,7 +46,7 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
-#define BAK_PREFIX ".bak"
+#define BAK_SUFFIX ".bak"
 
 #define DO_FREE 0
 
@@ -155,14 +155,14 @@ process_file(const jstr_twoway_ty *R t,
 			jstr_io_putchar('\n');
 	} else {
 		if (G.print_mode == PRINT_FILE_BACKUP) {
-			if (jstr_unlikely(fname_len + sizeof(BAK_PREFIX) - 1 >= sizeof(G.bak))) {
-				jstr_errdie("Filename length is too large to create a backup file prefixed with " BAK_PREFIX ".");
+			if (jstr_unlikely(fname_len + sizeof(BAK_SUFFIX) - 1 >= sizeof(G.bak))) {
+				jstr_errdie("Filename length is too large to create a backup file suffixed with " BAK_SUFFIX ".");
 				return JSTR_RET_ERR;
 			}
 			char *p = jstr_mempcpy(G.bak, fname, fname_len);
-			jstr_strcpy_len(p, BAK_PREFIX, sizeof(BAK_PREFIX) - 1);
+			jstr_strcpy_len(p, BAK_SUFFIX, sizeof(BAK_SUFFIX) - 1);
 			if (jstr_unlikely(file_exists(G.bak))) {
-				jstr_errdie("Can't make a backup file because the filename prefixed with " BAK_PREFIX " already exists.");
+				jstr_errdie("Can't make a backup file because the filename suffixed with " BAK_SUFFIX " already exists.");
 				return JSTR_RET_ERR;
 			}
 			if (jstr_unlikely(rename(fname, G.bak)))
@@ -210,11 +210,11 @@ main(int argc, char **argv)
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
 		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
 		         "Options:\n"
-			 /* TODO: add option to specify custom backup prefixes.
+			 /* TODO: add option to specify custom backup suffixes.
 			  * For example: i.orig. */
 		         "  -i, -i.bak\n"
 		         "    Replace files in-place. The default is printing to stdout.\n"
-		         "    If .bak is provided, backup the original file prefixed with .bak.\n"
+		         "    If .bak is provided, backup the original file suffixed with .bak.\n"
 		         "  -r\n"
 		         "    Recurse on the directories in FILES.\n"
 		         "  -name pattern\n"

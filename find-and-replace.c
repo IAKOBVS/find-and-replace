@@ -210,6 +210,8 @@ main(int argc, char **argv)
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
 		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
 		         "Options:\n"
+			 /* TODO: add option to specify custom backup prefixes.
+			  * For example: i.orig. */
 		         "  -i, -i.bak\n"
 		         "    Replace files in-place. The default is printing to stdout.\n"
 		         "    If .bak is provided, backup the original file prefixed with .bak.\n"

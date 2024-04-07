@@ -1,6 +1,6 @@
 # find-and-replace
 
-Like sed but defaults to fixed strings instead of regexes. Substitutions are done on the whole file instead of line-by-line (like sed with the -z flag).
+Like sed but defaults to fixed strings instead of regexes. Substitution is done on the whole file instead of line-by-line (like sed with the -z flag).
 
 ## Rationale:
 

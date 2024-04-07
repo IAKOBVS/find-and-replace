@@ -153,10 +153,9 @@ process_file(const jstr_twoway_ty *R t,
 		changed = ret;
 	}
 	if (G.print_mode == PRINT_STDOUT) {
-		jstr_io_fwrite(buf->data, 1, buf->size, stdout);
-		jstr_io_putchar('\n');
+		write(STDOUT_FILENO, buf->data, buf->size);
 	} else {
-		if (jstr_unlikely(changed == 0))
+		if (changed == 0)
 			return JSTR_RET_SUCC;
 		int o_creat = 0;
 		if (G.print_mode == PRINT_FILE_BACKUP) {

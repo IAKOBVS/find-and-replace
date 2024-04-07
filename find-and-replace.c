@@ -263,12 +263,13 @@ main(int argc, char **argv)
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (ARG[0]) {
 		case '-': /* flag */
-			if (!strncmp(ARG + 1, "i", sizeof("i") - 1)) {
-				if (*(ARG + 1 + sizeof("i") - 1) == '\0') {
+			if (ARG[1] == 'i') {
+				if (ARG[2] == '\0') {
 					G.print_mode = PRINT_FILE;
 				} else {
-					G.bak_suffix = ARG + 1 + sizeof("i") - 1;
+					G.bak_suffix = ARG + sizeof("-i") - 1;
 					G.bak_suffix_len = strlen(G.bak_suffix);
+					G.print_mode = PRINT_FILE_BACKUP;
 				}
 			} else if (!strcmp(ARG + 1, "r")) {
 				G.recursive = 1;

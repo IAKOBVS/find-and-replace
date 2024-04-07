@@ -277,7 +277,7 @@ main(int argc, char **argv)
 	a.t = &t;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (ARG[0]) {
-		case '-': /* flag */
+		case '-': /* -[-] flag */
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
@@ -287,6 +287,7 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.print_mode = PRINT_FILE_BACKUP;
 				}
+			/* -- flag */
 			} else if (ARG[1] == '-') {
 				/* --include */
 				if (!strcmp(ARG + 2, "include")) {
@@ -301,8 +302,10 @@ main(int argc, char **argv)
 						jstr_errdie("No argument after --exclude flag.");
 					m.exclude_glob = ARG;
 				}
+			/* - flags */
 			} else {
 				const char *argp = ARG + 1;
+				/* Allow flag combinations. */
 				for (; *argp; ++argp) {
 					/* -r */
 					if (*argp == 'r') {

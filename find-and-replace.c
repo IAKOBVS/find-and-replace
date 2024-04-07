@@ -138,22 +138,27 @@ process_file(const jstr_twoway_ty *R t,
 	if (ft == FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, buf->size, 64))
 			return JSTR_RET_SUCC;
+	size_t changed;
 	if (G.regex_use) {
 		const jstr_re_off_ty ret = jstr_re_rplcall_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10);
 		if (jstr_re_chk(ret)) {
 			jstr_re_errdie(-ret, &G.regex);
 			return JSTR_RET_ERR;
 		}
+		changed = (size_t)ret;
 	} else {
 		const size_t ret = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
 		if (jstr_unlikely(ret == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		changed = ret;
 	}
 	if (G.print_mode == PRINT_STDOUT) {
 		jstr_io_fwrite(buf->data, 1, buf->size, stdout);
-		if (buf->size && *(buf->data + buf->size - 1) != '\n')
-			jstr_io_putchar('\n');
+		jstr_io_putchar('\n');
 	} else {
+		if (jstr_unlikely(changed == 0))
+			return JSTR_RET_SUCC;
+		int o_creat = 0;
 		if (G.print_mode == PRINT_FILE_BACKUP) {
 			if (jstr_unlikely(fname_len + sizeof(BAK_SUFFIX) - 1 >= sizeof(G.bak))) {
 				jstr_errdie("Filename length is too large to create a backup file suffixed with " BAK_SUFFIX ".");
@@ -167,8 +172,9 @@ process_file(const jstr_twoway_ty *R t,
 			}
 			if (jstr_unlikely(rename(fname, G.bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			o_creat = O_CREAT;
 		}
-		if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
+		if (jstr_chk(jstr_io_writefile_len_j(buf, fname, o_creat | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	return JSTR_RET_SUCC;

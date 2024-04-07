@@ -271,22 +271,31 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.print_mode = PRINT_FILE_BACKUP;
 				}
-			} else if (!strcmp(ARG + 1, "r")) {
-				G.recursive = 1;
-			} else if (!strcmp(ARG + 1, "R")) {
-				G.regex_use = 1;
-			} else if (!strcmp(ARG + 1, "I")) {
-				G.regex_use = 1;
-				G.cflags |= JSTR_RE_CF_ICASE;
-			} else if (!strcmp(ARG + 1, "E")) {
-				G.regex_use = 1;
-				G.cflags |= JSTR_RE_CF_EXTENDED;
 			} else if (!strcmp(ARG + 1, "-include")) {
 				++i;
 				if (jstr_nullchk(ARG))
 					jstr_errdie("No argument after --include flag.");
 				G.file_pattern = ARG;
 				m.pattern = G.file_pattern;
+			} else {
+				const char *argp = ARG + 1;
+				for (; *argp; ++argp) {
+					/* -r */
+					if (*argp == 'r') {
+						G.recursive = 1;
+					/* -R */
+					} else if (*argp == 'R') {
+						G.regex_use = 1;
+					/* -I */
+					} else if (*argp == 'I') {
+						G.regex_use = 1;
+						G.cflags |= JSTR_RE_CF_ICASE;
+					/* -E */
+					} else if (*argp == 'E') {
+						G.regex_use = 1;
+						G.cflags |= JSTR_RE_CF_EXTENDED;
+					}
+				}
 			}
 			break;
 		default:;

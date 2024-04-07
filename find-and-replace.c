@@ -229,6 +229,8 @@ main(int argc, char **argv)
 		         "  --include GLOB\n"
 		         "    File glob to match when -r is used. Glob is a wildcard.\n"
 		         "    If --include is used without -r, behavior is undefined.\n"
+		         "  --exclude GLOB\n"
+		         "    The reverse of --include. Skip files that match glob.\n"
 		         "  -F\n"
 		         "    Treat FIND as a fixed-string. This is the default.\n"
 		         "  -R\n"
@@ -292,6 +294,7 @@ main(int argc, char **argv)
 					if (jstr_nullchk(ARG))
 						jstr_errdie("No argument after --include flag.");
 					m.include_glob = ARG;
+				/* --exclude */
 				} else if (!strcmp(ARG + 2, "exclude")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))

@@ -46,8 +46,6 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
-#define BAK_SUFFIX ".bak"
-
 #define DO_FREE 0
 
 typedef enum {
@@ -61,9 +59,11 @@ typedef struct global_ty {
 	int print_mode;
 	int recursive;
 	int compiled;
-	regex_t regex;
 	int regex_use;
 	int cflags;
+	regex_t regex;
+	const char *bak_suffix;
+	size_t bak_suffix_len;
 	char bak[JSTR_IO_PATH_MAX];
 } global_ty;
 global_ty G = { 0 };
@@ -159,14 +159,14 @@ process_file(const jstr_twoway_ty *R t,
 			return JSTR_RET_SUCC;
 		int o_creat = 0;
 		if (G.print_mode == PRINT_FILE_BACKUP) {
-			if (jstr_unlikely(fname_len + sizeof(BAK_SUFFIX) - 1 >= sizeof(G.bak))) {
-				jstr_errdie("Filename length is too large to create a backup file suffixed with " BAK_SUFFIX ".");
+			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(G.bak))) {
+				jstr_errdie("Suffix length is too large to create a backup file.");
 				return JSTR_RET_ERR;
 			}
 			char *p = jstr_mempcpy(G.bak, fname, fname_len);
-			jstr_strcpy_len(p, BAK_SUFFIX, sizeof(BAK_SUFFIX) - 1);
+			jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
 			if (jstr_unlikely(file_exists(G.bak))) {
-				jstr_errdie("Can't make a backup file because the filename suffixed with " BAK_SUFFIX " already exists.");
+				jstr_errdie("Can't make a backup file because suffixed filename already exists.");
 				return JSTR_RET_ERR;
 			}
 			if (jstr_unlikely(rename(fname, G.bak)))
@@ -215,34 +215,34 @@ main(int argc, char **argv)
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
 		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
 		         "Options:\n"
-			 /* TODO: add option to specify custom backup suffixes.
-			  * For example: i.orig. */
-		         "  -i, -i.bak\n"
+		         "  -i[SUFFIX]\n"
 		         "    Replace files in-place. The default is printing to stdout.\n"
-		         "    If .bak is provided, backup the original file suffixed with .bak.\n"
+		         "    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n"
 		         "  -r\n"
 		         "    Recurse on the directories in FILES.\n"
-		         "  -name pattern\n"
-		         "    File pattern to match when -r is used. Pattern is a wildcard.\n"
-		         "    If -name is used without -r, behavior is undefined.\n"
-		         "  -regex\n"
+		         "  --include GLOB\n"
+		         "    File glob to match when -r is used. Glob is a wildcard.\n"
+		         "    If --include is used without -r, behavior is undefined.\n"
+		         "  -F\n"
+		         "    Treat FIND as a fixed-string. This is the default.\n"
+		         "  -R\n"
 		         "    Treat FIND as a regex pattern.\n"
 		         "  -E\n"
 		         "    Use POSIX Extended Regular Expressions syntax.\n"
 		         "    REG_EXTENDED is passed as the cflag to regexec.\n"
-		         "  -icase\n"
+		         "  -I\n"
 		         "    Ignore case if FIND is a regex pattern.\n"
 		         "    REG_ICASE is passed as the cflag to regexec.\n"
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
-			 "\n"
+		         "\n"
 		         "OPTIONS shall be placed before FILES.\n"
-			 "\n"
+		         "\n"
 		         "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
-			 "Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n"
-			 "For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n"
-			 "you would do with sed.\n"
-			 "\n"
+		         "Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n"
+		         "For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n"
+		         "you would do with sed.\n"
+		         "\n"
 		         "Filenames shall not start with - as they will be interpreted as a flag.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
@@ -261,24 +261,29 @@ main(int argc, char **argv)
 	jstr_twoway_ty t;
 	a.t = &t;
 	for (unsigned int i = 3; ARG; ++i) {
-		switch (argv[i][0]) {
+		switch (ARG[0]) {
 		case '-': /* flag */
-			if (!strcmp(ARG, "-i")) {
-				G.print_mode = PRINT_FILE;
-			} else if (!strcmp(ARG, "-i.bak")) {
-				G.print_mode = PRINT_FILE_BACKUP;
-			} else if (!strcmp(ARG, "-r")) {
+			if (!strncmp(ARG + 1, "i", sizeof("i") - 1)) {
+				if (*(ARG + 1 + sizeof("i") - 1) == '\0') {
+					G.print_mode = PRINT_FILE;
+				} else {
+					G.bak_suffix = ARG + 1 + sizeof("i") - 1;
+					G.bak_suffix_len = strlen(G.bak_suffix);
+				}
+			} else if (!strcmp(ARG + 1, "r")) {
 				G.recursive = 1;
-			} else if (!strcmp(ARG, "-regex")) {
+			} else if (!strcmp(ARG + 1, "R")) {
 				G.regex_use = 1;
-			} else if (!strcmp(ARG, "-icase")) {
+			} else if (!strcmp(ARG + 1, "I")) {
+				G.regex_use = 1;
 				G.cflags |= JSTR_RE_CF_ICASE;
-			} else if (!strcmp(ARG, "-E")) {
+			} else if (!strcmp(ARG + 1, "E")) {
+				G.regex_use = 1;
 				G.cflags |= JSTR_RE_CF_EXTENDED;
-			} else if (!strcmp(ARG, "-name")) {
+			} else if (!strcmp(ARG + 1, "-include")) {
 				++i;
 				if (jstr_nullchk(ARG))
-					jstr_errdie("No argument after -name flag.");
+					jstr_errdie("No argument after --include flag.");
 				G.file_pattern = ARG;
 				m.pattern = G.file_pattern;
 			}

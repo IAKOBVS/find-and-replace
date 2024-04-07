@@ -39,6 +39,7 @@
 #define DIE_IF(x)   DIE_IF_PRINT(x, "")
 #define DIE()       DIE_IF(1)
 #define ARG         argv[i]
+#define ARG_NEXT()  ++i
 #define unlikely(x) jstr_unlikely(x)
 #define IS_REG(x)   S_ISREG(x)
 #define IS_DIR(x)   S_ISDIR(x)
@@ -55,7 +56,7 @@ typedef enum {
 } print_mode_ty;
 
 typedef struct global_ty {
-	const char *file_pattern;
+	const char *include_glob;
 	int print_mode;
 	int recursive;
 	int compiled;
@@ -197,14 +198,19 @@ static JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 }
 
 typedef struct matcher_args_ty {
-	const char *pattern;
+	const char *include_glob;
+	const char *exclude_glob;
 } matcher_args_ty;
 
 static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 {
 	matcher_args_ty *a = (matcher_args_ty *)args;
-	if (fnmatch(a->pattern, fname, 0))
-		return 1;
+	if (a->include_glob)
+		if (fnmatch(a->include_glob, fname, 0))
+			return 1;
+	if (a->exclude_glob)
+		if (!fnmatch(a->exclude_glob, fname, 0))
+			return 1;
 	return 0;
 	(void)fname_len;
 }
@@ -226,12 +232,12 @@ main(int argc, char **argv)
 		         "  -F\n"
 		         "    Treat FIND as a fixed-string. This is the default.\n"
 		         "  -R\n"
-		         "    Treat FIND as a regex pattern.\n"
+		         "    Treat FIND as a regex include_glob.\n"
 		         "  -E\n"
 		         "    Use POSIX Extended Regular Expressions syntax.\n"
 		         "    REG_EXTENDED is passed as the cflag to regexec.\n"
 		         "  -I\n"
-		         "    Ignore case if FIND is a regex pattern.\n"
+		         "    Ignore case if FIND is a regex include_glob.\n"
 		         "    REG_ICASE is passed as the cflag to regexec.\n"
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
@@ -243,7 +249,13 @@ main(int argc, char **argv)
 		         "For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n"
 		         "you would do with sed.\n"
 		         "\n"
-		         "Filenames shall not start with - as they will be interpreted as a flag.\n",
+		         "Filenames shall not start with - as they will be interpreted as a flag.\n"
+		         "\n"
+		         "Single character flags starting with a single dash can be combined.\n"
+		         "For example: -EI is equal to -E -i.\n"
+		         "\n"
+		         "-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n"
+		         "enables -R.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}
@@ -257,12 +269,14 @@ main(int argc, char **argv)
 	a.rplc = (const char *)RPLC;
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
-	m.pattern = NULL;
+	m.include_glob = NULL;
+	m.exclude_glob = NULL;
 	jstr_twoway_ty t;
 	a.t = &t;
 	for (unsigned int i = 3; ARG; ++i) {
 		switch (ARG[0]) {
 		case '-': /* flag */
+			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
 					G.print_mode = PRINT_FILE;
@@ -271,26 +285,33 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.print_mode = PRINT_FILE_BACKUP;
 				}
-			} else if (!strcmp(ARG + 1, "-include")) {
-				++i;
-				if (jstr_nullchk(ARG))
-					jstr_errdie("No argument after --include flag.");
-				G.file_pattern = ARG;
-				m.pattern = G.file_pattern;
+			} else if (ARG[1] == '-') {
+				/* --include */
+				if (!strcmp(ARG + 2, "include")) {
+					ARG_NEXT();
+					if (jstr_nullchk(ARG))
+						jstr_errdie("No argument after --include flag.");
+					m.include_glob = ARG;
+				} else if (!strcmp(ARG + 2, "exclude")) {
+					ARG_NEXT();
+					if (jstr_nullchk(ARG))
+						jstr_errdie("No argument after --exclude flag.");
+					m.exclude_glob = ARG;
+				}
 			} else {
 				const char *argp = ARG + 1;
 				for (; *argp; ++argp) {
 					/* -r */
 					if (*argp == 'r') {
 						G.recursive = 1;
-					/* -R */
+						/* -R */
 					} else if (*argp == 'R') {
 						G.regex_use = 1;
-					/* -I */
+						/* -I */
 					} else if (*argp == 'I') {
 						G.regex_use = 1;
 						G.cflags |= JSTR_RE_CF_ICASE;
-					/* -E */
+						/* -E */
 					} else if (*argp == 'E') {
 						G.regex_use = 1;
 						G.cflags |= JSTR_RE_CF_EXTENDED;
@@ -318,7 +339,7 @@ main(int argc, char **argv)
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;
-					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.file_pattern ? matcher : NULL, &m)));
+					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)));
 				}
 			} else {
 				PRINTERR("stat() failed on %s.\n", ARG);

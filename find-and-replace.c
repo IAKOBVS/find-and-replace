@@ -232,7 +232,8 @@ static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 	(void)fname_len;
 }
 
-static jstr_ret_ty compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
+static jstr_ret_ty
+compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 {
 	if (!G.compiled) {
 		if (G.regex_use) {
@@ -278,8 +279,6 @@ main(int argc, char **argv)
 		         "\n"
 		         "FIND and REPLACE shall be placed in that exact order.\n"
 		         "\n"
-		         "OPTIONS shall be placed before FILES.\n"
-		         "\n"
 		         "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
 		         "Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n"
 		         "For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n"
@@ -292,8 +291,8 @@ main(int argc, char **argv)
 		         "\n"
 		         "-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n"
 		         "enables -R.\n"
-			 "\n"
-			 "If no file was passed, read from stdin.\n",
+		         "\n"
+		         "If no file was passed, read from stdin.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}
@@ -311,9 +310,9 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_twoway_ty t;
 	a.t = &t;
+	/* Parse all flags. */
 	for (unsigned int i = 3; ARG; ++i) {
-		switch (ARG[0]) {
-		case '-': /* -[-] flag */
+		if (*ARG == '-') {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
@@ -361,18 +360,12 @@ main(int argc, char **argv)
 				}
 			}
 			break;
-		default:;
+		}
+	}
+	/* Parse all files/directories. */
+	for (unsigned int i = 3; ARG; ++i) {
+		if (*ARG != '-') {
 			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
-			if (!G.compiled) {
-				if (G.regex_use) {
-					ret = jstr_re_comp(&G.regex, a.find, G.cflags);
-					if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR))
-						jstr_re_errdie(-ret, &G.regex);
-				} else {
-					jstr_memmem_comp(&t, a.find, a.find_len);
-				}
-				G.compiled = 1;
-			}
 			ret = xstat(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR);
 			if (ret != JSTR_RET_SUCC)

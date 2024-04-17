@@ -59,6 +59,7 @@ typedef enum {
 
 typedef struct global_ty {
 	const char *include_glob;
+	int have_files;
 	int print_mode;
 	int recursive;
 	int compiled;
@@ -123,24 +124,16 @@ exttype(const char *fname, size_t fname_len)
 }
 
 static jstr_ret_ty
-process_file(const jstr_twoway_ty *R t,
-             jstr_ty *R buf,
-             const char *R fname,
-             size_t fname_len,
-             const struct stat *st,
-             const char *R find,
-             const size_t find_len,
-             const char *R rplc,
-             const size_t rplc_len)
+process_buffer(const jstr_twoway_ty *R t,
+               jstr_ty *R buf,
+               const char *R fname,
+               size_t fname_len,
+               const struct stat *st,
+               const char *R find,
+               const size_t find_len,
+               const char *R rplc,
+               const size_t rplc_len)
 {
-	const ft_ty ft = exttype(fname, fname_len);
-	if (ft == FT_BINARY)
-		return JSTR_RET_SUCC;
-	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (ft == FT_UNKNOWN)
-		if (jstr_isbinary(buf->data, buf->size, 64))
-			return JSTR_RET_SUCC;
 	size_t changed;
 	if (G.regex_use) {
 		const jstr_re_off_ty ret = jstr_re_rplcall_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10);
@@ -182,6 +175,28 @@ process_file(const jstr_twoway_ty *R t,
 	return JSTR_RET_SUCC;
 }
 
+static jstr_ret_ty
+process_file(const jstr_twoway_ty *R t,
+             jstr_ty *R buf,
+             const char *R fname,
+             size_t fname_len,
+             const struct stat *st,
+             const char *R find,
+             const size_t find_len,
+             const char *R rplc,
+             const size_t rplc_len)
+{
+	const ft_ty ft = exttype(fname, fname_len);
+	if (ft == FT_BINARY)
+		return JSTR_RET_SUCC;
+	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, (size_t)st->st_size)))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (ft == FT_UNKNOWN)
+		if (jstr_isbinary(buf->data, buf->size, 64))
+			return JSTR_RET_SUCC;
+	return process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
+}
+
 typedef struct args_ty {
 	jstr_ty *buf;
 	const char *find;
@@ -217,10 +232,27 @@ static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 	(void)fname_len;
 }
 
+static jstr_ret_ty compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
+{
+	if (!G.compiled) {
+		if (G.regex_use) {
+			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
+			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+				jstr_re_errdie(-ret, &G.regex);
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			}
+		} else {
+			jstr_memmem_comp(t, find, find_len);
+		}
+		G.compiled = 1;
+	}
+	return JSTR_RET_SUCC;
+}
+
 int
 main(int argc, char **argv)
 {
-	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2]) || jstr_nullchk(argv[3])) {
+	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2])) {
 		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
 		         "Options:\n"
 		         "  -i[SUFFIX]\n"
@@ -289,7 +321,7 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.print_mode = PRINT_FILE_BACKUP;
 				}
-			/* -- flag */
+				/* -- flag */
 			} else if (ARG[1] == '-') {
 				/* --include */
 				if (!strcmp(ARG + 2, "include")) {
@@ -297,14 +329,14 @@ main(int argc, char **argv)
 					if (jstr_nullchk(ARG))
 						jstr_errdie("No argument after --include flag.");
 					m.include_glob = ARG;
-				/* --exclude */
+					/* --exclude */
 				} else if (!strcmp(ARG + 2, "exclude")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
 						jstr_errdie("No argument after --exclude flag.");
 					m.exclude_glob = ARG;
 				}
-			/* - flags */
+				/* - flags */
 			} else {
 				const char *argp = ARG + 1;
 				/* Allow flag combinations. */
@@ -328,6 +360,7 @@ main(int argc, char **argv)
 			}
 			break;
 		default:;
+			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
 			if (!G.compiled) {
 				if (G.regex_use) {
 					ret = jstr_re_comp(&G.regex, a.find, G.cflags);
@@ -344,6 +377,7 @@ main(int argc, char **argv)
 				continue;
 			if (IS_REG(st.st_mode)) {
 				const size_t fname_len = strlen(ARG);
+				G.have_files = 1;
 				if (!m.exclude_glob) {
 process:
 					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
@@ -355,6 +389,7 @@ process:
 						goto process;
 				}
 			} else if (IS_DIR(st.st_mode)) {
+				G.have_files = 1;
 				if (G.recursive) {
 					a.buf = &buf;
 					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)));
@@ -365,6 +400,20 @@ process:
 			}
 			break;
 		}
+	}
+	/* If no file is passed, read from stdin. */
+	if (!G.have_files) {
+		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(G.print_mode != PRINT_STDOUT)) {
+			jstr_err("Trying to create a backup file while reading from stdin.");
+			DIE();
+		}
+		if (jstr_unlikely(G.recursive)) {
+			jstr_err("Trying to recursively traverse through directories while reading from stdin.");
+			DIE();
+		}
+		jstr_io_readstdin_j(&buf);
+		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
+		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)));
 	}
 #if DO_FREE /* We don't need to free since we're exiting. */
 	jstr_free_j(&buf);

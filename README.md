@@ -30,12 +30,12 @@ Options:
   -F
     Treat FIND as a fixed-string. This is the default.
   -R
-    Treat FIND as a regex include_glob.
+    Treat FIND as a regex.
   -E
     Use POSIX Extended Regular Expressions syntax.
     REG_EXTENDED is passed as the cflag to regexec.
   -I
-    Ignore case if FIND is a regex include_glob.
+    Ignore case.
     REG_ICASE is passed as the cflag to regexec.
 
 FIND and REPLACE shall be placed in that exact order.

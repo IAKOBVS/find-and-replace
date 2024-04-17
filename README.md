@@ -11,12 +11,14 @@ Substituting fixed strings with sed which only offers regex substitution is a ma
 ```
 ./setup && ./build && sudo ./install
 ```
+
 ## Usage:
-find-and-replace \[FIND\] \[REPLACE\] \[OPTIONS\]... \[FILES\]...
+
+```find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...
 
 Options:
 
-  -i\[SUFFIX\]
+  -i[SUFFIX]
 
     Replace files in-place. The default is printing to stdout.
 
@@ -42,19 +44,19 @@ Options:
 
   -R
 
-    Treat FIND as a regex include\_glob.
+    Treat FIND as a regex include_glob.
 
   -E
 
     Use POSIX Extended Regular Expressions syntax.
 
-    REG\_EXTENDED is passed as the cflag to regexec.
+    REG_EXTENDED is passed as the cflag to regexec.
 
   -I
 
-    Ignore case if FIND is a regex include\_glob.
+    Ignore case if FIND is a regex include_glob.
 
-    REG\_ICASE is passed as the cflag to regexec.
+    REG_ICASE is passed as the cflag to regexec.
 
 
 
@@ -62,11 +64,11 @@ FIND and REPLACE shall be placed in that exact order.
 
 
 
-\b, \f, \n, \r, \t, \v, and \ooo \(octal\) in FIND and REPLACE will be unescaped.
+\b, \f, \n, \r, \t, \v, and \ooo (octal) in FIND and REPLACE will be unescaped.
 
 Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.
 
-For example: '\\\(this\\\)' and '\\1' instead of '\\(this\\)' and '\1', unlike what
+For example: '\\(this\\)' and '\\1' instead of '\(this\)' and '\1', unlike what
 
 you would do with sed.
 
@@ -82,10 +84,10 @@ For example: -EI is equal to -E -i.
 
 
 
--E \(Extended Regex\) and -I \(ignore case\) imply -R \(Regex\), so using -E or -I automatically
+-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically
 
 enables -R.
 
 
 
-If no file was passed, read from stdin.
+If no file was passed, read from stdin.```

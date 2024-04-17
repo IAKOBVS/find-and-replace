@@ -53,4 +53,5 @@ For example: -EI is equal to -E -i.
 -E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically
 enables -R.
 
-If no file was passed, read from stdin.```
+If no file was passed, read from stdin.
+```

@@ -4,4 +4,4 @@ README_SRC=.README.md
 README_DST=README.md
 cat "$README_SRC" > "$README_DST"
 echo "
-## $(grep '[^0-9A-Za-z_]_("' "$SOURCE" | sed 's/.*_("//; s/\\n".*/\n/; s/\\\\/\\/g; s/ find-and-replace/\n\n```find-and-replace/')\`\`\`" >> "$README_DST"
+## $(grep '[^0-9A-Za-z_]_("' "$SOURCE" | sed 's/.*_("//; s/\\n".*//; s/\\\\/\\/g; s/ find-and-replace/\n\n```\nfind-and-replace/')\`\`\`" >> "$README_DST"

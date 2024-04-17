@@ -396,7 +396,7 @@ process:
 			break;
 		}
 	}
-	/* If no file is passed, read from stdin. */
+	/* If no file was passed, read from stdin. */
 	if (!G.have_files) {
 		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(G.print_mode != PRINT_STDOUT)) {
 			jstr_err("Trying to create a backup file while reading from stdin.");

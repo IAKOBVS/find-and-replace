@@ -48,7 +48,7 @@ you would do with sed.
 Filenames shall not start with - as they will be interpreted as a flag.
 
 Single character flags starting with a single dash can be combined.
-For example: -EI is equal to -E -i.
+For example: -EI is equal to -E -I.
 
 -E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically
 enables -R.

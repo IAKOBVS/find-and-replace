@@ -291,7 +291,9 @@ main(int argc, char **argv)
 		         "For example: -EI is equal to -E -i.\n"
 		         "\n"
 		         "-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n"
-		         "enables -R.\n",
+		         "enables -R.\n"
+			 "\n"
+			 "If no file was passed, read from stdin.\n",
 		         argv[0]);
 		return EXIT_FAILURE;
 	}

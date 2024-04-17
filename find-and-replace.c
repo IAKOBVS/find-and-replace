@@ -30,7 +30,6 @@
 #include <jstr/jstr-regex.h>
 #include <fnmatch.h>
 
-#define PRINTERR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
 #define DIE_IF_PRINT(x, msg)              \
 	do {                              \
 		if (jstr_unlikely(x))     \
@@ -47,7 +46,8 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
-#define SEP '/'
+#define _(x) x
+#define SEP  '/'
 
 #define DO_FREE 0
 
@@ -254,46 +254,46 @@ int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2])) {
-		PRINTERR("Usage: %s [FIND] [REPLACE] [OPTIONS]... [FILES]...\n"
-		         "Options:\n"
-		         "  -i[SUFFIX]\n"
-		         "    Replace files in-place. The default is printing to stdout.\n"
-		         "    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n"
-		         "  -r\n"
-		         "    Recurse on the directories in FILES.\n"
-		         "  --include GLOB\n"
-		         "    File glob to match when -r is used. Glob is a wildcard.\n"
-		         "  --exclude GLOB\n"
-		         "    The reverse of --include. Skip files that match glob.\n"
-		         "    This applies to the passed command line files.\n"
-		         "  -F\n"
-		         "    Treat FIND as a fixed-string. This is the default.\n"
-		         "  -R\n"
-		         "    Treat FIND as a regex include_glob.\n"
-		         "  -E\n"
-		         "    Use POSIX Extended Regular Expressions syntax.\n"
-		         "    REG_EXTENDED is passed as the cflag to regexec.\n"
-		         "  -I\n"
-		         "    Ignore case if FIND is a regex include_glob.\n"
-		         "    REG_ICASE is passed as the cflag to regexec.\n"
-		         "\n"
-		         "FIND and REPLACE shall be placed in that exact order.\n"
-		         "\n"
-		         "\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n"
-		         "Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n"
-		         "For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n"
-		         "you would do with sed.\n"
-		         "\n"
-		         "Filenames shall not start with - as they will be interpreted as a flag.\n"
-		         "\n"
-		         "Single character flags starting with a single dash can be combined.\n"
-		         "For example: -EI is equal to -E -i.\n"
-		         "\n"
-		         "-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n"
-		         "enables -R.\n"
-		         "\n"
-		         "If no file was passed, read from stdin.\n",
-		         argv[0]);
+		fprintf(stderr,
+		        _("Usage: find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...\n")
+		        _("Options:\n")
+		        _("  -i[SUFFIX]\n")
+		        _("    Replace files in-place. The default is printing to stdout.\n")
+		        _("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
+		        _("  -r\n")
+		        _("    Recurse on the directories in FILES.\n")
+		        _("  --include GLOB\n")
+		        _("    File glob to match when -r is used. Glob is a wildcard.\n")
+		        _("  --exclude GLOB\n")
+		        _("    The reverse of --include. Skip files that match glob.\n")
+		        _("    This applies to the passed command line files.\n")
+		        _("  -F\n")
+		        _("    Treat FIND as a fixed-string. This is the default.\n")
+		        _("  -R\n")
+		        _("    Treat FIND as a regex include_glob.\n")
+		        _("  -E\n")
+		        _("    Use POSIX Extended Regular Expressions syntax.\n")
+		        _("    REG_EXTENDED is passed as the cflag to regexec.\n")
+		        _("  -I\n")
+		        _("    Ignore case if FIND is a regex include_glob.\n")
+		        _("    REG_ICASE is passed as the cflag to regexec.\n")
+		        _("\n")
+		        _("FIND and REPLACE shall be placed in that exact order.\n")
+		        _("\n")
+		        _("\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n")
+		        _("Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n")
+		        _("For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n")
+		        _("you would do with sed.\n")
+		        _("\n")
+		        _("Filenames shall not start with - as they will be interpreted as a flag.\n")
+		        _("\n")
+		        _("Single character flags starting with a single dash can be combined.\n")
+		        _("For example: -EI is equal to -E -i.\n")
+		        _("\n")
+		        _("-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n")
+		        _("enables -R.\n")
+		        _("\n")
+		        _("If no file was passed, read from stdin.\n"));
 		return EXIT_FAILURE;
 	}
 	jstr_ty buf = JSTR_INIT;
@@ -390,7 +390,7 @@ process:
 					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)));
 				}
 			} else {
-				PRINTERR("stat() failed on %s.\n", ARG);
+				fprintf(stderr, "stat() failed on %s.\n", ARG);
 				exit(EXIT_FAILURE);
 			}
 			break;

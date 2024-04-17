@@ -47,6 +47,8 @@
 #define RPLC        argv[2]
 #define R           JSTR_RESTRICT
 
+#define SEP '/'
+
 #define DO_FREE 0
 
 typedef enum {
@@ -228,9 +230,9 @@ main(int argc, char **argv)
 		         "    Recurse on the directories in FILES.\n"
 		         "  --include GLOB\n"
 		         "    File glob to match when -r is used. Glob is a wildcard.\n"
-		         "    If --include is used without -r, behavior is undefined.\n"
 		         "  --exclude GLOB\n"
 		         "    The reverse of --include. Skip files that match glob.\n"
+		         "    This applies to the passed command line files.\n"
 		         "  -F\n"
 		         "    Treat FIND as a fixed-string. This is the default.\n"
 		         "  -R\n"
@@ -341,7 +343,17 @@ main(int argc, char **argv)
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {
-				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, strlen(ARG), &st, a.find, a.find_len, a.rplc, a.rplc_len)));
+				const size_t fname_len = strlen(ARG);
+				if (!m.exclude_glob) {
+process:
+					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
+				} else {
+					const char *fname = jstr_memrchr(ARG, SEP, fname_len);
+					/* Get the filename. */
+					fname = (fname != NULL && *(fname + 1)) ? fname + 1 : ARG;
+					if (!fnmatch(m.exclude_glob, fname, 0))
+						goto process;
+				}
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;

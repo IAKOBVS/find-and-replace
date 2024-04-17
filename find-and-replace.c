@@ -376,9 +376,9 @@ main(int argc, char **argv)
 	/* Parse all files/directories. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG != '-') {
-			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
 			ret = xstat(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR);
+			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {

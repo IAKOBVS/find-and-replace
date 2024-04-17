@@ -39,6 +39,7 @@
 #define DIE()       DIE_IF(1)
 #define ARG         argv[i]
 #define ARG_NEXT()  ++i
+#define ARG_PREV()  --i
 #define unlikely(x) jstr_unlikely(x)
 #define IS_REG(x)   S_ISREG(x)
 #define IS_DIR(x)   S_ISDIR(x)
@@ -68,6 +69,7 @@ typedef struct global_ty {
 	regex_t regex;
 	const char *bak_suffix;
 	size_t bak_suffix_len;
+	size_t n;
 	char bak[JSTR_IO_PATH_MAX];
 } global_ty;
 global_ty G = { 0 };
@@ -136,14 +138,14 @@ process_buffer(const jstr_twoway_ty *R t,
 {
 	size_t changed;
 	if (G.regex_use) {
-		const jstr_re_off_ty ret = jstr_re_rplcall_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10);
+		const jstr_re_off_ty ret = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10, G.n);
 		if (jstr_re_chk(ret)) {
 			jstr_re_errdie(-ret, &G.regex);
 			return JSTR_RET_ERR;
 		}
 		changed = (size_t)ret;
 	} else {
-		const size_t ret = jstr_rplcall_len_exec_j(t, buf, find, find_len, rplc, rplc_len);
+		const size_t ret = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
 		if (jstr_unlikely(ret == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		changed = ret;
@@ -257,6 +259,9 @@ main(int argc, char **argv)
 		fprintf(stderr,
 		        _("Usage: find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...\n")
 		        _("Options:\n")
+		        _("  -g\n")
+		        _("    Replace all occurrences of FIND with REPLACE.\n")
+		        _("    The default replaces only the first occurrence.\n")
 		        _("  -i[SUFFIX]\n")
 		        _("    Replace files in-place. The default is printing to stdout.\n")
 		        _("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
@@ -298,6 +303,7 @@ main(int argc, char **argv)
 	}
 	jstr_ty buf = JSTR_INIT;
 	DIE_IF(jstr_chk(jstr_reserve_j(&buf, 4096)));
+	G.n = 1;
 	struct stat st;
 	int ret;
 	args_ty a;
@@ -342,20 +348,25 @@ main(int argc, char **argv)
 				const char *argp = ARG + 1;
 				/* Allow flag combinations. */
 				for (; *argp; ++argp) {
-					/* -r */
-					if (*argp == 'r') {
-						G.recursive = 1;
-						/* -R */
-					} else if (*argp == 'R') {
-						G.regex_use = 1;
-						/* -I */
-					} else if (*argp == 'I') {
-						G.regex_use = 1;
-						G.cflags |= JSTR_RE_CF_ICASE;
-						/* -E */
-					} else if (*argp == 'E') {
+					switch (*argp) {
+						break;
+					case 'E': /* -E */
 						G.regex_use = 1;
 						G.cflags |= JSTR_RE_CF_EXTENDED;
+						break;
+					case 'I': /* -I */
+						G.regex_use = 1;
+						G.cflags |= JSTR_RE_CF_ICASE;
+						break;
+					case 'R': /* -R */
+						G.regex_use = 1;
+						break;
+					case 'g': /* -g */
+						G.n = (size_t)-1;
+						break;
+					case 'r': /* -r */
+						G.recursive = 1;
+						break;
 					}
 				}
 			}

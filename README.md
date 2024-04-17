@@ -17,6 +17,9 @@ Substituting fixed strings with sed which only offers regex substitution is a ma
 ```
 find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...
 Options:
+  -g
+    Replace all occurrences of FIND with REPLACE.
+    The default replaces only the first occurrence.
   -i[SUFFIX]
     Replace files in-place. The default is printing to stdout.
     If SUFFIX is provided, backup the original file suffixed with SUFFIX.

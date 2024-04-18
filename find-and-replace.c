@@ -375,6 +375,7 @@ main(int argc, char **argv)
 	/* Parse all files/directories. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG != '-') {
+			G.have_files = 1;
 			ret = xstat(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR);
 			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
@@ -382,7 +383,6 @@ main(int argc, char **argv)
 				continue;
 			if (IS_REG(st.st_mode)) {
 				const size_t fname_len = strlen(ARG);
-				G.have_files = 1;
 				if (!m.exclude_glob) {
 process:
 					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
@@ -394,7 +394,6 @@ process:
 						goto process;
 				}
 			} else if (IS_DIR(st.st_mode)) {
-				G.have_files = 1;
 				if (G.recursive) {
 					a.buf = &buf;
 					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)));

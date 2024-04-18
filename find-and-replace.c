@@ -370,7 +370,6 @@ main(int argc, char **argv)
 					}
 				}
 			}
-			break;
 		}
 	}
 	/* Parse all files/directories. */
@@ -404,7 +403,6 @@ process:
 				fprintf(stderr, "stat() failed on %s.\n", ARG);
 				exit(EXIT_FAILURE);
 			}
-			break;
 		}
 	}
 	/* If no file was passed, read from stdin. */

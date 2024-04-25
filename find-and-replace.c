@@ -136,24 +136,26 @@ process_buffer(const jstr_twoway_ty *R t,
                const char *R rplc,
                const size_t rplc_len)
 {
-	size_t changed;
+	union u {
+		size_t zu;
+		jstr_re_off_ty d;
+	} changed;
 	if (G.regex_use) {
-		const jstr_re_off_ty ret = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10, G.n);
-		if (jstr_re_chk(ret)) {
-			jstr_re_errdie(-ret, &G.regex);
+		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10, G.n);
+		if (jstr_re_chk(changed.d)) {
+			jstr_re_errdie(-changed.d, &G.regex);
 			return JSTR_RET_ERR;
 		}
-		changed = (size_t)ret;
+		changed.zu = (size_t)changed.d;
 	} else {
-		const size_t ret = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
-		if (jstr_unlikely(ret == (size_t)-1))
+		changed.zu = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
+		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		changed = ret;
 	}
 	if (G.print_mode == PRINT_STDOUT) {
 		write(STDOUT_FILENO, buf->data, buf->size);
 	} else {
-		if (changed == 0)
+		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
 		int o_creat = 0;
 		if (G.print_mode == PRINT_FILE_BACKUP) {

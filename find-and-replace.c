@@ -395,7 +395,7 @@ use_regex_flag:
 						G.recursive = 1;
 						break;
 					case 'z': /* -z */
-						G.cflags |= ~JSTR_RE_CF_NEWLINE;
+						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
 					}
 				}

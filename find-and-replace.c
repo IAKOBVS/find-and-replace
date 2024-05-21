@@ -253,6 +253,15 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 	return JSTR_RET_SUCC;
 }
 
+/* Default flags. */
+void init_defaults()
+{
+	/* Anchors match on newlines. */
+	G.cflags |= JSTR_RE_CF_NEWLINE;
+	/* Non-global replacement. */
+	G.n = 1;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -260,9 +269,10 @@ main(int argc, char **argv)
 		fprintf(stderr,
 		        _("Usage: find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...\n")
 		        _("Options:\n")
+		        _("  -G (default)\n")
+		        _("    Replace first occurence of FIND with REPLACE.\n")
 		        _("  -g\n")
-		        _("    Replace all occurrences of FIND with REPLACE.\n")
-		        _("    The default replaces only the first occurrence.\n")
+		        _("    Replace all occurrences of FIND with REPLACE, negates -G flag.\n")
 		        _("  -i[SUFFIX]\n")
 		        _("    Replace files in-place. The default is printing to stdout.\n")
 		        _("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
@@ -273,16 +283,23 @@ main(int argc, char **argv)
 		        _("  --exclude GLOB\n")
 		        _("    The reverse of --include. Skip files that match glob.\n")
 		        _("    This applies to the passed command line files.\n")
-		        _("  -F\n")
-		        _("    Treat FIND as a fixed-string. This is the default.\n")
+		        _("  -F (default)\n")
+		        _("    Treat FIND as a fixed-string.\n")
 		        _("  -R\n")
-		        _("    Treat FIND as a regex.\n")
+		        _("    Treat FIND as a regex, negates -F flag.\n")
 		        _("  -E\n")
 		        _("    Use POSIX Extended Regular Expressions syntax.\n")
 		        _("    REG_EXTENDED is passed as the cflag to regexec.\n")
 		        _("  -I\n")
 		        _("    Ignore case.\n")
 		        _("    REG_ICASE is passed as the cflag to regexec.\n")
+		        _("  -Z (default)\n")
+		        _("    Anchors match newlines.\n")
+		        _("    REG_NEWLINE is passed as the cflag to regexec.\n")
+		        _("  -z\n")
+		        _("    Anchors only match the start or end of the string not newlines, negates -Z flag.\n")
+		        _("    You can still use newlines in the FIND string, different from sed.\n")
+		        _("    REG_NEWLINE is not passed as the cflag to regexec.\n")
 		        _("\n")
 		        _("FIND and REPLACE shall be placed in that exact order.\n")
 		        _("\n")
@@ -304,19 +321,19 @@ main(int argc, char **argv)
 	}
 	jstr_ty buf = JSTR_INIT;
 	DIE_IF(jstr_chk(jstr_reserve_j(&buf, 4096)));
-	G.n = 1;
 	struct stat st;
 	int ret;
 	args_ty a;
 	matcher_args_ty m;
+	jstr_twoway_ty t;
+	a.t = &t;
 	a.find = (const char *)FIND;
 	a.rplc = (const char *)RPLC;
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.include_glob = NULL;
 	m.exclude_glob = NULL;
-	jstr_twoway_ty t;
-	a.t = &t;
+	init_defaults();
 	/* Parse all flags. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG == '-') {
@@ -353,20 +370,31 @@ main(int argc, char **argv)
 						break;
 					case 'E': /* -E */
 						G.regex_use = 1;
-						G.cflags |= JSTR_RE_CF_EXTENDED;
+						goto use_regex_flag;
+					case 'F': /* -F */
+						G.regex_use = 0;
+						break;
+					case 'G': /* -G */
+						G.n = 0;
 						break;
 					case 'I': /* -I */
-						G.regex_use = 1;
 						G.cflags |= JSTR_RE_CF_ICASE;
-						break;
+						goto use_regex_flag;
 					case 'R': /* -R */
+use_regex_flag:
 						G.regex_use = 1;
+						break;
+					case 'Z': /* -Z */
+						G.cflags |= JSTR_RE_CF_NEWLINE;
 						break;
 					case 'g': /* -g */
 						G.n = (size_t)-1;
 						break;
 					case 'r': /* -r */
 						G.recursive = 1;
+						break;
+					case 'z': /* -z */
+						G.cflags |= ~JSTR_RE_CF_NEWLINE;
 						break;
 					}
 				}

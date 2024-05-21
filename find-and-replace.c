@@ -40,7 +40,6 @@
 #define ARG         argv[i]
 #define ARG_NEXT()  ++i
 #define ARG_PREV()  --i
-#define unlikely(x) jstr_unlikely(x)
 #define IS_REG(x)   S_ISREG(x)
 #define IS_DIR(x)   S_ISDIR(x)
 #define FIND        argv[1]
@@ -80,7 +79,7 @@ static jstr_ret_ty
 xstat(const char *R file,
       struct stat *R buf)
 {
-	if (unlikely(stat(file, buf)))
+	if (jstr_unlikely(stat(file, buf)))
 		goto err;
 	return JSTR_RET_SUCC;
 err:

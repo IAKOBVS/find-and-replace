@@ -65,6 +65,7 @@ typedef struct global_ty {
 	int compiled;
 	int regex_use;
 	int cflags;
+	int eflags;
 	regex_t regex;
 	const char *bak_suffix;
 	size_t bak_suffix_len;
@@ -140,7 +141,7 @@ process_buffer(const jstr_twoway_ty *R t,
 		jstr_re_off_ty d;
 	} changed;
 	if (G.regex_use) {
-		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.cflags, 10, G.n);
+		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
 		if (jstr_re_chk(changed.d)) {
 			jstr_re_errdie(-changed.d, &G.regex);
 			return JSTR_RET_ERR;

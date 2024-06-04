@@ -370,7 +370,7 @@ main(int argc, char **argv)
 					switch (*argp) {
 						break;
 					case 'E': /* -E */
-						G.regex_use = 1;
+						G.cflags |= JSTR_RE_CF_EXTENDED;
 						goto use_regex_flag;
 					case 'F': /* -F */
 						G.regex_use = 0;

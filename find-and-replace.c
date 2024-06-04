@@ -366,9 +366,10 @@ main(int argc, char **argv)
 			} else {
 				const char *argp = ARG + 1;
 				/* Allow flag combinations. */
-				for (; *argp; ++argp) {
+				for (;; ++argp) {
 					switch (*argp) {
-						break;
+					case '\0':
+						goto exit_for;
 					case 'E': /* -E */
 						G.cflags |= JSTR_RE_CF_EXTENDED;
 						goto use_regex_flag;
@@ -397,8 +398,13 @@ use_regex_flag:
 					case 'z': /* -z */
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
+					default:
+						fprintf(stderr, "Passing an unknown flag: %c.\n", *argp);
+						exit(EXIT_FAILURE);
+						break;
 					}
 				}
+exit_for:;
 			}
 		}
 	}

@@ -9,7 +9,7 @@ Substituting fixed strings with sed which only offers regex substitution is a ma
 ## Installation:
 
 ```
-./setup && ./build && sudo ./install
+sudo ./setup && ./build && sudo ./install
 ```
 
 ## Usage:

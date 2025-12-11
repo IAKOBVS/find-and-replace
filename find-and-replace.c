@@ -321,7 +321,8 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	jstr_ty buf = JSTR_INIT;
-	DIE_IF(jstr_chk(jstr_reserve_j(&buf, 4096)));
+	/* allocate PAGE_SIZE - some room for malloc metadata to not cross two pages */
+	DIE_IF(jstr_chk(jstr_reserve_j(&buf, (4096 - 64))));
 	struct stat st;
 	int ret;
 	args_ty a;

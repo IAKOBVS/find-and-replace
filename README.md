@@ -5,10 +5,8 @@ It is a truth universally acknowledged, that substituting fixed strings with sed
 ## Installation:
 
 ```
-sudo ./setup && ./build && sudo ./install
+sudo ./setup && ./build && ./install
 ```
-
-sudo is used here to install jstring to /usr/local/include.
 
 ## Dependencies
 

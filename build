@@ -1,7 +1,7 @@
 #!/bin/sh
 
 PROG=find-and-replace
-FLAGS='-O3'
+FLAGS='-O2'
 CC=$(readlink "$(command -v cc)")
 if [ "$CC" = 'gcc' ] || [ "$CC" = 'clang' ]; then
 	FLAGS="$FLAGS -march=native -Wall -Wextra -Wpedantic"

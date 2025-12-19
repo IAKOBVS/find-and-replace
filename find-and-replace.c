@@ -66,7 +66,7 @@ typedef struct global_ty {
 	int regex_use;
 	int cflags;
 	int eflags;
-	regex_t regex;
+	jstr_re_ty regex;
 	const char *bak_suffix;
 	size_t bak_suffix_len;
 	size_t n;
@@ -84,9 +84,7 @@ xstat(const char *R file,
 		goto err;
 	return JSTR_RET_SUCC;
 err:
-	if (jstr_unlikely(errno == EINVAL))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	return JSTR_RET_ERR - 1;
+	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
 static int
@@ -320,9 +318,6 @@ main(int argc, char **argv)
 		        _("If no file was passed, read from stdin.\n"));
 		return EXIT_FAILURE;
 	}
-	jstr_ty buf = JSTR_INIT;
-	/* allocate PAGE_SIZE - some room for malloc metadata to not cross two pages */
-	DIE_IF(jstr_chk(jstr_reserve_j(&buf, (4096 - 64))));
 	struct stat st;
 	int ret;
 	args_ty a;
@@ -409,6 +404,9 @@ exit_for:;
 			}
 		}
 	}
+	jstr_ty buf = JSTR_INIT;
+	/* allocate PAGE_SIZE - some room for malloc metadata to not cross two pages */
+	DIE_IF(jstr_chk(jstr_reserve_j(&buf, (4096 - 64))));
 	/* Parse all files/directories. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG != '-') {

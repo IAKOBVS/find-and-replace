@@ -75,7 +75,6 @@ typedef struct global_ty {
 global_ty G = { 0 };
 
 JSTR_FUNC
-JSTR_ATTR_INLINE
 static jstr_ret_ty
 xstat(const char *R file,
       struct stat *R buf)

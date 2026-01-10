@@ -405,7 +405,7 @@ exit_for:;
 	}
 	jstr_ty buf = JSTR_INIT;
 	/* allocate PAGE_SIZE - some room for malloc metadata to not cross two pages */
-	DIE_IF(jstr_chk(jstr_reserve_j(&buf, JSTR_PAGE_SIZE - 64)));
+	DIE_IF(jstr_chk(jstr_reserve_j(&buf, JSTR_PAGE_SIZE - sizeof(size_t))));
 	/* Parse all files/directories. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG != '-') {

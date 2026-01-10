@@ -195,7 +195,10 @@ process_file(const jstr_twoway_ty *R t,
 	if (ft == FT_UNKNOWN)
 		if (jstr_isbinary(buf->data, buf->size, 64))
 			return JSTR_RET_SUCC;
-	return process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
+	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
+	/* Avoid realloc. */
+	jstr_free_j(buf);
+	return ret;
 }
 
 typedef struct args_ty {
@@ -329,6 +332,7 @@ main(int argc, char **argv)
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.include_glob = NULL;
 	m.exclude_glob = NULL;
+	jstr_ty buf = JSTR_INIT;
 	init_defaults();
 	/* Parse all flags. */
 	for (unsigned int i = 3; ARG; ++i) {
@@ -403,9 +407,6 @@ exit_for:;
 			}
 		}
 	}
-	jstr_ty buf = JSTR_INIT;
-	/* allocate PAGE_SIZE - some room for malloc metadata to not cross two pages */
-	DIE_IF(jstr_chk(jstr_reserve_j(&buf, JSTR_PAGE_SIZE - sizeof(size_t))));
 	/* Parse all files/directories. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG != '-') {

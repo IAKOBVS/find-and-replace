@@ -141,7 +141,7 @@ process_buffer(const jstr_twoway_ty *R t,
 		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
 		if (jstr_re_chk(changed.d)) {
 			jstr_re_errdie(-changed.d, &G.regex);
-			return JSTR_RET_ERR;
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		changed.zu = (size_t)changed.d;
 	} else {
@@ -150,7 +150,8 @@ process_buffer(const jstr_twoway_ty *R t,
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	if (G.print_mode == PRINT_STDOUT) {
-		write(STDOUT_FILENO, buf->data, buf->size);
+		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	} else {
 		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
@@ -158,13 +159,13 @@ process_buffer(const jstr_twoway_ty *R t,
 		if (G.print_mode == PRINT_FILE_BACKUP) {
 			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(G.bak))) {
 				jstr_errdie("Suffix length is too large to create a backup file.");
-				return JSTR_RET_ERR;
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			char *p = jstr_mempcpy(G.bak, fname, fname_len);
 			jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
 			if (jstr_unlikely(file_exists(G.bak))) {
 				jstr_errdie("Can't make a backup file because suffixed filename already exists.");
-				return JSTR_RET_ERR;
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			if (jstr_unlikely(rename(fname, G.bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -189,7 +190,7 @@ process_file(const jstr_twoway_ty *R t,
 {
 	const size_t file_size = (size_t)st->st_size;
 	if (file_size < find_len)
-		return JSTR_RET_ERR;
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	const ft_ty ft = exttype(fname, fname_len);
 	if (ft == FT_BINARY)
 		return JSTR_RET_SUCC;

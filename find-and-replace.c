@@ -455,7 +455,7 @@ process:
 			jstr_err("Trying to recursively traverse through directories while reading from stdin.");
 			DIE();
 		}
-		jstr_io_readstdin_j(&buf);
+		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)));
 		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
 		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)));
 	}

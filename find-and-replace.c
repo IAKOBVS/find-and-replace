@@ -358,13 +358,13 @@ main(int argc, char **argv)
 				if (!strcmp(ARG + 2, "include")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
-						jstr_errdie("No argument after --include flag.");
+						jstr_errdie("find-and-replace: no argument after --include flag.");
 					m.include_glob = ARG;
 					/* --exclude */
 				} else if (!strcmp(ARG + 2, "exclude")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
-						jstr_errdie("No argument after --exclude flag.");
+						jstr_errdie("find-and-replace: no argument after --exclude flag.");
 					m.exclude_glob = ARG;
 				}
 				/* - flags */
@@ -404,7 +404,7 @@ use_regex_flag:
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
 					default:
-						fprintf(stderr, "Passing an unknown flag: %c.\n", *argp);
+						fprintf(stderr, "find-and-replace: Passing an unknown flag: %c.\n", *argp);
 						exit(EXIT_FAILURE);
 						break;
 					}
@@ -440,7 +440,7 @@ process:
 					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)));
 				}
 			} else {
-				fprintf(stderr, "stat() failed on %s.\n", ARG);
+				fprintf(stderr, "find-and-replace: stat() failed on %s.\n", ARG);
 				exit(EXIT_FAILURE);
 			}
 		}
@@ -448,11 +448,11 @@ process:
 	/* If no file was passed, read from stdin. */
 	if (!G.have_files) {
 		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(G.print_mode != PRINT_STDOUT)) {
-			jstr_err("Trying to create a backup file while reading from stdin.");
+			jstr_err("find-and-replace: trying to create a backup file while reading from stdin.");
 			DIE();
 		}
 		if (jstr_unlikely(G.recursive)) {
-			jstr_err("Trying to recursively traverse through directories while reading from stdin.");
+			jstr_err("find-and-replace: trying to recursively traverse through directories while reading from stdin.");
 			DIE();
 		}
 		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)));

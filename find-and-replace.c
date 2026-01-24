@@ -26,8 +26,8 @@
 #define JSTR_USE_UNLOCKED_IO_READ 1
 
 #include <jstr/jstr.h>
-#include <jstr/jstr-io.h>
-#include <jstr/jstr-regex.h>
+#include <jstr/io.h>
+#include <jstr/regex.h>
 #include <fnmatch.h>
 
 #define DIE_IF_PRINT(x, msg)              \

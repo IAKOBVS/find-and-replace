@@ -35,16 +35,16 @@
 		if (jstr_unlikely(x))     \
 			jstr_errdie(msg); \
 	} while (0)
-#define DIE_IF(x)   DIE_IF_PRINT(x, "")
-#define DIE()       DIE_IF(1)
-#define ARG         argv[i]
-#define ARG_NEXT()  ++i
-#define ARG_PREV()  --i
-#define IS_REG(x)   S_ISREG(x)
-#define IS_DIR(x)   S_ISDIR(x)
-#define FIND        argv[1]
-#define RPLC        argv[2]
-#define R           JSTR_RESTRICT
+#define DIE_IF(x)  DIE_IF_PRINT(x, "")
+#define DIE()      DIE_IF(1)
+#define ARG        argv[i]
+#define ARG_NEXT() ++i
+#define ARG_PREV() --i
+#define IS_REG(x)  S_ISREG(x)
+#define IS_DIR(x)  S_ISDIR(x)
+#define FIND       argv[1]
+#define RPLC       argv[2]
+#define R          JSTR_RESTRICT
 
 #define _(x) x
 #define SEP  '/'
@@ -261,7 +261,8 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 }
 
 /* Default flags. */
-void init_defaults()
+void
+init_defaults()
 {
 	/* Anchors match on newlines. */
 	G.cflags |= JSTR_RE_CF_NEWLINE;
@@ -269,61 +270,67 @@ void init_defaults()
 	G.n = 1;
 }
 
+/* clang-format off */
+
+const char *usage =
+	_("Usage: find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...\n")
+	_("Options:\n")
+	_("  -G (default)\n")
+	_("    Replace first occurence of FIND with REPLACE.\n")
+	_("  -g\n")
+	_("    Replace all occurrences of FIND with REPLACE, negates -G flag.\n")
+	_("  -i[SUFFIX]\n")
+	_("    Replace files in-place. The default is printing to stdout.\n")
+	_("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
+	_("  -r\n")
+	_("    Recurse on the directories in FILES.\n")
+	_("  --include GLOB\n")
+	_("    File glob to match when -r is used. Glob is a wildcard.\n")
+	_("  --exclude GLOB\n")
+	_("    The reverse of --include. Skip files that match glob.\n")
+	_("    This applies to the passed command line files.\n")
+	_("  -F (default)\n")
+	_("    Treat FIND as a fixed-string.\n")
+	_("  -R\n")
+	_("    Treat FIND as a regex, negates -F flag.\n")
+	_("  -E\n")
+	_("    Use POSIX Extended Regular Expressions syntax.\n")
+	_("    REG_EXTENDED is passed as the cflag to regexec.\n")
+	_("  -I\n")
+	_("    Ignore case.\n")
+	_("    REG_ICASE is passed as the cflag to regexec.\n")
+	_("  -Z (default)\n")
+	_("    Anchors match newlines.\n")
+	_("    REG_NEWLINE is passed as the cflag to regexec.\n")
+	_("  -z\n")
+	_("    Anchors only match the start or end of the string not newlines, negates -Z flag.\n")
+	_("    You can still use newlines in the FIND string, different from sed.\n")
+	_("    REG_NEWLINE is not passed as the cflag to regexec.\n")
+	_("\n")
+	_("FIND and REPLACE shall be placed in that exact order.\n")
+	_("\n")
+	_("\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n")
+	_("Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n")
+	_("For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n")
+	_("you would do with sed.\n")
+	_("\n")
+	_("Filenames shall not start with - as they will be interpreted as a flag.\n")
+	_("\n")
+	_("Single character flags starting with a single dash can be combined.\n")
+	_("For example: -EI is equal to -E -I.\n")
+	_("\n")
+	_("-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n")
+	_("enables -R.\n")
+	_("\n")
+	_("If no file was passed, read from stdin.\n");
+
+/* clang-format on */
+
 int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2])) {
-		fprintf(stderr,
-		        _("Usage: find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...\n")
-		        _("Options:\n")
-		        _("  -G (default)\n")
-		        _("    Replace first occurence of FIND with REPLACE.\n")
-		        _("  -g\n")
-		        _("    Replace all occurrences of FIND with REPLACE, negates -G flag.\n")
-		        _("  -i[SUFFIX]\n")
-		        _("    Replace files in-place. The default is printing to stdout.\n")
-		        _("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
-		        _("  -r\n")
-		        _("    Recurse on the directories in FILES.\n")
-		        _("  --include GLOB\n")
-		        _("    File glob to match when -r is used. Glob is a wildcard.\n")
-		        _("  --exclude GLOB\n")
-		        _("    The reverse of --include. Skip files that match glob.\n")
-		        _("    This applies to the passed command line files.\n")
-		        _("  -F (default)\n")
-		        _("    Treat FIND as a fixed-string.\n")
-		        _("  -R\n")
-		        _("    Treat FIND as a regex, negates -F flag.\n")
-		        _("  -E\n")
-		        _("    Use POSIX Extended Regular Expressions syntax.\n")
-		        _("    REG_EXTENDED is passed as the cflag to regexec.\n")
-		        _("  -I\n")
-		        _("    Ignore case.\n")
-		        _("    REG_ICASE is passed as the cflag to regexec.\n")
-		        _("  -Z (default)\n")
-		        _("    Anchors match newlines.\n")
-		        _("    REG_NEWLINE is passed as the cflag to regexec.\n")
-		        _("  -z\n")
-		        _("    Anchors only match the start or end of the string not newlines, negates -Z flag.\n")
-		        _("    You can still use newlines in the FIND string, different from sed.\n")
-		        _("    REG_NEWLINE is not passed as the cflag to regexec.\n")
-		        _("\n")
-		        _("FIND and REPLACE shall be placed in that exact order.\n")
-		        _("\n")
-		        _("\\b, \\f, \\n, \\r, \\t, \\v, and \\ooo (octal) in FIND and REPLACE will be unescaped.\n")
-		        _("Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.\n")
-		        _("For example: '\\\\(this\\\\)' and '\\\\1' instead of '\\(this\\)' and '\\1', unlike what\n")
-		        _("you would do with sed.\n")
-		        _("\n")
-		        _("Filenames shall not start with - as they will be interpreted as a flag.\n")
-		        _("\n")
-		        _("Single character flags starting with a single dash can be combined.\n")
-		        _("For example: -EI is equal to -E -I.\n")
-		        _("\n")
-		        _("-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n")
-		        _("enables -R.\n")
-		        _("\n")
-		        _("If no file was passed, read from stdin.\n"));
+		fprintf(stderr, "%s", usage);
 		return EXIT_FAILURE;
 	}
 	struct stat st;
@@ -397,6 +404,10 @@ use_regex_flag:
 					case 'g': /* -g */
 						G.n = (size_t)-1;
 						break;
+					case 'h':
+						printf("%s", usage);
+						exit(EXIT_SUCCESS);
+						break;
 					case 'r': /* -r */
 						G.recursive = 1;
 						break;
@@ -404,7 +415,7 @@ use_regex_flag:
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
 					default:
-						fprintf(stderr, "find-and-replace: Passing an unknown flag: %c.\n", *argp);
+						fprintf(stderr, "%s", usage);
 						exit(EXIT_FAILURE);
 						break;
 					}

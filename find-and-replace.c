@@ -190,7 +190,7 @@ process_file(const jstr_twoway_ty *R t,
 {
 	const size_t file_size = (size_t)st->st_size;
 	if (file_size < find_len)
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
+		return JSTR_RET_SUCC;
 	const ft_ty ft = exttype(fname, fname_len);
 	if (ft == FT_BINARY)
 		return JSTR_RET_SUCC;

@@ -25,9 +25,9 @@
 #define JSTR_PANIC                1
 #define JSTR_USE_UNLOCKED_IO_READ 1
 
-#include <jstr/jstr.h>
-#include <jstr/io.h>
-#include <jstr/regex.h>
+#include "lib/jstring/build/include/jstr/jstr.h"
+#include "lib/jstring/build/include/jstr/io.h"
+#include "lib/jstring/build/include/jstr/regex.h"
 #include <fnmatch.h>
 
 #define DIE_IF_PRINT(x, msg)              \

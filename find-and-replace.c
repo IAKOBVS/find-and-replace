@@ -389,7 +389,7 @@ main(int argc, char **argv)
 						G.regex_use = 0;
 						break;
 					case 'G': /* -G */
-						G.n = 0;
+						G.n = 1;
 						break;
 					case 'I': /* -I */
 						G.cflags |= JSTR_RE_CF_ICASE;
@@ -442,7 +442,7 @@ process:
 					const char *fname = jstr_memrchr(ARG, SEP, fname_len);
 					/* Get the filename. */
 					fname = (fname != NULL && *(fname + 1)) ? fname + 1 : ARG;
-					if (!fnmatch(m.exclude_glob, fname, 0))
+					if (fnmatch(m.exclude_glob, fname, 0))
 						goto process;
 				}
 			} else if (IS_DIR(st.st_mode)) {
@@ -454,6 +454,8 @@ process:
 				fprintf(stderr, "find-and-replace: stat() failed on %s.\n", ARG);
 				exit(EXIT_FAILURE);
 			}
+		} else if (ARG[1] == '-' && (!strcmp(ARG + 2, "include") || !strcmp(ARG + 2, "exclude"))) {
+			ARG_NEXT();
 		}
 	}
 	/* If no file was passed, read from stdin. */

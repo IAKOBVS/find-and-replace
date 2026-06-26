@@ -5,7 +5,7 @@ It is a truth universally acknowledged, that substituting fixed strings with sed
 ## Installation:
 
 ```
-sudo ./setup && ./build && ./install
+sudo ./setup && ./compile && ./install
 ```
 
 ## Dependencies

@@ -1,2 +1,2 @@
 #!/bin/sh
-cd ./lib/jstring && ./update
+cd ./lib/jstring && git pull && ./compile

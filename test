@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+"$(dirname "$0")/tests/run.sh"
+"$(dirname "$0")/tests/fuzz.sh" "${1:-500}"

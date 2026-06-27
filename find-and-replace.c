@@ -30,12 +30,12 @@
 
 #include <fnmatch.h>
 
-#define DIE_IF_PRINT(x, msg)              \
-	do {                              \
-		if (jstr_unlikely(x))     \
-			jstr_errdie(msg); \
+#define DIE_IF_PRINT(x, fmt, ...)                      \
+	do {                                           \
+		if (jstr_unlikely(x))                  \
+			jstr_errdie(fmt, __VA_ARGS__); \
 	} while (0)
-#define DIE_IF(x)  DIE_IF_PRINT(x, "")
+#define DIE_IF(x, fmt, ...)  DIE_IF_PRINT(x, fmt, __VA_ARGS__)
 #define DIE()      DIE_IF(1)
 #define ARG        argv[i]
 #define ARG_NEXT() ++i
@@ -140,7 +140,7 @@ process_buffer(const jstr_twoway_ty *R t,
 	if (G.regex_use) {
 		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
 		if (jstr_re_chk(changed.d)) {
-			jstr_re_errdie(-changed.d, &G.regex);
+			jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		changed.zu = (size_t)changed.d;
@@ -158,13 +158,13 @@ process_buffer(const jstr_twoway_ty *R t,
 		int o_creat = 0;
 		if (G.print_mode == PRINT_FILE_BACKUP) {
 			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(G.bak))) {
-				jstr_errdie("Suffix length is too large to create a backup file.");
+				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(G.bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			char *p = jstr_mempcpy(G.bak, fname, fname_len);
 			jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
 			if (jstr_unlikely(file_exists(G.bak))) {
-				jstr_errdie("Can't make a backup file because suffixed filename already exists.");
+				jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", G.bak_suffix);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			if (jstr_unlikely(rename(fname, G.bak)))
@@ -249,8 +249,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 		if (G.regex_use) {
 			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
-				assert(0);
-				jstr_re_errdie(-ret, &G.regex);
+				jstr_re_err(ret, &G.regex, "%s", "");
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 		} else {
@@ -366,13 +365,13 @@ main(int argc, char **argv)
 				if (!strcmp(ARG + 2, "include")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
-						jstr_errdie("find-and-replace: no argument after --include flag.");
+						jstr_errdie("%s: %s", argv[0], "no argument after --include flag.\n");
 					m.include_glob = ARG;
 					/* --exclude */
 				} else if (!strcmp(ARG + 2, "exclude")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
-						jstr_errdie("find-and-replace: no argument after --exclude flag.");
+						jstr_errdie("%s: %s", argv[0], "no argument after --exclude flag.\n");
 					m.exclude_glob = ARG;
 				}
 				/* - flags */
@@ -430,15 +429,15 @@ exit_for:;
 		if (*ARG != '-') {
 			G.have_files = 1;
 			ret = xstat(ARG, &st);
-			DIE_IF(ret == JSTR_RET_ERR);
-			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
+			DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
+			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
 			if (ret != JSTR_RET_SUCC)
 				continue;
 			if (IS_REG(st.st_mode)) {
 				const size_t fname_len = strlen(ARG);
 				if (!m.exclude_glob) {
 process:
-					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)));
+					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "Can't process file (%s).\n", ARG);
 				} else {
 					const char *fname = jstr_memrchr(ARG, SEP, fname_len);
 					/* Get the filename. */
@@ -449,7 +448,7 @@ process:
 			} else if (IS_DIR(st.st_mode)) {
 				if (G.recursive) {
 					a.buf = &buf;
-					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)));
+					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, G.include_glob ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, G.include_glob ? "1" : "0");
 				}
 			} else {
 				fprintf(stderr, "find-and-replace: stat() failed on %s.\n", ARG);
@@ -461,17 +460,13 @@ process:
 	}
 	/* If no file was passed, read from stdin. */
 	if (!G.have_files) {
-		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(G.print_mode != PRINT_STDOUT)) {
-			jstr_err("find-and-replace: trying to create a backup file while reading from stdin.");
-			DIE();
-		}
-		if (jstr_unlikely(G.recursive)) {
-			jstr_err("find-and-replace: trying to recursively traverse through directories while reading from stdin.");
-			DIE();
-		}
-		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)));
-		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)));
-		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)));
+		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(G.print_mode != PRINT_STDOUT))
+			jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
+		if (jstr_unlikely(G.recursive))
+			jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
+		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)), "%s", "Failed reading stdin.\n");
+		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "Failed compiling regex.\n");
+		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 	}
 #if DO_FREE /* We don't need to free since we're exiting. */
 	jstr_free_j(&buf);

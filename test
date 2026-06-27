@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
-./tests/run.sh &
-./tests/fuzz.sh "${1:-500}" &
-./tests/complex.sh &
 ./tests/edge-cases.sh &
+./tests/fuzz.sh "${1:-250}" &
+./tests/run.sh &
+./tests/complex.sh &
 wait

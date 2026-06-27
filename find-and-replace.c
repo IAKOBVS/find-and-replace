@@ -117,7 +117,7 @@ exttype(const char *fname, size_t fname_len)
 				return FT_TEXT;
 		for (i = 0; i < sizeof(binv) / sizeof(*binv); ++i)
 			if (!jstr_strcmpeq_loop(fname, binv[i]))
-				return FT_TEXT;
+				return FT_BINARY;
 	}
 	return FT_UNKNOWN;
 }
@@ -191,18 +191,22 @@ process_file(const jstr_twoway_ty *R t,
 	const size_t file_size = (size_t)st->st_size;
 	if (file_size < find_len)
 		return JSTR_RET_SUCC;
+#if 0
 	const ft_ty ft = exttype(fname, fname_len);
 	if (ft == FT_BINARY)
 		return JSTR_RET_SUCC;
+#endif
 	/* Preallocate the length of the replace string. */
 	if (rplc_len > find_len && !G.regex_use)
 		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + 1)))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
+#if 0
 	if (ft == FT_UNKNOWN)
-		if (jstr_isbinary(buf->data, buf->size, 64))
+		if (jstr_io_isbinary(buf->data, JSTR_MIN(64, file_size)))
 			return JSTR_RET_SUCC;
+#endif
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
 	return ret;
 }

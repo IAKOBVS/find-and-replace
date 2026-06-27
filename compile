@@ -1,12 +1,12 @@
 #!/bin/sh
 
 PROG=find-and-replace
-FLAGS='-O2'
-LIB='./lib/jstring/build/lib/libjstr.a'
+CFLAGS='-O2'
+LFLAGS="$LD_LIBRARY_PATH -ljstr"
 CC=$(readlink "$(command -v cc)")
 if [ "$CC" = 'gcc' ] || [ "$CC" = 'clang' ]; then
-	FLAGS="$FLAGS -march=native -Wall -Wextra -Wpedantic"
+	CFLAGS="$CFLAGS -march=native -Wall -Wextra -Wpedantic"
 fi
 #shellcheck disable=SC2086
-cc $PROG.c $LIB -o $PROG $FLAGS || exit
-echo "cc $PROG.c -o $PROG $FLAGS"
+cc $PROG.c -o $PROG $CFLAGS $LFLAGS || exit
+echo "cc $PROG.c -o $PROG $CFLAGS $LFLAGS"

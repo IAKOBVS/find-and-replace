@@ -1,2 +1,11 @@
 #!/bin/sh
-cd ./lib/jstring && git pull && ./compile
+if [ ! -f /usr/local/lib/libjstr.so ]; then
+	if [ "$(id -u)" -eq 0 ]; then
+		if mkdir lib/jstring; then
+			git clone https://github.com/IAKOBVS/jstring lib/jstring
+		fi
+		cd ./lib/jstring && git pull && ./compile && ./install
+	else
+		echo "Please run the command with sudo, as it requires permission to install to /usr/local"
+	fi
+fi

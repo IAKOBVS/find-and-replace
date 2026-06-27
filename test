@@ -1,4 +1,7 @@
 #!/bin/sh
 set -e
-"$(dirname "$0")/tests/run.sh"
-"$(dirname "$0")/tests/fuzz.sh" "${1:-500}"
+./tests/run.sh &
+./tests/fuzz.sh "${1:-500}" &
+./tests/complex.sh &
+./tests/edge-cases.sh &
+wait

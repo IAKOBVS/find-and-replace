@@ -22,7 +22,7 @@
  *
  * MIT License (Expat) */
 
-#define JSTR_PANIC                1
+#define JSTR_PANIC                0
 #define JSTR_USE_UNLOCKED_IO_READ 1
 #include <jstr/jstr.h>
 #include <jstr/io.h>
@@ -249,6 +249,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 		if (G.regex_use) {
 			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+				assert(0);
 				jstr_re_errdie(-ret, &G.regex);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}

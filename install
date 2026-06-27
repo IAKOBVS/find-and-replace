@@ -6,5 +6,6 @@ if ! [ -d "$DIR" ]; then
 	echo "$HOME/.local/bin is not a directory."
 	exit 1
 fi
+strip $PROG
 cp $PROG "$DIR"
 echo "Installed $PROG to $DIR"

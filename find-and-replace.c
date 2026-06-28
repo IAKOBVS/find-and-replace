@@ -24,9 +24,13 @@
 
 #define JSTR_PANIC                0
 #define JSTR_USE_UNLOCKED_IO_READ 1
+
 #include <jstr/jstr.h>
 #include <jstr/io.h>
 #include <jstr/regex.h>
+
+#define S_LEN(s)     (sizeof(s) - 1)
+#define S_LITERAL(s) (s), (sizeof(s) - 1)
 
 #include <fnmatch.h>
 
@@ -35,16 +39,16 @@
 		if (jstr_unlikely(x))                  \
 			jstr_errdie(fmt, __VA_ARGS__); \
 	} while (0)
-#define DIE_IF(x, fmt, ...)  DIE_IF_PRINT(x, fmt, __VA_ARGS__)
-#define DIE()      DIE_IF(1)
-#define ARG        argv[i]
-#define ARG_NEXT() ++i
-#define ARG_PREV() --i
-#define IS_REG(x)  S_ISREG(x)
-#define IS_DIR(x)  S_ISDIR(x)
-#define FIND       argv[1]
-#define RPLC       argv[2]
-#define R          JSTR_RESTRICT
+#define DIE_IF(x, fmt, ...) DIE_IF_PRINT(x, fmt, __VA_ARGS__)
+#define DIE()               DIE_IF(1)
+#define ARG                 argv[i]
+#define ARG_NEXT()          ++i
+#define ARG_PREV()          --i
+#define IS_REG(x)           S_ISREG(x)
+#define IS_DIR(x)           S_ISDIR(x)
+#define FIND                argv[1]
+#define RPLC                argv[2]
+#define R                   JSTR_RESTRICT
 
 #define _(x) x
 #define SEP  '/'
@@ -70,7 +74,6 @@ typedef struct global_ty {
 	const char *bak_suffix;
 	size_t bak_suffix_len;
 	size_t n;
-	char bak[JSTR_IO_PATH_MAX];
 } global_ty;
 global_ty G = { 0 };
 
@@ -104,23 +107,23 @@ typedef enum {
 #define FT_BINARY FT_BINARY
 } ft_ty;
 
-static ft_ty
-exttype(const char *fname, size_t fname_len)
-{
-	fname = jstr_memrchr(fname, '.', fname_len);
-	if (fname != NULL && *++fname != '\0') {
-		static const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" };
-		static const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" };
-		unsigned int i;
-		for (i = 0; i < sizeof(textv) / sizeof(*textv); ++i)
-			if (!jstr_strcmpeq_loop(fname, textv[i]))
-				return FT_TEXT;
-		for (i = 0; i < sizeof(binv) / sizeof(*binv); ++i)
-			if (!jstr_strcmpeq_loop(fname, binv[i]))
-				return FT_BINARY;
-	}
-	return FT_UNKNOWN;
-}
+/* static ft_ty */
+/* exttype(const char *fname, size_t fname_len) */
+/* { */
+/* 	fname = jstr_memrchr(fname, '.', fname_len); */
+/* 	if (fname != NULL && *++fname != '\0') { */
+/* 		static const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" }; */
+/* 		static const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" }; */
+/* 		unsigned int i; */
+/* 		for (i = 0; i < sizeof(textv) / sizeof(*textv); ++i) */
+/* 			if (!jstr_strcmpeq_loop(fname, textv[i])) */
+/* 				return FT_TEXT; */
+/* 		for (i = 0; i < sizeof(binv) / sizeof(*binv); ++i) */
+/* 			if (!jstr_strcmpeq_loop(fname, binv[i])) */
+/* 				return FT_BINARY; */
+/* 	} */
+/* 	return FT_UNKNOWN; */
+/* } */
 
 static jstr_ret_ty
 process_buffer(const jstr_twoway_ty *R t,
@@ -137,6 +140,9 @@ process_buffer(const jstr_twoway_ty *R t,
 		size_t zu;
 		jstr_re_off_ty d;
 	} changed;
+	int fd_tmp = -1;
+	char *bakp = NULL;
+	char bak[JSTR_IO_PATH_MAX];
 	if (G.regex_use) {
 		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
 		if (jstr_re_chk(changed.d)) {
@@ -149,32 +155,71 @@ process_buffer(const jstr_twoway_ty *R t,
 		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
+	/* Append newline if has space */
+	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity > buf->size + S_LEN("\n") + 1)
+		buf->size = JSTR_PTR_DIFF(jstr_append_len_unsafe_p(buf->data, buf->size, "\n", 1), buf->data);
 	if (G.print_mode == PRINT_STDOUT) {
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	} else {
 		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
-		int o_creat = 0;
 		if (G.print_mode == PRINT_FILE_BACKUP) {
-			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(G.bak))) {
-				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(G.bak));
+			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
+				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
-			char *p = jstr_mempcpy(G.bak, fname, fname_len);
+			char *p = jstr_mempcpy(bak, fname, fname_len);
 			jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
-			if (jstr_unlikely(file_exists(G.bak))) {
-				jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", G.bak_suffix);
+			if (jstr_unlikely(file_exists(bak))) {
+				jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", bak);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
-			if (jstr_unlikely(rename(fname, G.bak)))
+			if (jstr_unlikely(rename(fname, bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			o_creat = O_CREAT;
+			if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+		} else {
+			bakp = bak;
+			if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak))) {
+				jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			}
+			char *p = jstr_mempcpy(bak, fname, fname_len);
+			p = jstr_stpcpy_len(p, S_LITERAL(".XXXXXX"));
+			fd_tmp = mkstemp(bak);
+			if (jstr_unlikely(fd_tmp == -1)) {
+				bakp = NULL;
+				jstr_errdie("Can't make a file (%s) to temporarily write replacements to.\n", bak);
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+				goto err;
+			}
+			if (jstr_chk(jstr_io_writefilefd_len_j(buf, fd_tmp))) {
+				jstr_errdie("Can't write replacements to temp file (%s).\n", bak);
+				goto err;
+			}
+			if (jstr_unlikely(close(fd_tmp) == -1)) {
+				fd_tmp = -1;
+				jstr_errdie("Can't close temp file (%s).\n", bak);
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+				goto err;
+			}
+			fd_tmp = -1;
+			if (jstr_unlikely(rename(bak, fname))) {
+				jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname);
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+				goto err;
+			}
+			bakp = NULL;
 		}
-		if (jstr_chk(jstr_io_writefile_len_j(buf, fname, o_creat | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	return JSTR_RET_SUCC;
+err:
+	if (fd_tmp != -1)
+		if (close(fd_tmp) < 0) {}
+	if (bakp != NULL)
+		if (unlink(bakp) < 0) {}
+	return JSTR_RET_ERR;
 }
 
 static jstr_ret_ty
@@ -193,12 +238,12 @@ process_file(const jstr_twoway_ty *R t,
 		return JSTR_RET_SUCC;
 #if 0
 	const ft_ty ft = exttype(fname, fname_len);
-	if (ft == FT_BINARY)
+	f (ft == FT_BINARY)
 		return JSTR_RET_SUCC;
 #endif
 	/* Preallocate the length of the replace string. */
 	if (rplc_len > find_len && !G.regex_use)
-		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + 1)))
+		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);

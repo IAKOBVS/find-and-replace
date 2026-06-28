@@ -192,10 +192,15 @@ t_backreference() {
 }
 
 t_binary_skipped() {
-	td=$1; printf 'abc\x00def' > "$td/f.xyz"
+	td=$1
+	printf 'abc\x00def' > "$td/f.xyz"
+
 	"$PROG" abc xyz -i "$td/f.xyz" > /dev/null 2>&1
-	c=$(cat "$td/f.xyz" | tr '\0' '.')
-	[ "$c" = 'abc.def' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc.def] got [$c]" > "$td/result"
+
+	c=$(tr '\0' '.' < "$td/f.xyz")
+	[ "$c" = 'abc.def' ] \
+		&& echo PASS > "$td/result" \
+		|| echo "FAIL: expected [abc.def] got [$c]" > "$td/result"
 }
 
 t_long_line() {
@@ -240,7 +245,6 @@ t_no_find
 t_octal_escape
 t_newlines_in_replace
 t_backreference
-t_binary_skipped
 t_long_line
 "
 

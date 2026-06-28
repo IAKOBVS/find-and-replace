@@ -1,8 +1,7 @@
 #!/bin/sh
 
 PROG=find-and-replace
-# CFLAGS='-O2 -g'
-CFLAGS='-g'
+CFLAGS='-O2'
 LFLAGS="$LD_LIBRARY_PATH -ljstr"
 CC=$(readlink "$(command -v cc)")
 if [ "$CC" = 'gcc' ] || [ "$CC" = 'clang' ]; then

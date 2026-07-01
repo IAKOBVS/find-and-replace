@@ -378,9 +378,20 @@ const char *usage =
 int
 main(int argc, char **argv)
 {
-	if (jstr_nullchk(argv[1]) || jstr_nullchk(argv[2])) {
+	if (jstr_nullchk(argv[1])) {
 		fprintf(stderr, "%s", usage);
 		return EXIT_FAILURE;
+	}
+	if (jstr_nullchk(argv[2])) {
+		/* -h */
+		FILE *fp = stderr;
+		int ret = EXIT_FAILURE;
+		if (!strcmp(argv[1], "-h")) {
+			fp = stdout;
+			ret = EXIT_SUCCESS;
+		}
+		fprintf(fp, "%s", usage);
+		return ret;
 	}
 	struct stat st;
 	int ret;

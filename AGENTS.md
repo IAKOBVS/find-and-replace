@@ -39,12 +39,14 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
-| Main integration | `tests/run.sh` | 57 | Fixed-string, global/regex/case-insensitive, in-place with/without backup, stdin, multi-file, recursive, `--include`/`--exclude`, escapes (`\b\f\n\r\t\v` + octal), flag combinations (`-F -G -g -Z -z -R -E -I`), error paths (missing args, invalid flags, stdin+in-place, nonexistent file, backup collision) |
-| Edge cases | `tests/edge-cases.sh` | 16 | Empty input, missing newlines, invalid regex, overlapping matches, empty lines, null bytes, massive lines, long replacements, UTF-8 bytes, special chars in replace, empty file in-place, regex anchors with `-z` |
+| Main integration | `tests/run.sh` | 76 | Fixed-string, global/regex/case-insensitive, in-place with/without backup, stdin, multi-file, recursive, `--include`/`--exclude`, escapes (`\b\f\n\r\t\v` + octal), flag combinations (`-F -G -g -Z -z -R -E -I`), error paths (missing args, invalid flags, stdin+in-place, nonexistent file, backup collision), IO tests (backup content identity with `cmp`, empty/binary/multi-file backup, in-place shorter/longer/same-length/identical, FIFO/file argument, read-only in-place, large stdin, stdout multi-file, deep/many-file recursion, nonexistent-among-valid, backup-twice, mixed multi-file in-place) |
+| Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping matches, empty lines, null bytes, massive lines, long replacements, UTF-8 bytes, special chars in replace, empty file in-place, regex anchors with `-z`, read-only file with backup, nonexistent dir with `-r` |
 | Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy matching, repeat quantifiers, escaped literals |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags (`-g -R -E -I -Z -z -G`) in stdin, file, in-place, and in-place-backup modes; detects crashes and unexpected non-zero exits |
 
-### Coverage: 84% of executable lines
+### Coverage: 86% of executable lines
+
+Coverage measured via `gcov` after running all 106 deterministic tests.
 
 Coverage measured via `gcov` after running all deterministic tests.
 
@@ -67,7 +69,11 @@ Coverage measured via `gcov` after running all deterministic tests.
 - Empty files, empty input, empty replace string
 - Long lines and large replacement buffers
 
-**Remaining uncovered** (35 lines, all OS-level error paths): disk-full, permission-denied, memory allocation failure, signal interrupts during I/O — these require fault injection and cannot be exercised in integration tests.
+**Remaining uncovered** (31 lines, all OS-level or dead-code error paths): disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors — these require fault injection and cannot be exercised in integration tests.
+
+### Bugs found and fixed during IO test improvements
+
+1. **`jstr_io_writefilefd_len` newline condition inverted** — `jstring/include/io.h:161` in writev path: `(s[sz - 1] == '\n') ? 1 : 0` causes a double `\n` when content already ends with newline (which `process_buffer` always ensures). Fixed to `(s[sz - 1] != '\n') ? 1 : 0` in both `include/io.h` and `build/include/jstr/io.h`. The tool now uses the jstring write functions directly with correct single-trailing-newline output in all modes.
 
 ### Bugs found and fixed during test improvements
 

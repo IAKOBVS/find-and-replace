@@ -1,6 +1,7 @@
 find-and-replace
 jstring
 *.gcov
+*.gc*
 # Prerequisites
 *.d
 

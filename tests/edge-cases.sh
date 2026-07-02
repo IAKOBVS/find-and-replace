@@ -107,6 +107,18 @@ t_edge_unicode_bytes() {
 	[ "$out" = 'e' ] && echo PASS > "$td/result" || echo "FAIL: unicode replacement mismatch got [$out]" > "$td/result"
 }
 
+t_edge_readonly_file_backup() {
+	td=$1; printf 'content\n' > "$td/f"; chmod 0444 "$td/f"
+	"$PROG" content replaced -i.bak "$td/f" > /dev/null 2>&1
+	rc=$?; chmod 0644 "$td/f"
+	[ "$rc" -eq 0 ] && cmp -s "$td/f.bak" <(printf 'content\n') && [ "$(cat "$td/f")" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: read-only with backup failed (rc=$rc)" > "$td/result"
+}
+
+t_edge_nonexistent_dir_recursive() {
+	td=$1; rc=0; "$PROG" foo bar -i -r "$td/nonexistent" > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: nonexistent dir with -r should error" > "$td/result"
+}
+
 printf '\n=== find-and-replace edge case tests ===\n\n'
 
 TESTS="
@@ -126,6 +138,8 @@ t_edge_empty_file_inplace
 t_edge_regex_anchor_z
 t_edge_many_matches
 t_edge_unicode_bytes
+t_edge_readonly_file_backup
+t_edge_nonexistent_dir_recursive
 "
 
 for t in $TESTS; do

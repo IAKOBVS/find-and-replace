@@ -1,7 +1,9 @@
 #!/bin/sh
 # Parallel find-and-replace integration tests
 
-PROG="$(cd "$(dirname "$0")/.." && pwd)/find-and-replace"
+PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PROG="$PROG_DIR/find-and-replace"
+export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 PASS=0
 FAIL=0
 FAIL_LIST=''
@@ -75,10 +77,10 @@ t_recursive() {
 
 t_include() {
 	td=$1; mkdir -p "$td/sub"
-	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'ccc\n' > "$td/sub/c.c"
+	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'aaa\n' > "$td/sub/c.c"
 	"$PROG" aaa a_replaced -i -r --include '*.txt' "$td/sub" 2>/dev/null
 	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.txt"); tc=$(cat "$td/sub/c.c")
-	[ "$ta" = 'a_replaced' ] && [ "$tb" = 'bbb' ] && [ "$tc" = 'ccc' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
+	[ "$ta" = 'a_replaced' ] && [ "$tb" = 'bbb' ] && [ "$tc" = 'aaa' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
 }
 
 t_exclude() {
@@ -209,6 +211,159 @@ t_long_line() {
 	[ "$out" = "$long" ] && echo PASS > "$td/result" || echo "FAIL: long line mismatch" > "$td/result"
 }
 
+t_explicit_F() {
+	td=$1; out=$(printf 'hello world\n' | "$PROG" hello goodbye -F 2>/dev/null)
+	[ "$out" = 'goodbye world' ] && echo PASS > "$td/result" || echo "FAIL: expected [goodbye world] got [$out]" > "$td/result"
+}
+
+t_Z_flag() {
+	td=$1; out=$(printf 'a\nb\n' | "$PROG" '^b' 'B' -RZ 2>/dev/null)
+	# With -Z (REG_NEWLINE, default), ^ matches after newline → b replaced with B
+	# Output should be a\nB (possibly with trailing newline)
+	case "$out" in
+		"$(printf 'a\nB')"|"$(printf 'a\nB\n')") echo PASS > "$td/result" ;;
+		*) echo "FAIL: Z flag expected [a.B] got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result" ;;
+	esac
+}
+
+t_z_flag() {
+	td=$1; out=$(printf 'a\nb\n' | "$PROG" '^b' 'B' -Rz 2>/dev/null)
+	# With -z (no REG_NEWLINE), ^ only matches string start → b unchanged
+	[ "$out" = "$(printf 'a\nb\n')" ] || [ "$out" = "$(printf 'a\nb')" ] && echo PASS > "$td/result" || echo "FAIL: z flag, expected unchanged [a.b.] got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result"
+}
+
+t_global_then_G() {
+	td=$1; out=$(printf 'la la la\n' | "$PROG" la lu -Gg 2>/dev/null)
+	[ "$out" = 'lu lu lu' ] && echo PASS > "$td/result" || echo "FAIL: expected [lu lu lu] got [$out]" > "$td/result"
+}
+
+t_G_then_global() {
+	td=$1; out=$(printf 'la la la\n' | "$PROG" la lu -gG 2>/dev/null)
+	[ "$out" = 'lu la la' ] && echo PASS > "$td/result" || echo "FAIL: expected [lu la la] got [$out]" > "$td/result"
+}
+
+t_inplace_no_change() {
+	td=$1; printf 'no match here\n' > "$td/f"; "$PROG" xyzzy REPLACED -i "$td/f" 2>/dev/null
+	content=$(cat "$td/f")
+	[ "$content" = 'no match here' ] && echo PASS > "$td/result" || echo "FAIL: expected unchanged file got [$content]" > "$td/result"
+}
+
+t_combined_i_r() {
+	td=$1; printf 'hello\n' > "$td/f"; "$PROG" hello hi -ir "$td/f" 2>/dev/null
+	# -ir treats 'r' as the backup suffix, not --recursive flag
+	bak=$(cat "$td/fr" 2>/dev/null); orig=$(cat "$td/f" 2>/dev/null)
+	[ "$orig" = 'hi' ] && [ "$bak" = 'hello' ] && echo PASS > "$td/result" || echo "FAIL: orig [$orig] bak [$bak]" > "$td/result"
+}
+
+t_end_of_options() {
+	td=$1; printf 'match\n' > "$td/f.txt"; printf 'match\n' > "$td/f.c"
+	# --exclude should be skipped in the file pass; only .c file should be processed
+	"$PROG" match replaced -i --exclude '*.txt' "$td/f.txt" "$td/f.c" 2>/dev/null
+	ct=$(cat "$td/f.txt"); cc=$(cat "$td/f.c")
+	[ "$ct" = 'match' ] && [ "$cc" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: txt [$ct] c [$cc]" > "$td/result"
+}
+
+t_escape_ff() {
+	td=$1; out=$(printf 'a\fb\n' | "$PROG" '\f' 'FF' 2>/dev/null)
+	[ "$out" = 'aFFb' ] && echo PASS > "$td/result" || echo "FAIL: expected [aFFb] got [$out]" > "$td/result"
+}
+
+t_escape_cr() {
+	td=$1; out=$(printf 'a\rb\n' | "$PROG" '\r' 'CR' 2>/dev/null)
+	[ "$out" = 'aCRb' ] && echo PASS > "$td/result" || echo "FAIL: expected [aCRb] got [$out]" > "$td/result"
+}
+
+t_escape_vt() {
+	td=$1; out=$(printf 'a\vb\n' | "$PROG" '\v' 'VT' 2>/dev/null)
+	[ "$out" = 'aVTb' ] && echo PASS > "$td/result" || echo "FAIL: expected [aVTb] got [$out]" > "$td/result"
+}
+
+t_escape_bs() {
+	td=$1; out=$(printf 'a\bb\n' | "$PROG" '\b' 'BS' 2>/dev/null)
+	[ "$out" = 'aBSb' ] && echo PASS > "$td/result" || echo "FAIL: expected [aBSb] got [$out]" > "$td/result"
+}
+
+t_no_args() {
+	td=$1; rc=0; "$PROG" > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: no args should exit non-zero" > "$td/result"
+}
+
+t_missing_replace() {
+	td=$1; rc=0; "$PROG" find > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: missing REPLACE should exit non-zero" > "$td/result"
+}
+
+t_recursive_exclude() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'keep\n' > "$td/sub/k.txt"; printf 'skip\n' > "$td/sub/skip.me"
+	"$PROG" keep kept -i -r --exclude '*.me' "$td/sub" 2>/dev/null
+	tk=$(cat "$td/sub/k.txt"); ts=$(cat "$td/sub/skip.me")
+	[ "$tk" = 'kept' ] && [ "$ts" = 'skip' ] && echo PASS > "$td/result" || echo "FAIL: keep [$tk] skip [$ts]" > "$td/result"
+}
+
+t_include_exclude_combined() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'ccc\n' > "$td/sub/c.c"
+	"$PROG" aaa REPLACED -i -r --include '*.txt' --exclude 'b*' "$td/sub" 2>/dev/null
+	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.txt"); tc=$(cat "$td/sub/c.c")
+	[ "$ta" = 'REPLACED' ] && [ "$tb" = 'bbb' ] && [ "$tc" = 'ccc' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
+}
+
+t_exclude_on_cli_files() {
+	td=$1; printf 'aaa\n' > "$td/a.txt"; printf 'aaa\n' > "$td/b.c"
+	"$PROG" aaa REPLACED -i --exclude '*.txt' "$td/a.txt" "$td/b.c" 2>/dev/null
+	ta=$(cat "$td/a.txt"); tb=$(cat "$td/b.c")
+	# a.txt excluded by --exclude, b.c should be processed
+	[ "$ta" = 'aaa' ] && [ "$tb" = 'REPLACED' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb]" > "$td/result"
+}
+
+t_multi_directory_recursive() {
+	td=$1; mkdir -p "$td/d1" "$td/d2"
+	printf 'hello\n' > "$td/d1/a.txt"; printf 'world\n' > "$td/d2/b.txt"
+	"$PROG" hello hi -i -r "$td/d1" "$td/d2" 2>/dev/null
+	ca=$(cat "$td/d1/a.txt"); cb=$(cat "$td/d2/b.txt")
+	[ "$ca" = 'hi' ] && [ "$cb" = 'world' ] && echo PASS > "$td/result" || echo "FAIL: d1 [$ca] d2 [$cb]" > "$td/result"
+}
+
+t_regex_basic_no_backref() {
+	td=$1; out=$(printf 'abc123def\n' | "$PROG" '[a-z]*[0-9][0-9]*[a-z]*' 'NUM' -R 2>/dev/null)
+	[ "$out" = 'NUM' ] && echo PASS > "$td/result" || echo "FAIL: expected [NUM] got [$out]" > "$td/result"
+}
+
+t_include_without_arg() {
+	td=$1; rc=0; "$PROG" foo bar --include > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: --include without arg should exit non-zero" > "$td/result"
+}
+
+t_exclude_without_arg() {
+	td=$1; rc=0; "$PROG" foo bar --exclude > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: --exclude without arg should exit non-zero" > "$td/result"
+}
+
+t_inplace_backup_collision() {
+	td=$1; printf 'original\n' > "$td/f"; printf 'collision\n' > "$td/f.bak"
+	rc=0; "$PROG" original replaced -i.bak "$td/f" > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: should error when backup file exists (rc=$rc)" > "$td/result"
+}
+
+t_z_with_regex() {
+	td=$1; out=$(printf 'hello\nworld\n' | "$PROG" 'hello$' 'HI' -Rz 2>/dev/null)
+	# With -z (no REG_NEWLINE), $ matches end of string only; hello not at end → no match
+	case "$out" in
+		"$(printf 'hello\nworld')"|"$(printf 'hello\nworld\n')") echo PASS > "$td/result" ;;
+		*) echo "FAIL: z+regex expected unchanged got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result" ;;
+	esac
+}
+
+t_Z_with_regex() {
+	td=$1; out=$(printf 'hello\nworld\n' | "$PROG" 'hello$' 'HI' -RZ 2>/dev/null)
+	# With -Z (REG_NEWLINE, default), $ matches before newline → hello replaced with HI
+	case "$out" in
+		"$(printf 'HI\nworld')"|"$(printf 'HI\nworld\n')") echo PASS > "$td/result" ;;
+		*) echo "FAIL: Z+regex expected HI.world got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result" ;;
+	esac
+}
+
 printf '\n=== find-and-replace tests ===\n\n'
 
 # List all test functions here
@@ -246,6 +401,30 @@ t_octal_escape
 t_newlines_in_replace
 t_backreference
 t_long_line
+t_explicit_F
+t_Z_flag
+t_z_flag
+t_global_then_G
+t_G_then_global
+t_inplace_no_change
+t_combined_i_r
+t_end_of_options
+t_escape_ff
+t_escape_cr
+t_escape_vt
+t_escape_bs
+t_no_args
+t_missing_replace
+t_recursive_exclude
+t_include_exclude_combined
+t_exclude_on_cli_files
+t_multi_directory_recursive
+t_regex_basic_no_backref
+t_include_without_arg
+t_exclude_without_arg
+t_inplace_backup_collision
+t_z_with_regex
+t_Z_with_regex
 "
 
 # Launch all tests in parallel

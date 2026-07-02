@@ -1,0 +1,52 @@
+#!/bin/sh
+# Build with coverage support, run all tests, and report line/branch coverage.
+
+set -e
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+
+# Clean any previous coverage artifacts
+rm -f *.gcda *.gcno *.gcov *.gcovr
+
+# Build with coverage flags
+echo "=== Building with coverage support ==="
+COVERAGE=1 ./compile
+
+# Run all tests (use test runner which runs in parallel)
+echo "=== Running all tests ==="
+./test 2>/dev/null || true
+
+# Run edge-cases and complex separately (test already includes them via background)
+# but ensure edge-cases completed too
+wait
+
+# Generate gcov report
+echo ""
+echo "=== gcov line coverage ==="
+gcov find-and-replace.c 2>/dev/null
+
+echo ""
+echo "=== Coverage Summary ==="
+# Parse gcov output for line/branch coverage percentages
+if [ -f find-and-replace.c.gcov ]; then
+    total=$(grep -c '.*' find-and-replace.c.gcov)
+    executed=$(grep -c '^        [0-9]' find-and-replace.c.gcov)
+    not_executed=$(grep -c '^    #####' find-and-replace.c.gcov)
+    pct=$(awk "BEGIN {printf \"%.1f\", 100 * $executed / $total}")
+    pct_nonex=$(awk "BEGIN {printf \"%.1f\", 100 * $not_executed / $total}")
+    echo "  Total source lines : $total"
+    echo "  Executed lines     : $executed"
+    echo "  Not executed       : $not_executed"
+    echo "  Line coverage      : ${pct}%"
+    echo ""
+    echo "=== Lines NOT covered ==="
+    grep '^    #####' find-and-replace.c.gcov | head -40
+else
+    echo "  No gcov output found."
+fi
+
+# Rebuild production binary
+echo ""
+echo "=== Rebuilding production binary ==="
+./compile

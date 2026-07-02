@@ -1,12 +1,14 @@
 #!/bin/sh
 
 PROG=find-and-replace
+DIR="$(cd "$(dirname "$0")" && pwd)"
 CFLAGS='-O2'
-LFLAGS="$LD_LIBRARY_PATH -ljstr"
+LFLAGS=""
 CC=$(readlink "$(command -v cc)")
-if [ "$CC" = 'gcc' ] || [ "$CC" = 'clang' ]; then
-	CFLAGS="$CFLAGS -march=native -Wall -Wextra -Wpedantic"
+if [ "$COVERAGE" = "1" ]; then
+	CFLAGS="-O0 --coverage"
+	LFLAGS="--coverage"
 fi
 #shellcheck disable=SC2086
-cc $PROG.c -o $PROG $CFLAGS $LFLAGS || exit
-echo "cc $PROG.c -o $PROG $CFLAGS $LFLAGS"
+cc "$DIR/$PROG.c" -o "$DIR/$PROG" $CFLAGS -I"$DIR/lib/jstring/build/include" -L"$DIR/lib/jstring/build/lib" -ljstr $LFLAGS || exit
+echo "cc $DIR/$PROG.c -o $DIR/$PROG $CFLAGS -I$DIR/lib/jstring/build/include -L$DIR/lib/jstring/build/lib -ljstr $LFLAGS"

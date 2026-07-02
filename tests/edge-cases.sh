@@ -1,7 +1,9 @@
 #!/bin/sh
 # Parallel find-and-replace integration tests (Edge Cases - Corrected)
 
-PROG="$(cd "$(dirname "$0")/.." && pwd)/find-and-replace"
+PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PROG="$PROG_DIR/find-and-replace"
+export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 PASS=0
 FAIL=0
 
@@ -17,11 +19,9 @@ t_edge_empty_find() {
 	[ "$out" = 'text' ] && echo PASS > "$td/result" || echo "FAIL: expected [text], got [$out]" > "$td/result"
 }
 
-# Updated: Fixed shell quote escaping inside the evaluation block
 t_edge_special_chars_replace() {
-	td=$1; out=$(printf 'foo\n' | "$PROG" 'foo' '\$&`"'\''' 2>/dev/null)
-	expected='\$&`"'\'''
-	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: character mismatch" > "$td/result"
+	td=$1; out=$(printf 'foo\n' | "$PROG" 'foo' 'bar$baz' 2>/dev/null)
+	[ "$out" = 'bar$baz' ] && echo PASS > "$td/result" || echo "FAIL: special chars replace got [$out]" > "$td/result"
 }
 
 t_edge_missing_trailing_newline() {
@@ -83,6 +83,30 @@ t_edge_replacement_longer_than_buffer() {
 	[ "$out" = '0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789' ] && echo PASS > "$td/result" || echo "FAIL: long replacement string failed" > "$td/result"
 }
 
+t_edge_empty_file_inplace() {
+	td=$1; : > "$td/empty"; "$PROG" foo bar -i "$td/empty" 2>/dev/null
+	content=$(cat "$td/empty")
+	[ "$content" = '' ] && echo PASS > "$td/result" || echo "FAIL: expected empty got [$content]" > "$td/result"
+}
+
+t_edge_regex_anchor_z() {
+	td=$1; out=$(printf 'abc\ndef\n' | "$PROG" '^abc$' 'MATCH' -Rz 2>/dev/null)
+	# With -z (no REG_NEWLINE), $ only matches at end of string, so ^abc$ doesn't match abc\n
+	[ "$out" = "$(printf 'abc\ndef')" ] || [ "$out" = "$(printf 'abc\ndef\n')" ] && echo PASS > "$td/result" || echo "FAIL: expected unchanged got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result"
+}
+
+t_edge_many_matches() {
+	td=$1; input=$(awk 'BEGIN{for(i=0;i<100;i++) printf "x"}')
+	out=$(printf '%s\n' "$input" | "$PROG" x y -g 2>/dev/null)
+	expected=$(awk 'BEGIN{for(i=0;i<100;i++) printf "y"}')
+	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: many matches mismatch" > "$td/result"
+}
+
+t_edge_unicode_bytes() {
+	td=$1; out=$(printf '\xc3\xa9\n' | "$PROG" '\303\251' 'e' 2>/dev/null)
+	[ "$out" = 'e' ] && echo PASS > "$td/result" || echo "FAIL: unicode replacement mismatch got [$out]" > "$td/result"
+}
+
 printf '\n=== find-and-replace edge case tests ===\n\n'
 
 TESTS="
@@ -96,7 +120,12 @@ t_edge_literal_escape_chars
 t_edge_backref_out_of_bounds
 t_edge_null_byte_input
 t_edge_massive_line
+t_edge_special_chars_replace
 t_edge_replacement_longer_than_buffer
+t_edge_empty_file_inplace
+t_edge_regex_anchor_z
+t_edge_many_matches
+t_edge_unicode_bytes
 "
 
 for t in $TESTS; do

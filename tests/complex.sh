@@ -1,7 +1,9 @@
 #!/bin/sh
 # Parallel find-and-replace integration tests (Complex Regex & Backreferences)
 
-PROG="$(cd "$(dirname "$0")/.." && pwd)/find-and-replace"
+PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PROG="$PROG_DIR/find-and-replace"
+export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 PASS=0
 FAIL=0
 FAIL_LIST=''
@@ -62,6 +64,26 @@ t_regex_url_protocol() {
 	[ "$out" = 'Proto:https Domain:example Ext:com' ] && echo PASS > "$td/result" || echo "FAIL: expected [Proto:https Domain:example Ext:com] got [$out]" > "$td/result"
 }
 
+t_regex_greedy() {
+	td=$1; out=$(printf 'a---b---c\n' | "$PROG" '.*' 'X' -REg 2>/dev/null)
+	[ "$out" = 'XX' ] && echo PASS > "$td/result" || echo "FAIL: greedy regex expected [XX] got [$out]" > "$td/result"
+}
+
+t_regex_repeat_quantifiers() {
+	td=$1; out=$(printf 'aaa123\n' | "$PROG" 'a{2,4}' 'A' -REg 2>/dev/null)
+	[ "$out" = 'A123' ] && echo PASS > "$td/result" || echo "FAIL: repeat quantifiers expected [A123] got [$out]" > "$td/result"
+}
+
+t_regex_multiple_groups() {
+	td=$1; out=$(printf 'a b c d e\n' | "$PROG" '([a-z]) ([a-z]) ([a-z]) ([a-z]) ([a-z])' '\\5 \\4 \\3 \\2 \\1' -RE 2>/dev/null)
+	[ "$out" = 'e d c b a' ] && echo PASS > "$td/result" || echo "FAIL: multiple groups expected [e d c b a] got [$out]" > "$td/result"
+}
+
+t_regex_escaped_dot() {
+	td=$1; out=$(printf 'file.txt\n' | "$PROG" 'file\\.txt' 'document.txt' -R 2>/dev/null)
+	[ "$out" = 'document.txt' ] && echo PASS > "$td/result" || echo "FAIL: escaped dot expected [document.txt] got [$out]" > "$td/result"
+}
+
 printf '\n=== find-and-replace complex regex tests ===\n\n'
 
 TESTS="
@@ -75,6 +97,10 @@ t_backref_max_digits
 t_regex_ip_address
 t_regex_negated_class
 t_regex_url_protocol
+t_regex_greedy
+t_regex_repeat_quantifiers
+t_regex_multiple_groups
+t_regex_escaped_dot
 "
 
 for t in $TESTS; do

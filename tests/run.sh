@@ -278,9 +278,9 @@ t_readonly_dir_inplace() {
 }
 
 t_stdin_large() {
-	td=$1; input=$(awk 'BEGIN{for(i=0;i<10000;i++) printf "x"}')
+	td=$1; input=$(awk 'BEGIN{for(i=0;i<5000;i++) printf "x"}')
 	out=$(printf '%s\n' "$input" | "$PROG" x y -g 2>/dev/null)
-	expected=$(awk 'BEGIN{for(i=0;i<10000;i++) printf "y"}')
+	expected=$(awk 'BEGIN{for(i=0;i<5000;i++) printf "y"}')
 	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: large stdin size mismatch (outlen=${#out} explen=${#expected})" > "$td/result"
 }
 

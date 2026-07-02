@@ -71,7 +71,7 @@ err:
 static int
 file_exists(const char *R fname)
 {
-	return access(fname, F_OK | W_OK | R_OK) == 0;
+	return access(fname, F_OK) == 0;
 }
 
 typedef enum {
@@ -123,19 +123,23 @@ process_buffer(const jstr_twoway_ty *R t,
 	char *bakp = NULL;
 	char bak[JSTR_IO_PATH_MAX];
 	if (G.regex_use) {
-		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
-		if (jstr_re_chk(changed.d)) {
-			jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(find_len == 0)) {
+			changed.zu = 0;
+		} else {
+			changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
+			if (jstr_re_chk(changed.d)) {
+				jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			}
+			changed.zu = (size_t)changed.d;
 		}
-		changed.zu = (size_t)changed.d;
 	} else {
 		changed.zu = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
 		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	/* Append newline if has space */
-	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity > buf->size + S_LEN("\n") + 1)
+	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity >= buf->size + S_LEN("\n") + 1)
 		buf->size = JSTR_PTR_DIFF(jstr_append_len_unsafe_p(buf->data, buf->size, "\n", 1), buf->data);
 	if (G.print_mode == PRINT_STDOUT) {
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
@@ -171,7 +175,6 @@ process_buffer(const jstr_twoway_ty *R t,
 				bakp = NULL;
 				jstr_errdie("Can't make a file (%s) to temporarily write replacements to.\n", bak);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
-				goto err;
 			}
 			if (jstr_chk(jstr_io_writefilefd_len_j(buf, fd_tmp))) {
 				jstr_errdie("Can't write replacements to temp file (%s).\n", bak);
@@ -181,13 +184,11 @@ process_buffer(const jstr_twoway_ty *R t,
 				fd_tmp = -1;
 				jstr_errdie("Can't close temp file (%s).\n", bak);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
-				goto err;
 			}
 			fd_tmp = -1;
 			if (jstr_unlikely(rename(bak, fname))) {
 				jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
-				goto err;
 			}
 			bakp = NULL;
 		}
@@ -213,7 +214,7 @@ process_file(const jstr_twoway_ty *R t,
              const size_t rplc_len)
 {
 	const size_t file_size = (size_t)st->st_size;
-	if (file_size < find_len)
+	if (!G.regex_use && file_size < find_len)
 		return JSTR_RET_SUCC;
 #if 0
 	const ft_ty ft = exttype(fname, fname_len);
@@ -277,7 +278,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 		if (G.regex_use) {
 			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
-				jstr_re_err(ret, &G.regex, "%s", "");
+				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 		} else {
@@ -386,6 +387,7 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
+	int end_of_flags = 0;
 	/* Parse all flags. */
 	for (unsigned int i = 3; ARG; ++i) {
 		if (*ARG == '-') {
@@ -412,6 +414,11 @@ main(int argc, char **argv)
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --exclude flag.\n");
 					m.exclude_glob = ARG;
+				} else if (ARG[2] == '\0') {
+					/* bare "--": stop flag parsing */
+					end_of_flags = 1;
+					ARG_NEXT();
+					break;
 				}
 				/* - flags */
 			} else {
@@ -453,10 +460,10 @@ use_regex_flag:
 					case 'z': /* -z */
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
-					default:
-						fprintf(stderr, "%s", usage);
-						exit(EXIT_FAILURE);
-						break;
+				default:
+					fprintf(stderr, "find-and-replace: invalid flag '-%c'. See usage below:\n\n%s", *argp, usage);
+					exit(EXIT_FAILURE);
+					break;
 					}
 				}
 exit_for:;
@@ -465,18 +472,20 @@ exit_for:;
 	}
 	/* Parse all files/directories. */
 	for (unsigned int i = 3; ARG; ++i) {
-		if (*ARG != '-') {
+		if (ARG[0] == '-' && ARG[1] == '-' && ARG[2] == '\0') {
+			/* bare "--": end of options, skip it */
+			continue;
+		}
+		if (end_of_flags || *ARG != '-') {
 			G.have_files = 1;
 			ret = xstat(ARG, &st);
 			DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
 			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
-			if (ret != JSTR_RET_SUCC)
-				continue;
 			if (IS_REG(st.st_mode)) {
 				const size_t fname_len = strlen(ARG);
 				if (!m.exclude_glob) {
 process:
-					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "Can't process file (%s).\n", ARG);
+					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
 				} else {
 					const char *fname = jstr_memrchr(ARG, SEP, fname_len);
 					/* Get the filename. */
@@ -490,7 +499,7 @@ process:
 					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
 				}
 			} else {
-				fprintf(stderr, "find-and-replace: stat() failed on %s.\n", ARG);
+				fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", ARG);
 				exit(EXIT_FAILURE);
 			}
 		} else if (ARG[1] == '-' && (!strcmp(ARG + 2, "include") || !strcmp(ARG + 2, "exclude"))) {
@@ -508,6 +517,7 @@ process:
 		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 	}
 #if DO_FREE /* We don't need to free since we're exiting. */
+	jstr_re_free(&G.regex);
 	jstr_free_j(&buf);
 #endif
 	return EXIT_SUCCESS;

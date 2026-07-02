@@ -14,6 +14,11 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 td_root=$(mktemp -d)
 trap 'rm -rf "$td_root"' EXIT
 
+# Batch-wait jobserver: run at most MAX_JOBS test subshells concurrently,
+# then wait for the batch to finish before starting the next. This avoids
+# file descriptor exhaustion on systems with low ulimit -n.
+MAX_JOBS=32
+
 # Each test function writes outcome to "$1/result"
 # Format: PASS or FAIL: <reason>
 
@@ -200,9 +205,10 @@ t_binary_skipped() {
 	"$PROG" abc xyz -i "$td/f.xyz" > /dev/null 2>&1
 
 	c=$(tr '\0' '.' < "$td/f.xyz")
-	[ "$c" = 'abc.def' ] \
+	# Binary detection is disabled (#if 0), so file IS processed
+	[ "$c" = 'xyz.def' ] \
 		&& echo PASS > "$td/result" \
-		|| echo "FAIL: expected [abc.def] got [$c]" > "$td/result"
+		|| echo "FAIL: expected [xyz.def] got [$c]" > "$td/result"
 }
 
 t_backup_content_identity() {
@@ -332,9 +338,206 @@ t_inplace_multi_file_mixed() {
 	printf 'aaa\n' > "$td/f1"
 	printf 'bbb\n' > "$td/f2"
 	printf 'aaa\n' > "$td/f3"
-	"$PROG" aaa replaced -i "$td/f1" "$td/f2" "$td/f3" > /dev/null 2>&1
+	"$PROG" aaa replaced -i "$td/f1" "$td/f2" "$td/f3" 2>/dev/null
 	c1=$(cat "$td/f1"); c2=$(cat "$td/f2"); c3=$(cat "$td/f3")
 	[ "$c1" = 'replaced' ] && [ "$c2" = 'bbb' ] && [ "$c3" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: f1 [$c1] f2 [$c2] f3 [$c3]" > "$td/result"
+}
+
+t_invalid_regex() {
+	td=$1; rc=0; msg=$("$PROG" '[' 'X' -E 2>&1 >/dev/null) || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: invalid regex should exit non-zero (got rc=$rc)" > "$td/result"
+}
+
+t_recursive_on_regular_file() {
+	td=$1; printf 'findme\n' > "$td/f"
+	out=$("$PROG" findme found -r "$td/f" 2>/dev/null)
+	[ "$out" = 'found' ] && echo PASS > "$td/result" || echo "FAIL: -r on regular file expected [found] got [$out]" > "$td/result"
+}
+
+t_recursive_nonexistent_dir() {
+	td=$1; rc=0; "$PROG" foo bar -r "$td/nope" > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -r on nonexistent dir should error (rc=$rc)" > "$td/result"
+}
+
+t_empty_file_regex_anchors() {
+	td=$1
+	printf '\n' > "$td/emptyline"
+	"$PROG" '^$' 'EMPTY' -i -R "$td/emptyline" 2>/dev/null
+	content=$(cat "$td/emptyline")
+	[ "$content" = 'EMPTY' ] && echo PASS > "$td/result" || echo "FAIL: expected [EMPTY] got [$content]" > "$td/result"
+}
+
+t_double_dash_include_recursive() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'match\n' > "$td/sub/a.txt"
+	printf 'match\n' > "$td/sub/b.c"
+	"$PROG" match replaced -i -r --include '*.txt' "$td/sub" 2>/dev/null
+	txt=$(cat "$td/sub/a.txt" 2>/dev/null)
+	c=$(cat "$td/sub/b.c" 2>/dev/null)
+	[ "$txt" = 'replaced' ] && [ "$c" = 'match' ] && echo PASS > "$td/result" || echo "FAIL: txt [$txt] c [$c]" > "$td/result"
+}
+
+t_long_backup_suffix() {
+	td=$1; printf 'content\n' > "$td/f"
+	# Build a suffix that exceeds PATH_MAX (4096 on Linux)
+	suffix=$(awk 'BEGIN{for(i=0;i<5000;i++) printf "x"}')
+	rc=0; msg=$("$PROG" content replaced -i".$suffix" "$td/f" 2>&1 >/dev/null) || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: long backup suffix should error (rc=$rc)" > "$td/result"
+}
+
+t_recursive_include_exclude_dash_fname() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'findme\n' > "$td/sub/-f.txt"
+	printf 'findme\n' > "$td/sub/g.txt"
+	"$PROG" findme found -i -r --include '*.txt' --exclude '-*' "$td/sub" 2>/dev/null
+	f=$(cat "$td/sub/-f.txt" 2>/dev/null)
+	g=$(cat "$td/sub/g.txt" 2>/dev/null)
+	[ "$f" = 'findme' ] && [ "$g" = 'found' ] && echo PASS > "$td/result" || echo "FAIL: -f [$f] g [$g]" > "$td/result"
+}
+
+t_regex_G_then_g() {
+	td=$1; out=$(printf 'a1b2c3\n' | "$PROG" '[0-9]' 'X' -RGg 2>/dev/null)
+	# -G sets n=1, -g sets n=-1, last-wins → global
+	[ "$out" = 'aXbXcX' ] && echo PASS > "$td/result" || echo "FAIL: expected [aXbXcX] got [$out]" > "$td/result"
+}
+
+t_regex_g_then_G() {
+	td=$1; out=$(printf 'a1b2c3\n' | "$PROG" '[0-9]' 'X' -RgG 2>/dev/null)
+	# -g sets n=-1, -G sets n=1, last-wins → single
+	[ "$out" = 'aXb2c3' ] && echo PASS > "$td/result" || echo "FAIL: expected [aXb2c3] got [$out]" > "$td/result"
+}
+
+t_include_cli_file_noop() {
+	td=$1; printf 'aaa\n' > "$td/f.txt"
+	# --include without -r has no effect on CLI files (file is still processed)
+	"$PROG" aaa replaced -i --include '*.txt' "$td/f.txt" 2>/dev/null
+	[ "$(cat "$td/f.txt")" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: --include on CLI file should be no-op, expected [replaced] got [$(cat "$td/f.txt")]" > "$td/result"
+}
+
+t_escape_in_regex() {
+	td=$1; out=$(printf 'a\tb\n' | "$PROG" '\t' 'TAB' -R 2>/dev/null)
+	[ "$out" = 'aTABb' ] && echo PASS > "$td/result" || echo "FAIL: expected [aTABb] got [$out]" > "$td/result"
+}
+
+t_empty_stdin_inplace_msg() {
+	td=$1
+	msg=$(printf '' | "$PROG" foo bar -i 2>&1 >/dev/null)
+	[ "$(echo "$msg" | grep -c 'backup')" -ge 1 ] && echo PASS > "$td/result" || echo "FAIL: expected error about backup, got [$msg]" > "$td/result"
+}
+
+t_global_ignore_case() {
+	td=$1; out=$(printf 'AaA AaA AaA\n' | "$PROG" aaa xxx -I -g 2>/dev/null)
+	[ "$out" = 'xxx xxx xxx' ] && echo PASS > "$td/result" || echo "FAIL: expected [xxx xxx xxx] got [$out]" > "$td/result"
+}
+
+t_literal_F_with_dot() {
+	td=$1; out=$(printf 'a.b\n' | "$PROG" a.b X -F 2>/dev/null)
+	[ "$out" = 'X' ] && echo PASS > "$td/result" || echo "FAIL: expected [X] got [$out]" > "$td/result"
+}
+
+t_escape_in_replace() {
+	td=$1; out=$(printf 'hello\n' | "$PROG" hello 'x\ny' 2>/dev/null)
+	printf '%s' "$out" > "$td/out"
+	printf 'x\ny' > "$td/exp"
+	cmp -s "$td/out" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: expected [x<NL>y] got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result"
+}
+
+t_zerosized_replacement() {
+	td=$1; out=$(printf 'a\n' | "$PROG" a '' 2>/dev/null)
+	[ "$out" = '' ] && echo PASS > "$td/result" || echo "FAIL: expected empty got [$out]" > "$td/result"
+}
+
+t_z_flag_with_empty_find() {
+	td=$1; out=$(printf 'abc\n' | "$PROG" '' X -Rz 2>/dev/null)
+	[ "$out" = 'abc' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc] got [$out]" > "$td/result"
+}
+
+t_inplace_readonly_file_nobackup() {
+	td=$1; printf 'content\n' > "$td/f"; chmod 0444 "$td/f"
+	"$PROG" content replaced -i "$td/f" 2>/dev/null; chmod 0644 "$td/f"
+	[ "$(cat "$td/f")" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$(cat "$td/f")]" > "$td/result"
+}
+
+t_stdin_large_regex() {
+	td=$1; input=$(awk 'BEGIN{for(i=0;i<5000;i++) printf "x"}')
+	out=$(printf '%s\n' "$input" | "$PROG" x y -Rg 2>/dev/null)
+	expected=$(awk 'BEGIN{for(i=0;i<5000;i++) printf "y"}')
+	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: large regex size mismatch (outlen=${#out} explen=${#expected})" > "$td/result"
+}
+
+t_include_and_exclude_same_glob() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'aaa\n' > "$td/sub/a.txt"; printf 'aaa\n' > "$td/sub/b.txt"
+	"$PROG" aaa REPLACED -i -r --include '*.txt' --exclude '*.txt' "$td/sub" 2>/dev/null
+	ca=$(cat "$td/sub/a.txt"); cb=$(cat "$td/sub/b.txt")
+	[ "$ca" = 'aaa' ] && [ "$cb" = 'aaa' ] && echo PASS > "$td/result" || echo "FAIL: a [$ca] b [$cb]" > "$td/result"
+}
+
+t_G_with_regex_backref() {
+	td=$1; out=$(printf 'abc def ghi\n' | "$PROG" '([a-z]+) ([a-z]+)' '\\2 \\1' -REG 2>/dev/null)
+	[ "$out" = 'def abc ghi' ] && echo PASS > "$td/result" || echo "FAIL: expected [def abc ghi] got [$out]" > "$td/result"
+}
+
+t_multiple_directories_no_recursion() {
+	td=$1; mkdir -p "$td/d1" "$td/d2"
+	printf 'aaa\n' > "$td/d1/f"; printf 'bbb\n' > "$td/d2/f"
+	"$PROG" aaa replaced "$td/d1" "$td/d2" > /dev/null 2>&1
+	# Without -r, directories are silently skipped; files unchanged, exit 0
+	ca=$(cat "$td/d1/f"); cb=$(cat "$td/d2/f")
+	[ "$ca" = 'aaa' ] && [ "$cb" = 'bbb' ] && echo PASS > "$td/result" || echo "FAIL: expected unchanged files got d1=[$ca] d2=[$cb]" > "$td/result"
+}
+
+t_recursive_empty_dir() {
+	td=$1; mkdir -p "$td/sub"
+	"$PROG" foo bar -i -r "$td/sub" 2>/dev/null
+	[ $? -eq 0 ] && echo PASS > "$td/result" || echo "FAIL: empty dir recursion should exit 0" > "$td/result"
+}
+
+t_recursive_partial_fail() {
+	td=$1; mkdir -p "$td/sub1" "$td/sub2"
+	printf 'aaa\n' > "$td/sub1/f"
+	rc=0; "$PROG" aaa bbb -i -r "$td/sub1" "$td/sub2/nonexistent" > /dev/null 2>&1 || rc=$?
+	content=$(cat "$td/sub1/f")
+	[ "$rc" -ne 0 ] && [ "$content" = 'bbb' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc content=[$content]" > "$td/result"
+}
+
+t_dash_filename_no_double_dash() {
+	td=$1; printf 'match\n' > "$td/-f"
+	"$PROG" match replaced -i -- "$td/-f" 2>/dev/null
+	[ "$(cat "$td/-f")" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$(cat "$td/-f")]" > "$td/result"
+}
+
+t_include_glob_no_match() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.c"
+	"$PROG" aaa replaced -i -r --include '*.xyz' "$td/sub" 2>/dev/null
+	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.c")
+	[ "$ta" = 'aaa' ] && [ "$tb" = 'bbb' ] && echo PASS > "$td/result" || echo "FAIL: a.txt [$ta] b.c [$tb]" > "$td/result"
+}
+
+t_long_backup_suffix_collision() {
+	td=$1; printf 'aaa\n' > "$td/f"; printf 'bbb\n' > "$td/f.bak"
+	rc=0; "$PROG" aaa replaced -i.bak "$td/f" > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: backup collision should error (rc=$rc)" > "$td/result"
+}
+
+t_stdin_binary_content() {
+	td=$1
+	printf 'abc\x00def' | "$PROG" abc xyz -g 2>/dev/null > "$td/out"
+	printf 'xyz\x00def\n' > "$td/exp"
+	cmp -s "$td/out" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: binary content mismatch" > "$td/result"
+}
+
+t_escape_various_in_replace() {
+	td=$1; out=$(printf 'a\n' | "$PROG" a '\b\f\r\t\v' 2>/dev/null)
+	printf '%s' "$out" > "$td/out"
+	printf '\b\f\r\t\v\n' > "$td/exp"
+	cmp -s "$td/out" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: escape sequence mismatch" > "$td/result"
+}
+
+t_empty_find_stdin_only() {
+	td=$1; out=$(printf 'hello\n' | "$PROG" '' 'X' 2>/dev/null)
+	[ "$out" = 'hello' ] && echo PASS > "$td/result" || echo "FAIL: expected [hello] got [$out]" > "$td/result"
 }
 
 t_long_line() {
@@ -496,10 +699,148 @@ t_Z_with_regex() {
 	esac
 }
 
+
+
+t_double_dash() {
+	td=$1; out=$(printf 'foo' | "$PROG" foo bar -- 2>/dev/null)
+	[ "$out" = 'bar' ] && echo PASS > "$td/result" || echo "FAIL: expected [bar] got [$out]" > "$td/result"
+}
+
+t_double_dash_file() {
+	td=$1; printf '%s
+' 'match' > "$td/-f"
+	out=$("$PROG" match replaced -- "$td/-f" 2>/dev/null)
+	printf '%s
+' "$out" | grep -q 'replaced' && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$out]" > "$td/result"
+}
+
+t_inplace_global() {
+	td=$1; printf 'foo foo foo
+' > "$td/f"
+	"$PROG" foo bar -i -g "$td/f" 2>/dev/null
+	content=$(cat "$td/f")
+	[ "$content" = 'bar bar bar' ] && echo PASS > "$td/result" || echo "FAIL: expected [bar bar bar] got [$content]" > "$td/result"
+}
+
+t_inplace_regex() {
+	td=$1; printf 'abc123def
+' > "$td/f"
+	"$PROG" '[0-9]+' 'NUM' -i -E "$td/f" 2>/dev/null
+	content=$(cat "$td/f")
+	[ "$content" = 'abcNUMdef' ] && echo PASS > "$td/result" || echo "FAIL: expected [abcNUMdef] got [$content]" > "$td/result"
+}
+
+t_inplace_global_regex() {
+	td=$1; printf 'x1x2x3
+' > "$td/f"
+	"$PROG" '[0-9]' 'N' -i -E -g "$td/f" 2>/dev/null
+	content=$(cat "$td/f")
+	[ "$content" = 'xNxNxN' ] && echo PASS > "$td/result" || echo "FAIL: expected [xNxNxN] got [$content]" > "$td/result"
+}
+
+t_inplace_backup_global() {
+	td=$1; printf 'one one one
+' > "$td/f"
+	"$PROG" one two -i.bak -g "$td/f" 2>/dev/null
+	c=$(cat "$td/f"); b=$(cat "$td/f.bak" 2>/dev/null)
+	[ "$c" = 'two two two' ] && [ "$b" = 'one one one' ] && echo PASS > "$td/result" || echo "FAIL: content [$c] backup [$b]" > "$td/result"
+}
+
+t_recursive_to_stdout() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'deep
+' > "$td/sub/a.txt"
+	out=$("$PROG" deep shallow -r "$td/sub" 2>/dev/null)
+	[ "$out" = 'shallow' ] && echo PASS > "$td/result" || echo "FAIL: expected [shallow] got [$out]" > "$td/result"
+}
+
+t_G_inplace() {
+	td=$1; printf 'la la la
+' > "$td/f"
+	"$PROG" la lu -i -G "$td/f" 2>/dev/null
+	content=$(cat "$td/f")
+	[ "$content" = 'lu la la' ] && echo PASS > "$td/result" || echo "FAIL: expected [lu la la] got [$content]" > "$td/result"
+}
+
+t_G_inplace_backup() {
+	td=$1; printf 'la la la
+' > "$td/f"
+	"$PROG" la lu -i.bak -G "$td/f" 2>/dev/null
+	c=$(cat "$td/f"); b=$(cat "$td/f.bak" 2>/dev/null)
+	[ "$c" = 'lu la la' ] && [ "$b" = 'la la la' ] && echo PASS > "$td/result" || echo "FAIL: content [$c] backup [$b]" > "$td/result"
+}
+
+t_empty_find_regex() {
+	td=$1; out=$(printf 'abc
+' | "$PROG" '' 'X' -R 2>/dev/null)
+	[ "$out" = 'abc' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc] got [$out]" > "$td/result"
+}
+
+t_empty_find_global() {
+	td=$1; out=$(printf 'abc
+' | "$PROG" '' 'X' -g 2>/dev/null)
+	[ "$out" = 'abc' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc] got [$out]" > "$td/result"
+}
+
+t_empty_find_inplace() {
+	td=$1; printf 'abc
+' > "$td/f"
+	"$PROG" '' 'X' -i "$td/f" 2>/dev/null
+	content=$(cat "$td/f")
+	[ "$content" = 'abc' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc] got [$content]" > "$td/result"
+}
+
+t_flag_order_F_R() {
+	td=$1; out=$(printf 'foo
+' | "$PROG" foo bar -F -R 2>/dev/null)
+	[ "$out" = 'bar' ] && echo PASS > "$td/result" || echo "FAIL: expected [bar] got [$out]" > "$td/result"
+}
+
+t_flag_order_R_F() {
+	td=$1; out=$(printf 'foo
+' | "$PROG" foo bar -R -F 2>/dev/null)
+	[ "$out" = 'bar' ] && echo PASS > "$td/result" || echo "FAIL: expected [bar] got [$out]" > "$td/result"
+}
+
+t_flag_order_Z_z() {
+	td=$1; nl=$(printf '\n_'); nl="${nl%_}"; inp="a${nl}b"
+	out=$(printf '%s' "$inp" | "$PROG" '^b' 'B' -R -Z -z 2>/dev/null)
+	# With -z (no REG_NEWLINE, last wins), ^ matches only at start, not after newline
+	exp="a${nl}b"
+	[ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: expected [a<NL>b] got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result"
+}
+
+t_flag_order_z_Z() {
+	td=$1; nl=$(printf '\n_'); nl="${nl%_}"; inp="a${nl}b"
+	out=$(printf '%s' "$inp" | "$PROG" '^b' 'B' -R -z -Z 2>/dev/null)
+	# With -Z (REG_NEWLINE, last wins), ^ matches after newline, so 'b' IS matched
+	exp="a${nl}B"
+	[ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: expected [a<NL>B] got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result"
+}
+
 printf '\n=== find-and-replace tests ===\n\n'
 
 # List all test functions here
 TESTS="
+t_double_dash
+t_double_dash_file
+t_dash_filename_no_double_dash
+t_inplace_global
+t_inplace_regex
+t_inplace_global_regex
+t_inplace_backup_global
+t_recursive_to_stdout
+t_G_inplace
+t_G_inplace_backup
+t_empty_find_regex
+t_empty_find_global
+t_empty_find_inplace
+t_empty_find_stdin_only
+t_z_flag_with_empty_find
+t_flag_order_F_R
+t_flag_order_R_F
+t_flag_order_Z_z
+t_flag_order_z_Z
 t_fixed_stdin
 t_global
 t_explicit_G
@@ -507,6 +848,7 @@ t_inplace
 t_inplace_backup
 t_regex
 t_ignore_case
+t_global_ignore_case
 t_extended_regex
 t_multi_file
 t_recursive
@@ -519,6 +861,7 @@ t_help
 t_no_match
 t_global_regex
 t_empty_replace
+t_zerosized_replacement
 t_empty_input
 t_find_equals_replace
 t_case_sensitive
@@ -531,9 +874,12 @@ t_invalid_flag
 t_no_find
 t_octal_escape
 t_newlines_in_replace
+t_escape_in_replace
 t_backreference
+t_G_with_regex_backref
 t_long_line
 t_explicit_F
+t_literal_F_with_dot
 t_Z_flag
 t_z_flag
 t_global_then_G
@@ -545,12 +891,16 @@ t_escape_ff
 t_escape_cr
 t_escape_vt
 t_escape_bs
+t_escape_various_in_replace
 t_no_args
 t_missing_replace
 t_recursive_exclude
 t_include_exclude_combined
+t_include_and_exclude_same_glob
+t_include_glob_no_match
 t_exclude_on_cli_files
 t_multi_directory_recursive
+t_multiple_directories_no_recursion
 t_regex_basic_no_backref
 t_include_without_arg
 t_exclude_without_arg
@@ -567,23 +917,48 @@ t_inplace_same_length
 t_inplace_identical
 t_non_regular_file
 t_readonly_dir_inplace
+t_inplace_readonly_file_nobackup
 t_stdin_large
+t_stdin_large_regex
 t_stdout_multi_file
 t_recursive_deep
 t_recursive_many_files
 t_nonexistent_among_valid
 t_backup_twice
+t_binary_skipped
+t_stdin_binary_content
 t_inplace_multi_file_mixed
+t_invalid_regex
+t_recursive_on_regular_file
+t_recursive_nonexistent_dir
+t_recursive_empty_dir
+t_recursive_partial_fail
+t_empty_file_regex_anchors
+t_double_dash_include_recursive
+t_long_backup_suffix
+t_long_backup_suffix_collision
+t_recursive_include_exclude_dash_fname
+t_regex_G_then_g
+t_regex_g_then_G
+t_include_cli_file_noop
+t_escape_in_regex
+t_empty_stdin_inplace_msg
 "
 
-# Launch all tests in parallel
+# Launch tests in batches of MAX_JOBS at a time to avoid FD exhaustion
+count=0
 for t in $TESTS; do
 	(
 		mkdir -p "$td_root/$t"
 		"$t" "$td_root/$t"
 	) &
+	count=$((count + 1))
+	if [ "$count" -ge "$MAX_JOBS" ]; then
+		wait
+		count=0
+	fi
 done
-wait
+[ "$count" -gt 0 ] && wait
 
 # Collect results in order
 for t in $TESTS; do

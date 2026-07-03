@@ -388,9 +388,10 @@ main(int argc, char **argv)
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
 	int end_of_flags = 0;
-	/* Parse all flags. */
-	for (unsigned int i = 3; ARG; ++i) {
-		if (*ARG == '-') {
+	unsigned int i;
+	/* Process all arguments: flags then files, in order. */
+	for (i = 3; ARG; ++i) {
+		if (*ARG == '-' && !end_of_flags) {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
@@ -400,110 +401,105 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.print_mode = PRINT_FILE_BACKUP;
 				}
-				/* -- flag */
-			} else if (ARG[1] == '-') {
+				continue;
+			}
+			/* -- flag */
+			if (ARG[1] == '-') {
 				/* --include */
 				if (!strcmp(ARG + 2, "include")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --include flag.\n");
 					m.include_glob = ARG;
-					/* --exclude */
-				} else if (!strcmp(ARG + 2, "exclude")) {
+					continue;
+				}
+				/* --exclude */
+				if (!strcmp(ARG + 2, "exclude")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --exclude flag.\n");
 					m.exclude_glob = ARG;
-				} else if (ARG[2] == '\0') {
-					/* bare "--": stop flag parsing */
-					end_of_flags = 1;
-					ARG_NEXT();
-					break;
+					continue;
 				}
-				/* - flags */
-			} else {
+				/* bare "--": stop flag parsing */
+				if (ARG[2] == '\0') {
+					end_of_flags = 1;
+					continue;
+				}
+				continue;
+			}
+			/* Single-dash flags, allow combinations */
+			{
 				const char *argp = ARG + 1;
-				/* Allow flag combinations. */
 				for (;; ++argp) {
 					switch (*argp) {
 					case '\0':
-						goto exit_for;
-					case 'E': /* -E */
+						goto done_single;
+					case 'E':
 						G.cflags |= JSTR_RE_CF_EXTENDED;
 						goto use_regex_flag;
-					case 'F': /* -F */
+					case 'F':
 						G.regex_use = 0;
 						break;
-					case 'G': /* -G */
+					case 'G':
 						G.n = 1;
 						break;
-					case 'I': /* -I */
+					case 'I':
 						G.cflags |= JSTR_RE_CF_ICASE;
 						goto use_regex_flag;
-					case 'R': /* -R */
+					case 'R':
 use_regex_flag:
 						G.regex_use = 1;
 						break;
-					case 'Z': /* -Z */
+					case 'Z':
 						G.cflags |= JSTR_RE_CF_NEWLINE;
 						break;
-					case 'g': /* -g */
+					case 'g':
 						G.n = (size_t)-1;
 						break;
 					case 'h':
 						printf("%s", usage);
 						exit(EXIT_SUCCESS);
 						break;
-					case 'r': /* -r */
+					case 'r':
 						G.recursive = 1;
 						break;
-					case 'z': /* -z */
+					case 'z':
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
-				default:
-					fprintf(stderr, "find-and-replace: invalid flag '-%c'. See usage below:\n\n%s", *argp, usage);
-					exit(EXIT_FAILURE);
-					break;
+					default:
+						fprintf(stderr, "find-and-replace: invalid flag '-%c'. See usage below:\n\n%s", *argp, usage);
+						exit(EXIT_FAILURE);
+						break;
 					}
 				}
-exit_for:;
+done_single:;
 			}
-		}
-	}
-	/* Parse all files/directories. */
-	for (unsigned int i = 3; ARG; ++i) {
-		if (ARG[0] == '-' && ARG[1] == '-' && ARG[2] == '\0') {
-			/* bare "--": end of options, skip it */
 			continue;
 		}
-		if (end_of_flags || *ARG != '-') {
-			G.have_files = 1;
-			ret = xstat(ARG, &st);
-			DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
-			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
-			if (IS_REG(st.st_mode)) {
-				const size_t fname_len = strlen(ARG);
-				if (!m.exclude_glob) {
+		G.have_files = 1;
+		ret = xstat(ARG, &st);
+		DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
+		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
+		if (IS_REG(st.st_mode)) {
+			const size_t fname_len = strlen(ARG);
+			if (!m.exclude_glob) {
 process:
-					DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
-				} else {
-					const char *fname = jstr_memrchr(ARG, SEP, fname_len);
-					/* Get the filename. */
-					fname = (fname != NULL && *(fname + 1)) ? fname + 1 : ARG;
-					if (fnmatch(m.exclude_glob, fname, 0))
-						goto process;
-				}
-			} else if (IS_DIR(st.st_mode)) {
-				if (G.recursive) {
-					a.buf = &buf;
-					DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
-				}
+				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
 			} else {
-				fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", ARG);
-				exit(EXIT_FAILURE);
+				const char *fname = jstr_memrchr(ARG, SEP, fname_len);
+				fname = (fname != NULL && *(fname + 1)) ? fname + 1 : ARG;
+				if (fnmatch(m.exclude_glob, fname, 0))
+					goto process;
 			}
-		} else if (ARG[1] == '-' && (!strcmp(ARG + 2, "include") || !strcmp(ARG + 2, "exclude"))) {
-			ARG_NEXT();
+		} else if (IS_DIR(st.st_mode)) {
+			if (G.recursive) {
+				a.buf = &buf;
+				DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
+			}
+		} else {
+			fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", ARG);
+			exit(EXIT_FAILURE);
 		}
 	}
 	/* If no file was passed, read from stdin. */
@@ -513,7 +509,7 @@ process:
 		if (jstr_unlikely(G.recursive))
 			jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
 		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)), "%s", "Failed reading stdin.\n");
-		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "Failed compiling regex.\n");
+		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
 		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 	}
 #if DO_FREE /* We don't need to free since we're exiting. */

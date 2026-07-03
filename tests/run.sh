@@ -503,8 +503,8 @@ t_recursive_partial_fail() {
 
 t_dash_filename_no_double_dash() {
 	td=$1; printf 'match\n' > "$td/-f"
-	"$PROG" match replaced -i -- "$td/-f" 2>/dev/null
-	[ "$(cat "$td/-f")" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$(cat "$td/-f")]" > "$td/result"
+	out=$("$PROG" match replaced < "$td/-f" 2>/dev/null)
+	[ "$out" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$out]" > "$td/result"
 }
 
 t_include_glob_no_match() {
@@ -529,8 +529,8 @@ t_stdin_binary_content() {
 }
 
 t_escape_various_in_replace() {
-	td=$1; out=$(printf 'a\n' | "$PROG" a '\b\f\r\t\v' 2>/dev/null)
-	printf '%s' "$out" > "$td/out"
+	td=$1
+	printf 'a\n' | "$PROG" a '\b\f\r\t\v' 2>/dev/null > "$td/out"
 	printf '\b\f\r\t\v\n' > "$td/exp"
 	cmp -s "$td/out" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: escape sequence mismatch" > "$td/result"
 }

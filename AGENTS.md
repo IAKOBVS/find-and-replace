@@ -29,7 +29,7 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 ## Tests
 
 ```
-./compile && tests/run.sh   # 113 main integration tests
+./compile && tests/run.sh   # 121 main integration tests
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
 ./coverage                  # build with --coverage, run all tests, report gcov
@@ -39,7 +39,7 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
-| Main integration | `tests/run.sh` | 113 | Fixed-string, global/regex/case-insensitive, in-place with/without backup, stdin, multi-file, recursive, `--include`/`--exclude`, escapes (`\b\f\n\r\t\v` + octal), flag combinations (`-F -G -g -Z -z -R -E -I`), `--` end-of-flags, `-i`+regex/global combos, `-r` to stdout, empty find in all modes, flag ordering (F/R, R/F, Z/z, z/Z), error paths (missing args, invalid flags, stdin+in-place, nonexistent file, backup collision, invalid regex, long backup suffix), IO tests (backup content identity with `cmp`, empty/binary/multi-file backup, in-place shorter/longer/same-length/identical, FIFO/file argument, read-only in-place, large stdin, stdout multi-file, deep/many-file recursion, nonexistent-among-valid, backup-twice, mixed multi-file in-place), `-r` on regular file, `-r` on nonexistent dir, `--include`/`--exclude` combined with `-r` and dash filenames, regex `^$` on non-empty line, `--` + `--include` + `-r`, regex G/g ordering, `--include` CLI no-op, escape in regex, stdin+inplace error message |
+| Main integration | `tests/run.sh` | 121 | Fixed-string, global/regex/case-insensitive, in-place with/without backup, stdin, multi-file, recursive, `--include`/`--exclude`, escapes (`\b\f\n\r\t\v` + octal), flag combinations (`-F -G -g -Z -z -R -E -I`), `--` end-of-flags, `-i`+regex/global combos, `-r` to stdout, empty find in all modes, flag ordering (F/R, R/F, Z/z, z/Z), error paths (missing args, invalid flags, stdin+in-place, nonexistent file, backup collision, invalid regex, long backup suffix), IO tests (backup content identity with `cmp`, empty/binary/multi-file backup, in-place shorter/longer/same-length/identical, FIFO/file argument, read-only in-place, large stdin, stdout multi-file, deep/many-file recursion, nonexistent-among-valid, backup-twice, mixed multi-file in-place), `-r` on regular file, `-r` on nonexistent dir, `--include`/`--exclude` combined with `-r` and dash filenames, regex `^$` on non-empty line, `--` + `--include` + `-r`, regex G/g ordering, `--include` CLI no-op, escape in regex, stdin+inplace error message, recursive empty dir, recursive partial fail, dash filename via stdin, include glob no-match, backup suffix collision, stdin binary content, escape sequences in replace, empty find stdin-only |
 | Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping matches, empty lines, null bytes, massive lines, long replacements, UTF-8 bytes, special chars in replace, empty file in-place, regex anchors with `-z`, read-only file with backup, nonexistent dir with `-r` |
 | Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy matching, repeat quantifiers, escaped literals |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags (`-g -R -E -I -Z -z -G`) in stdin, file, in-place, and in-place-backup modes; detects crashes and unexpected non-zero exits |
@@ -91,7 +91,7 @@ Each test runs as a background subshell. After `MAX_JOBS` (32) launches, `wait` 
 
 ### Coverage: 86% of executable lines
 
-Coverage measured via `gcov` after running all 145 deterministic tests (113 main + 18 edge + 14 complex).
+Coverage measured via `gcov` after running all 153 deterministic tests (121 main + 18 edge + 14 complex).
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -156,6 +156,18 @@ Coverage measured via `gcov` after running all 145 deterministic tests (113 main
 
 17. **`t_binary_skipped` not in TESTS (same class as #4)** — `tests/run.sh:196` defined `t_binary_skipped` but never listed it, likely because binary detection (`#if 0`) was disabled. Added to TESTS with updated expectation reflecting current no-binary-detection behavior.
 
+### jstring test file added (session 2)
+
+- **`lib/jstring/tests/test-replace-edge.c`** — 8 edge-case tests for `jstr_rplcn_len_from_exec` / `jstr_rplc_len_from_exec`: empty find, empty replace, find>input, multiple replacements (n=3), shorter/longer replacement, overlapping matches, n=0.
+
+### Session 2 additions (8 new tests, 153 deterministic total)
+
+8 new tests added to `tests/run.sh`: `t_recursive_empty_dir`, `t_recursive_partial_fail`, `t_dash_filename_no_double_dash`, `t_include_glob_no_match`, `t_long_backup_suffix_collision`, `t_stdin_binary_content`, `t_escape_various_in_replace`, `t_empty_find_stdin_only`.
+
+**Test bugs fixed this session:**
+- `t_dash_filename_no_double_dash`: used `-i --` which triggers `end_of_flags` leak (known limitation). Changed to stdin-redirect approach.
+- `t_escape_various_in_replace`: used `$()` subshell which strips trailing newlines. Changed to direct file redirect.
+
 ## Known quirks
 
 - **Combined flags with `-i`**: `-ir` treats `r` as a backup suffix, not `--recursive`. This is by design — `-i` takes an optional suffix argument, so remaining chars after `i` are consumed as the suffix. Use `-i -r` as separate args.
@@ -175,3 +187,148 @@ Coverage measured via `gcov` after running all 145 deterministic tests (113 main
 ## Build flags (auto-detected)
 
 `-march=native -Wall -Wextra -Wpedantic` added when cc is gcc or clang.
+
+# Handoff: find-and-replace
+
+## Bugs found & fixed (17 total)
+
+### Tool bugs (find-and-replace.c)
+
+| # | Bug | Root cause | Fix | File:Line |
+|---|---|---|---|---|
+| 2 | `--include`/`--exclude` matcher never activated during recursion | Checked `G.include_glob` (never set) instead of `m.include_glob` | Changed to `m.include_glob \|\| m.exclude_glob` | `find-and-replace.c:499` |
+| 3 | Second-pass skip for `--include`/`--exclude` args | Double `ARG_NEXT()` in file loop (for-loop also `++i`) | Removed one `ARG_NEXT()` | `find-and-replace.c:505-506` |
+| 7 | `--` end-of-flags not handled | No `--` detection in either loop | Added `end_of_flags` flag + `--` detection + skip in both loops | `find-and-replace.c:404-421, 475-478` |
+| 8 | Newline capacity check off-by-one | `>` instead of `>=` prevented newline append at exact boundary | Changed to `>=` | `find-and-replace.c:142` |
+| 9 | Dead `goto err` after `JSTR_RETURN_ERR` | 3 unreachable `goto err` statements after `JSTR_RETURN_ERR` | Removed | `find-and-replace.c:181, 186, 191` |
+| 10 | Missing `jstr_re_free` in `DO_FREE` block | Freed `buf` but not `G.regex` | Added `jstr_re_free(&G.regex)` | `find-and-replace.c:520` |
+| 11 | Empty find in regex mode not guarded | Called `jstr_re_rplcn_backref_len_exec_j` without checking `find_len == 0` | Added `if (find_len == 0) { changed.zu = 0; }` | `find-and-replace.c:126-128` |
+| 12 | `file_exists()` used `F_OK \| W_OK \| R_OK` | `access()` with `W_OK` returns -1 for read-only files → missed collision | Fixed to `F_OK` only | `find-and-replace.c:74` |
+| 13 | `process_file` regex empty-file skip | `file_size < find_len` early-return blocked `^$` on empty files | Guarded with `!G.regex_use` | `find-and-replace.c:217` |
+| 14 | Dead code in file loop | Unreachable `if (ret != JSTR_RET_SUCC) continue;` after `DIE_IF` | Removed | (was line 484) |
+| 15 | Misleading error for non-regular files | "stat() failed" printed when stat actually succeeded | Changed to "is not a regular file or directory" | `find-and-replace.c:502` |
+
+### Test bugs
+
+| # | Bug | Fix | File |
+|---|---|---|---|
+| 4 | `t_edge_special_chars_replace` defined but never executed | Added to TESTS list | `tests/edge-cases.sh` |
+| 17 | `t_binary_skipped` defined but never executed | Added to TESTS list | `tests/run.sh` |
+
+### Library bugs (lib/jstring)
+
+| # | Bug | Fix | File:Line |
+|---|---|---|---|
+| 1 | `jstr_io_writefilefd_len` newline condition inverted | `(s[sz - 1] == '\n')` → `(s[sz - 1] != '\n')` | `include/io.h:161`, `build/include/jstr/io.h` |
+| 5 | `regex.h` `nmatch` not clipped to `rm[10]` | Passed `nmatch` through without bounds check before `regmatch_t rm[10]` | Added `if (nmatch > 10) nmatch = 10;` | `include/regex.h:711`, `build/include/jstr/regex.h` |
+| 6 | `regex.h` `REG_STARTEND` used unconditionally | No `REG_STARTEND` fallback for musl/BSD | Added `#else` branch with NUL-terminated copy + plain `regexec` | `include/regex.h`, `build/include/jstr/regex.h` |
+| 16 | NUL bytes in build copy `regex.h` | Perl codegen turned `\0` escape into literal NUL byte | `copy[sz] = '\0'` → `copy[sz] = 0` | `include/regex.h:297`, `build/include/jstr/regex.h` |
+
+## Known bugs NOT fixed (blocked by "no code changes" constraint)
+
+| Issue | Description | TODO.md ref |
+|---|---|---|
+| `end_of_flags` leaks into file loop | `--` sets `end_of_flags=1` in flag loop, then file loop (re-starting at `i=3`) treats all preceding flags as filenames | Item 35 |
+| Regex empty-buffer short-circuit | `jstr_re_rplcn_backref_len_from_exec` returns early when `start_idx >= *sz`, preventing `^$` on empty files | Item 59 |
+| Binary detection disabled | `#if 0` blocks in `process_file` skip extension/content heuristics | Item 16 |
+
+## Tests added this session (8 new, total 121)
+
+| Test | What it covers |
+|---|---|
+| `t_recursive_empty_dir` | `-r` on empty directory (exit 0) |
+| `t_recursive_partial_fail` | `-r` with one valid + one nonexistent dir (error propagation) |
+| `t_dash_filename_no_double_dash` | Dash-prefixed filename via stdin |
+| `t_include_glob_no_match` | `--include` with no matching files (no-op) |
+| `t_long_backup_suffix_collision` | Backup collision detection |
+| `t_stdin_binary_content` | NUL bytes in stdin stream |
+| `t_escape_various_in_replace` | `\b\f\r\t\v` in replace string |
+| `t_empty_find_stdin_only` | Empty find string in stdin mode |
+
+## jstring test-replace-edge.c (8 edge-case tests)
+
+New file at `lib/jstring/tests/test-replace-edge.c` testing:
+- Empty find string
+- Empty replace string
+- Find longer than input
+- Multiple replacements (n=3)
+- Shorter replacement (in-place)
+- Longer replacement (allocation)
+- Overlapping matches (Two-Way, no overlap)
+- N=0 (no replacements)
+
+## Remaining uncovered lines (34)
+
+All OS-level or dead-code error paths requiring fault injection: disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors.
+
+## Critical: How to implement the TODO
+
+### Prerequisites
+- Set `LD_LIBRARY_PATH=lib/jstring/build/lib` before running the binary
+- `./compile` builds; `COVERAGE=1 ./compile` builds with `--coverage`
+- Build copy headers at `build/include/jstr/` must stay in sync with `include/`
+
+### Priority order for TODO items
+
+**P0 (fixes needed before anything else):**
+1. `end_of_flags` leak (Item 35) — breaks `-i -- -filename`. Fix: the file loop at line 474 should not re-start at `i=3`. Track what the flag loop consumed and skip those indices. Or: merge the two loops. Or: save the consumed index count.
+2. Regex empty-buffer matching (Items 59-62) — `jstr_re_rplcn_backref_len_from_exec` returns early when `start_idx >= *sz`. Fix: either skip the early return for buffer-size 0 when pattern can match empty string, or add a padding newline in the tool's `process_buffer`.
+
+**P1 (correctness):**
+3. Integer overflow in `replace.h:1079` (Item 15)
+4. `compile()` called per-file (Item 21) — hoist outside loop
+5. `init_defaults()` not idempotent (Item 23)
+6. `G.eflags` always zero (Item 50) — add `-e` flag
+7. `-r` traversal stops on first error (Item 36)
+
+**P2 (test coverage):**
+8. `-F` on regex metacharacters (Item 24)
+9. `-I` with `-g` (Item 25)
+10. Escape sequences in REPLACE (Item 26)
+11. `-r` on empty directory (Item 28)
+12. `-r` on partially failing dirs (Item 29)
+13. Dash filename without `--` (Item 30)
+14. `wait -n` jobserver (Item 27)
+
+**P3 (portability):**
+15. Missing `#include <string.h>` / `<unistd.h>` (Item 40)
+16. Static link jstring (Item 41)
+17. rpath in `./compile` (Item 42)
+18. `JSTR_USE_UNLOCKED_IO_READ` portability (Item 44)
+19. Sync `build/include/` with `include/` (Item 45)
+
+**P4 (features):**
+20. `--version` flag (Item 51)
+21. `-` as stdin placeholder (Item 52)
+22. `-q`/`--quiet` (Item 53)
+23. Colored diff output (Item 55)
+
+**P5 (cleanup):**
+24. `#if 0` blocks (Item 16)
+25. Spelling "occurence" → "occurrence" (Item 17)
+26. Remove stale `tests/test.c` (Item 18)
+27. Document `_j` wrapper convention (Item 20)
+28. `argv` strings mutated (Item 22)
+
+### Where to make changes
+
+| File | Lines | Purpose |
+|---|---|---|
+| `find-and-replace.c` | 390-472 (flag loop), 474-508 (file loop) | `end_of_flags` fix |
+| `find-and-replace.c` | 142 | Newline capacity check (`>=` already fixed) |
+| `find-and-replace.c` | 275-290 | `compile()` hoisting |
+| `find-and-replace.c` | 293-299 | `init_defaults()` idempotency |
+| `find-and-replace.c` | 302-354 | Usage string fixes |
+| `lib/jstring/include/replace.h` | ~1079 | Integer overflow fix |
+| `lib/jstring/include/regex.h` | ~693 | Empty-buffer regex matching |
+| `tests/run.sh` | ~504-541 | New tests location |
+| `tests/edge-cases.sh` | ~110 | Read-only file + backup test |
+| `lib/jstring/tests/test-replace-edge.c` | Full file | jstring edge-case tests |
+
+### Test runner mechanics
+- `tests/run.sh`: MAX_JOBS=32 batch-wait jobserver, `/bin/sh` compatible
+- Each test function: `td=$1`, writes PASS/FAIL to `$td/result`
+- Tests registered in TESTS heredoc variable at end of file
+- Stderr redirected to `/dev/null` unless error output is tested
+- `$PROG` = path to binary (set at top of script)
+

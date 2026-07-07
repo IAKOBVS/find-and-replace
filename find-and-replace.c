@@ -291,7 +291,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 		} else {
 			jstr_memmem_comp(t, find, find_len);
 		}
-		G.mode |= MODE_USE_REGEX;
+		G.mode |= MODE_COMPILED;
 	}
 	return JSTR_RET_SUCC;
 }

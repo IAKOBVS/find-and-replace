@@ -35,27 +35,27 @@
 #define DO_FREE 0
 
 typedef enum {
-	PRINT_STDOUT = 1 << 0,
-	PRINT_FILE = 1 << 1,
-	PRINT_FILE_BACKUP = 1 << 2,
-	PRINT_CHANGES = 1 << 3,
-} print_mode_ty;
+	MODE_PRINT_STDOUT = 1 << 0,
+	MODE_PRINT_FILE = 1 << 1,
+	MODE_PRINT_FILE_BACKUP = 1 << 2,
+	MODE_PRINT_CHANGES = 1 << 3,
+	MODE_USE_RECURSIVE = 1 << 4,
+	MODE_USE_REGEX = 1 << 5,
+	MODE_COMPILED = 1 << 6,
+	MODE_HAVE_FILES = 1 << 7,
+} mode_ty;
 
 typedef struct global_ty {
 	const char *include_glob;
-	int have_files;
-	int print_mode;
-	int recursive;
-	int compiled;
-	int regex_use;
-	int cflags;
-	int eflags;
-	jstr_re_ty regex;
 	const char *bak_suffix;
 	size_t bak_suffix_len;
 	size_t n;
+	int mode;
+	int cflags;
+	int eflags;
+	jstr_re_ty regex;
 } global_ty;
-global_ty G = { .print_mode = PRINT_STDOUT };
+global_ty G = { .mode = MODE_PRINT_STDOUT };
 
 JSTR_FUNC
 static jstr_ret_ty
@@ -123,7 +123,7 @@ process_buffer(const jstr_twoway_ty *R t,
 	int fd_tmp = -1;
 	char *bakp = NULL;
 	char bak[JSTR_IO_PATH_MAX];
-	if (G.regex_use) {
+	if (G.mode & MODE_USE_REGEX) {
 		if (jstr_unlikely(find_len == 0)) {
 			changed.zu = 0;
 		} else {
@@ -142,13 +142,13 @@ process_buffer(const jstr_twoway_ty *R t,
 	/* Append newline if has space */
 	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity >= buf->size + S_LEN("\n") + 1)
 		buf->size = JSTR_PTR_DIFF(jstr_append_len_unsafe_p(buf->data, buf->size, "\n", 1), buf->data);
-	if (G.print_mode & PRINT_STDOUT) {
+	if (G.mode & MODE_PRINT_STDOUT) {
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	} else {
 		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
-		if (G.print_mode & PRINT_FILE_BACKUP) {
+		if (G.mode & MODE_PRINT_FILE_BACKUP) {
 			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
 				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -193,7 +193,7 @@ process_buffer(const jstr_twoway_ty *R t,
 			}
 			bakp = NULL;
 		}
-		if (G.print_mode & PRINT_CHANGES) {
+		if (G.mode & MODE_PRINT_CHANGES) {
 			if (jstr_chk(jstr_io_fwrite(fname, 1, fname_len, stdout)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			if (jstr_chk(jstr_io_putchar('\n')))
@@ -221,7 +221,7 @@ process_file(const jstr_twoway_ty *R t,
              const size_t rplc_len)
 {
 	const size_t file_size = (size_t)st->st_size;
-	if (!G.regex_use && file_size < find_len)
+	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len)
 		return JSTR_RET_SUCC;
 #if 0
 	const ft_ty ft = exttype(fname, fname_len);
@@ -229,7 +229,7 @@ process_file(const jstr_twoway_ty *R t,
 		return JSTR_RET_SUCC;
 #endif
 	/* Preallocate the length of the replace string. */
-	if (rplc_len > find_len && !G.regex_use)
+	if (rplc_len > find_len && !(G.mode & MODE_USE_REGEX))
 		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
@@ -281,8 +281,8 @@ static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 static jstr_ret_ty
 compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 {
-	if (!G.compiled) {
-		if (G.regex_use) {
+	if (!(G.mode & MODE_COMPILED)) {
+		if (G.mode & MODE_USE_REGEX) {
 			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
 				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find);
@@ -291,7 +291,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 		} else {
 			jstr_memmem_comp(t, find, find_len);
 		}
-		G.compiled = 1;
+		G.mode |= MODE_USE_REGEX;
 	}
 	return JSTR_RET_SUCC;
 }
@@ -402,11 +402,11 @@ main(int argc, char **argv)
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
-					G.print_mode = (G.print_mode & ~PRINT_STDOUT) | PRINT_FILE;
+					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
 				} else {
 					G.bak_suffix = ARG + sizeof("-i") - 1;
 					G.bak_suffix_len = strlen(G.bak_suffix);
-					G.print_mode = (G.print_mode & ~PRINT_STDOUT) | PRINT_FILE_BACKUP;
+					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE_BACKUP;
 				}
 				continue;
 			}
@@ -446,7 +446,7 @@ main(int argc, char **argv)
 						G.cflags |= JSTR_RE_CF_EXTENDED;
 						goto use_regex_flag;
 					case 'F':
-						G.regex_use = 0;
+						G.mode &= ~MODE_USE_REGEX;
 						break;
 					case 'G':
 						G.n = 1;
@@ -456,7 +456,7 @@ main(int argc, char **argv)
 						goto use_regex_flag;
 					case 'R':
 use_regex_flag:
-						G.regex_use = 1;
+						G.mode |= MODE_USE_REGEX;
 						break;
 					case 'Z':
 						G.cflags |= JSTR_RE_CF_NEWLINE;
@@ -469,10 +469,10 @@ use_regex_flag:
 						exit(EXIT_SUCCESS);
 						break;
 					case 'l':
-						G.print_mode |= PRINT_CHANGES;
+						G.mode |= MODE_PRINT_CHANGES;
 						break;
 					case 'r':
-						G.recursive = 1;
+						G.mode |= MODE_USE_RECURSIVE;
 						break;
 					case 'z':
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
@@ -487,7 +487,7 @@ done_single:;
 			}
 			continue;
 		}
-		G.have_files = 1;
+		G.mode |= MODE_HAVE_FILES;
 		ret = xstat(ARG, &st);
 		DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
 		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
@@ -503,7 +503,7 @@ process:
 					goto process;
 			}
 		} else if (IS_DIR(st.st_mode)) {
-			if (G.recursive) {
+			if (G.mode & MODE_USE_RECURSIVE) {
 				a.buf = &buf;
 				DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
 			}
@@ -513,10 +513,10 @@ process:
 		}
 	}
 	/* If no file was passed, read from stdin. */
-	if (!G.have_files) {
-		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.print_mode & PRINT_STDOUT)))
+	if (!(G.mode & MODE_HAVE_FILES)) {
+		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.mode & MODE_PRINT_STDOUT)))
 			jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
-		if (jstr_unlikely(G.recursive))
+		if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
 			jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
 		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)), "%s", "Failed reading stdin.\n");
 		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");

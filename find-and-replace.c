@@ -55,7 +55,7 @@ typedef struct global_ty {
 	size_t bak_suffix_len;
 	size_t n;
 } global_ty;
-global_ty G = { 0 };
+global_ty G = { .print_mode = PRINT_STDOUT };
 
 JSTR_FUNC
 static jstr_ret_ty
@@ -402,11 +402,11 @@ main(int argc, char **argv)
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
-					G.print_mode |= PRINT_FILE;
+					G.print_mode = (G.print_mode & ~PRINT_STDOUT) | PRINT_FILE;
 				} else {
 					G.bak_suffix = ARG + sizeof("-i") - 1;
 					G.bak_suffix_len = strlen(G.bak_suffix);
-					G.print_mode |= PRINT_FILE_BACKUP;
+					G.print_mode = (G.print_mode & ~PRINT_STDOUT) | PRINT_FILE_BACKUP;
 				}
 				continue;
 			}

@@ -35,9 +35,10 @@
 #define DO_FREE 0
 
 typedef enum {
-	PRINT_STDOUT = 0,
-	PRINT_FILE,
-	PRINT_FILE_BACKUP,
+	PRINT_STDOUT = 1 << 0,
+	PRINT_FILE = 1 << 1,
+	PRINT_FILE_BACKUP = 1 << 2,
+	PRINT_CHANGES = 1 << 3,
 } print_mode_ty;
 
 typedef struct global_ty {
@@ -141,13 +142,13 @@ process_buffer(const jstr_twoway_ty *R t,
 	/* Append newline if has space */
 	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity >= buf->size + S_LEN("\n") + 1)
 		buf->size = JSTR_PTR_DIFF(jstr_append_len_unsafe_p(buf->data, buf->size, "\n", 1), buf->data);
-	if (G.print_mode == PRINT_STDOUT) {
+	if (G.print_mode & PRINT_STDOUT) {
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	} else {
 		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
-		if (G.print_mode == PRINT_FILE_BACKUP) {
+		if (G.print_mode & PRINT_FILE_BACKUP) {
 			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
 				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -191,6 +192,12 @@ process_buffer(const jstr_twoway_ty *R t,
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			bakp = NULL;
+		}
+		if (G.print_mode & PRINT_CHANGES) {
+			if (jstr_chk(jstr_io_fwrite(fname, 1, fname_len, stdout)))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			if (jstr_chk(jstr_io_putchar('\n')))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 	}
 	return JSTR_RET_SUCC;
@@ -395,11 +402,11 @@ main(int argc, char **argv)
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
-					G.print_mode = PRINT_FILE;
+					G.print_mode |= PRINT_FILE;
 				} else {
 					G.bak_suffix = ARG + sizeof("-i") - 1;
 					G.bak_suffix_len = strlen(G.bak_suffix);
-					G.print_mode = PRINT_FILE_BACKUP;
+					G.print_mode |= PRINT_FILE_BACKUP;
 				}
 				continue;
 			}
@@ -461,6 +468,9 @@ use_regex_flag:
 						printf("%s", usage);
 						exit(EXIT_SUCCESS);
 						break;
+					case 'l':
+						G.print_mode |= PRINT_CHANGES;
+						break;
 					case 'r':
 						G.recursive = 1;
 						break;
@@ -504,7 +514,7 @@ process:
 	}
 	/* If no file was passed, read from stdin. */
 	if (!G.have_files) {
-		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(G.print_mode != PRINT_STDOUT))
+		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.print_mode & PRINT_STDOUT)))
 			jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
 		if (jstr_unlikely(G.recursive))
 			jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");

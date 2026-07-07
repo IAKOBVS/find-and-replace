@@ -3,7 +3,7 @@
 PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
-CFLAGS='-O2'
+CFLAGS='-march=native -O2'
 LFLAGS=""
 CC=$(readlink "$(command -v cc)")
 if [ "$COVERAGE" = "1" ]; then

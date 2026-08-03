@@ -1,7 +1,5 @@
 #!/bin/sh
-set -e
-./tests/edge-cases.sh &
-./tests/fuzz.sh "${1:-250}" &
-./tests/run.sh &
-./tests/complex.sh &
-wait
+./tests/run.sh
+rc=$?
+./tests/fuzz.sh "${1:-250}"
+exit $((rc || $?))

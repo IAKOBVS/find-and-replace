@@ -3,10 +3,12 @@
 
 #define JSTR_PANIC                0
 #define JSTR_USE_UNLOCKED_IO_READ 1
+#define JSTR_USE_UNLOCKED_IO_WRITE 1
 
 #include <jstr/jstr.h>
 #include <jstr/io.h>
 #include <jstr/regex.h>
+#include <jstr/stdstring.h>
 
 #define S_LEN(s)     (sizeof(s) - 1)
 #define S_LITERAL(s) (s), (sizeof(s) - 1)
@@ -43,6 +45,7 @@ typedef enum {
 	MODE_USE_REGEX = 1 << 5,
 	MODE_COMPILED = 1 << 6,
 	MODE_HAVE_FILES = 1 << 7,
+	MODE_CONFIRM = 1 << 8,
 } mode_ty;
 
 typedef struct global_ty {
@@ -87,23 +90,25 @@ typedef enum {
 #define FT_BINARY FT_BINARY
 } ft_ty;
 
-/* static ft_ty */
-/* exttype(const char *fname, size_t fname_len) */
-/* { */
-/* 	fname = jstr_memrchr(fname, '.', fname_len); */
-/* 	if (fname != NULL && *++fname != '\0') { */
-/* 		static const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" }; */
-/* 		static const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" }; */
-/* 		unsigned int i; */
-/* 		for (i = 0; i < sizeof(textv) / sizeof(*textv); ++i) */
-/* 			if (!jstr_strcmpeq_loop(fname, textv[i])) */
-/* 				return FT_TEXT; */
-/* 		for (i = 0; i < sizeof(binv) / sizeof(*binv); ++i) */
-/* 			if (!jstr_strcmpeq_loop(fname, binv[i])) */
-/* 				return FT_BINARY; */
-/* 	} */
-/* 	return FT_UNKNOWN; */
-/* } */
+#if 0
+static ft_ty
+exttype(const char *fname, size_t fname_len)
+{
+	fname = jstr_memrchr(fname, '.', fname_len);
+	if (fname != NULL && *++fname != '\0') {
+		static const char *textv[] = { "C", "S", "c", "cc", "cs", "cpp", "h", "hh", "hpp", "html", "js", "json", "md", "pl", "pm", "py", "pyi", "rs", "s", "sh", "ts", "txt" };
+		static const char *binv[] = { "a", "bin", "gz", "jpg", "jpeg", "mp4", "mp3", "mkv", "o", "pdf", "png", "pyc", "rar", "so", "wav", "zip" };
+		unsigned int i;
+		for (i = 0; i < sizeof(textv) / sizeof(*textv); ++i)
+			if (!jstr_strcmpeq_loop(fname, textv[i]))
+				return FT_TEXT;
+		for (i = 0; i < sizeof(binv) / sizeof(*binv); ++i)
+			if (!jstr_strcmpeq_loop(fname, binv[i]))
+				return FT_BINARY;
+	}
+	return FT_UNKNOWN;
+}
+#endif
 
 static jstr_ret_ty
 process_buffer(const jstr_twoway_ty *R t,
@@ -194,7 +199,7 @@ process_buffer(const jstr_twoway_ty *R t,
 			bakp = NULL;
 		}
 		if (G.mode & MODE_PRINT_CHANGES) {
-			if (jstr_chk(jstr_io_fwrite(fname, 1, fname_len, stdout)))
+			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			if (jstr_chk(jstr_io_putchar('\n')))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -223,22 +228,14 @@ process_file(const jstr_twoway_ty *R t,
 	const size_t file_size = (size_t)st->st_size;
 	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len)
 		return JSTR_RET_SUCC;
-#if 0
-	const ft_ty ft = exttype(fname, fname_len);
-	f (ft == FT_BINARY)
-		return JSTR_RET_SUCC;
-#endif
 	/* Preallocate the length of the replace string. */
 	if (rplc_len > find_len && !(G.mode & MODE_USE_REGEX))
 		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
-#if 0
-	if (ft == FT_UNKNOWN)
-		if (jstr_io_isbinary(buf->data, JSTR_MIN(64, file_size)))
-			return JSTR_RET_SUCC;
-#endif
+	if (jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size)))
+		return JSTR_RET_SUCC;
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
 	return ret;
 }
@@ -460,6 +457,10 @@ use_regex_flag:
 						break;
 					case 'Z':
 						G.cflags |= JSTR_RE_CF_NEWLINE;
+						break;
+					/* TODO: implement */
+					case 'c':
+						G.mode |= MODE_CONFIRM;
 						break;
 					case 'g':
 						G.n = (size_t)-1;

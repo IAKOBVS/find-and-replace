@@ -7,7 +7,7 @@
 - **Misleading error on non-regular file** — "stat() failed" changed to "is not a regular file or directory".
 - **`file_exists()` uses `F_OK` only** — Backup collision check no longer requires `W_OK`, fixing detection for read-only files.
 - **Regex empty-file skip guarded** — `process_file` now skips size check when `G.regex_use` is set, allowing `^$` to match empty files.
-- **FD exhaustion mitigated** — `tests/run.sh` uses MAX_JOBS=32 batch-wait jobserver to limit concurrent subshells.
+- **FD exhaustion mitigated** — `tests/lib.sh` provides MAX_JOBS=32 batch-wait jobserver used by all category files to limit concurrent subshells.
 - **New tests added** — `--` + `--include` + `-r`, `-r` on regular file, long backup suffix, invalid regex, stdin+`-i` error path.
 
 ## Infrastructure
@@ -15,7 +15,7 @@
 - **Integer overflow in `replace.h:1079`** — `new_size = *sz + changed * (rplc_len - find_len)` in `jstr_rplcn_len_from_exec` can overflow `size_t` when `changed * (rplc_len - find_len)` exceeds `SIZE_MAX - *sz`. With global mode (`-g`) on a large file, this could silently corrupt. Fix with saturation check or early return.
 - **`#if 0` blocks for binary detection** — `find-and-replace.c:219-223,230-234` have disabled binary file detection via `exttype()`. Clean up or remove the dead code.
 - **Spelling in usage string** — Line 308: "occurence" should be "occurrence". Fix in `_(...)` macro.
-- **Remove stale `tests/test.c`** — Stub with broken include path; use `tests/run.sh` instead.
+- **Remove stale `tests/test.c`** — Stub with broken include path; use `tests/run.sh` (unified runner) or category files in `tests/` instead.
 - **Microbenchmark suite** — Basic performance tests for large files, many replacements, long lines, regex vs fixed-string throughput.
 - **Document `_j` wrapper convention** in AGENTS.md — Functions with `_j` suffix take `jstr_ty *` instead of `char **s, *sz, *cap`.
 - **`compile()` called per-file** — `find-and-replace.c:483` calls `compile()` for every file in the file loop. Though `compile()` is a no-op after the first call, it's wasteful. Hoist outside the loop.

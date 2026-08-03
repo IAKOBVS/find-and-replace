@@ -1,18 +1,5 @@
 #!/bin/sh
-# Parallel find-and-replace integration tests (Complex Regex & Backreferences)
-
-PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROG="$PROG_DIR/find-and-replace"
-export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-PASS=0
-FAIL=0
-FAIL_LIST=''
-
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-
-td_root=$(mktemp -d)
-trap 'rm -rf "$td_root"' EXIT
+. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 t_backref_reorder() {
 	td=$1; out=$(printf 'apple, banana, cherry\n' | "$PROG" '([a-z]+), ([a-z]+), ([a-z]+)' '\\3, \\1, \\2' -RE 2>/dev/null)
@@ -84,8 +71,6 @@ t_regex_escaped_dot() {
 	[ "$out" = 'document.txt' ] && echo PASS > "$td/result" || echo "FAIL: escaped dot expected [document.txt] got [$out]" > "$td/result"
 }
 
-printf '\n=== find-and-replace complex regex tests ===\n\n'
-
 TESTS="
 t_backref_reorder
 t_backref_duplicate_word
@@ -102,23 +87,4 @@ t_regex_repeat_quantifiers
 t_regex_multiple_groups
 t_regex_escaped_dot
 "
-
-for t in $TESTS; do
-	(
-		mkdir -p "$td_root/$t"
-		"$t" "$td_root/$t"
-	) &
-done
-wait
-
-for t in $TESTS; do
-	r=$(cat "$td_root/$t/result" 2>/dev/null)
-	case "$r" in
-		PASS*) PASS=$((PASS+1)); green PASS ;;
-		FAIL*) FAIL=$((FAIL+1)); red "FAIL (${r#FAIL: })" ;;
-		*)     FAIL=$((FAIL+1)); red "FAIL ($t: no result)" ;;
-	esac
-done
-
-printf '\n=== %d passed, %d failed ===\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] && exit 0 || exit 1
+run_suite "complex regex tests" "$TESTS"

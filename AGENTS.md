@@ -29,8 +29,9 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 ## Tests
 
 ```
-./compile && tests/run.sh   # 121 main integration tests
+./compile && tests/run.sh   # all deterministic suites (153 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
+./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
 ./coverage                  # build with --coverage, run all tests, report gcov
 ```
@@ -39,36 +40,36 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
-| Main integration | `tests/run.sh` | 121 | Fixed-string, global/regex/case-insensitive, in-place with/without backup, stdin, multi-file, recursive, `--include`/`--exclude`, escapes (`\b\f\n\r\t\v` + octal), flag combinations (`-F -G -g -Z -z -R -E -I`), `--` end-of-flags, `-i`+regex/global combos, `-r` to stdout, empty find in all modes, flag ordering (F/R, R/F, Z/z, z/Z), error paths (missing args, invalid flags, stdin+in-place, nonexistent file, backup collision, invalid regex, long backup suffix), IO tests (backup content identity with `cmp`, empty/binary/multi-file backup, in-place shorter/longer/same-length/identical, FIFO/file argument, read-only in-place, large stdin, stdout multi-file, deep/many-file recursion, nonexistent-among-valid, backup-twice, mixed multi-file in-place), `-r` on regular file, `-r` on nonexistent dir, `--include`/`--exclude` combined with `-r` and dash filenames, regex `^$` on non-empty line, `--` + `--include` + `-r`, regex G/g ordering, `--include` CLI no-op, escape in regex, stdin+inplace error message, recursive empty dir, recursive partial fail, dash filename via stdin, include glob no-match, backup suffix collision, stdin binary content, escape sequences in replace, empty find stdin-only |
-| Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping matches, empty lines, null bytes, massive lines, long replacements, UTF-8 bytes, special chars in replace, empty file in-place, regex anchors with `-z`, read-only file with backup, nonexistent dir with `-r` |
-| Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy matching, repeat quantifiers, escaped literals |
-| Fuzz | `tests/fuzz.sh` | N | Random strings with random flags (`-g -R -E -I -Z -z -G`) in stdin, file, in-place, and in-place-backup modes; detects crashes and unexpected non-zero exits |
+| Basic | `tests/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
+| Flags | `tests/flags.sh` | 14 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G) |
+| Regex | `tests/regex.sh` | 14 | BRE/ERE, backreferences, anchors with `-Z`/`-z`, regex in in-place, escape in regex |
+| Files | `tests/files.sh` | 22 | Multi-file, recursive, `--include`/`--exclude`, dash filenames, deep/many-file recursion |
+| Errors | `tests/errors.sh` | 15 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive |
+| IO | `tests/io.sh` | 19 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
+| Escape | `tests/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
+| Empty | `tests/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
+| Misc | `tests/misc.sh` | 6 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
+| Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
+| Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
+| Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
 
-| Category | Representative tests | Covered functionality |
-|---|---|---|
-| Basic replacement | `t_fixed_stdin`, `t_global`, `t_inplace`, `t_inplace_backup` | Fixed-string replacement via stdin, in-place (with/without backup), global mode |
-| Flag parsing | `t_explicit_F`, `t_explicit_G`, `t_regex`, `t_extended_regex`, `t_ignore_case`, `t_Z_flag`, `t_z_flag`, `t_help` | `-F -G -R -E -I -Z -z -g -h` flag interpretation |
-| Flag ordering | `t_flag_order_F_R`, `t_flag_order_R_F`, `t_flag_order_Z_z`, `t_flag_order_z_Z`, `t_global_then_G`, `t_G_then_global` | Last-wins semantics for flag pairs |
-| Regex | `t_regex`, `t_extended_regex`, `t_global_regex`, `t_backreference`, `t_empty_file_regex_anchors`, `t_z_with_regex`, `t_Z_with_regex` | BRE, ERE, backreferences, anchors with `-Z`/`-z` |
-| File operations | `t_multi_file`, `t_recursive`, `t_include`, `t_exclude`, `t_recursive_exclude`, `t_include_exclude_combined`, `t_recursive_deep`, `t_recursive_many_files` | Multi-file, recursive traversal, `--include`/`--exclude` glob filtering |
-| Error paths | `t_nonexistent_file`, `t_invalid_flag`, `t_no_args`, `t_missing_replace`, `t_stdin_inplace_err`, `t_invalid_regex`, `t_inplace_backup_collision`, `t_long_backup_suffix` | Missing/invalid args, nonexistent files, backup collisions, invalid regex |
-| Edge cases | `t_empty_input`, `t_empty_replace`, `t_empty_find_regex`, `t_empty_find_global`, `t_empty_find_inplace`, `t_long_line`, `t_overlapping`, `t_binary_skipped`, `t_escape_ff`, `t_escape_cr`, `t_escape_vt`, `t_escape_bs`, `t_octal_escape` | Empty inputs, long lines, overlapping matches, binary files, escape sequences |
+The category files partition tests by functionality rather than strict line coverage boundaries. Some overlap exists (e.g., regex used in in-place mode lives in `regex.sh`, not `io.sh`). Representative tests and coverage areas listed in the suites table above.
 
 ### Test writing conventions
 
-All tests in `tests/run.sh`, `tests/edge-cases.sh`, and `tests/complex.sh` follow the same conventions:
+All tests follow the same conventions:
 
 - **Each test is a shell function** that takes a single argument (`$1`) — a temporary directory unique to that test. The function stores it as `td=$1`.
 - **Results are written to `$1/result`** — the string `PASS` on success, or `FAIL: <reason>` on failure.
-- **The binary path** is available as `$PROG` (set at the top of the script).
+- **The binary path** is available as `$PROG` (set in `tests/lib.sh`, sourced by all test files).
 - **Stderr is redirected to `/dev/null`** (`2>/dev/null`) unless the test specifically checks error output.
-- **Tests are registered** by listing their function name in the `TESTS` heredoc variable. Only listed functions are executed by the runner.
+- **Tests are registered** by listing their function name in the `TESTS` variable. Only listed functions are executed by the runner.
 
 ### Test runner parallelism
 
-The test scripts use a batch-wait jobserver to limit concurrency and avoid file descriptor exhaustion:
+The test scripts use a batch-wait jobserver to limit concurrency and avoid file descriptor exhaustion, implemented in `tests/lib.sh`:
 
 ```
 MAX_JOBS=32
@@ -89,9 +90,11 @@ done
 
 Each test runs as a background subshell. After `MAX_JOBS` (32) launches, `wait` blocks until the batch finishes. The final incomplete batch is waited for after the loop. This prevents running all N tests simultaneously, which could exhaust file descriptors on systems with low `ulimit -n`.
 
+All 11 deterministic suites run concurrently at the file level via `tests/run.sh`, each with its own internal batch-wait jobserver for test-level parallelism.
+
 ### Coverage: 86% of executable lines
 
-Coverage measured via `gcov` after running all 153 deterministic tests (121 main + 18 edge + 14 complex).
+Coverage measured via `gcov` after running all 153 deterministic tests (17 basic + 14 flags + 14 regex + 22 files + 15 errors + 19 io + 9 escape + 5 empty + 6 misc + 18 edge + 14 complex).
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -162,7 +165,7 @@ Coverage measured via `gcov` after running all 153 deterministic tests (121 main
 
 ### Session 2 additions (8 new tests, 153 deterministic total)
 
-8 new tests added to `tests/run.sh`: `t_recursive_empty_dir`, `t_recursive_partial_fail`, `t_dash_filename_no_double_dash`, `t_include_glob_no_match`, `t_long_backup_suffix_collision`, `t_stdin_binary_content`, `t_escape_various_in_replace`, `t_empty_find_stdin_only`.
+8 new tests added: `t_recursive_empty_dir`, `t_recursive_partial_fail`, `t_dash_filename_no_double_dash`, `t_include_glob_no_match`, `t_long_backup_suffix_collision`, `t_stdin_binary_content`, `t_escape_various_in_replace`, `t_empty_find_stdin_only`. Tests now live in category files under `tests/`.
 
 **Test bugs fixed this session:**
 - `t_dash_filename_no_double_dash`: used `-i --` which triggers `end_of_flags` leak (known limitation). Changed to stdin-redirect approach.
@@ -175,7 +178,7 @@ Coverage measured via `gcov` after running all 153 deterministic tests (121 main
 - **`--include`/`--exclude`** during recursion was historically broken (matcher never activated). Now fixed.
 - **`--exclude`** on command-line files was historically inverted (matching files were processed, non-matching skipped). Now fixed.
 - **`--include` on CLI files** has no effect — `--include` only applies during directory recursion with `-r`. Use `--exclude` for CLI file filtering.
-- **`tests/test.c`** is a stale stub with a broken include path; use `tests/run.sh` instead.
+- **`tests/test.c`** is a stale stub with a broken include path; use `tests/run.sh` (unified runner) or individual category files like `tests/basic.sh` instead.
 - **`--` end-of-flags**: `find-and-replace foo bar -- file.txt` treats `file.txt` as a filename even if it starts with `-`. This is now fixed — both flag parsing and file parsing loops handle `--`.
 
   **Known limitation**: `--` cannot be followed by flags like `--include`/`--exclude`. The `end_of_flags` flag set by `--` in the flag loop leaks into the file loop, causing ALL remaining arguments (including flags and their arguments) to be treated as filenames. Flags must be placed before `--`:
@@ -321,14 +324,14 @@ All OS-level or dead-code error paths requiring fault injection: disk-full, perm
 | `find-and-replace.c` | 302-354 | Usage string fixes |
 | `lib/jstring/include/replace.h` | ~1079 | Integer overflow fix |
 | `lib/jstring/include/regex.h` | ~693 | Empty-buffer regex matching |
-| `tests/run.sh` | ~504-541 | New tests location |
+| Category files in `tests/` | Each file's TESTS list | New tests location |
 | `tests/edge-cases.sh` | ~110 | Read-only file + backup test |
 | `lib/jstring/tests/test-replace-edge.c` | Full file | jstring edge-case tests |
 
 ### Test runner mechanics
-- `tests/run.sh`: MAX_JOBS=32 batch-wait jobserver, `/bin/sh` compatible
+- `tests/lib.sh`: shared boilerplate with MAX_JOBS=32 batch-wait jobserver, `/bin/sh` compatible
 - Each test function: `td=$1`, writes PASS/FAIL to `$td/result`
 - Tests registered in TESTS heredoc variable at end of file
 - Stderr redirected to `/dev/null` unless error output is tested
-- `$PROG` = path to binary (set at top of script)
+- `$PROG` = path to binary (set in `tests/lib.sh`)
 

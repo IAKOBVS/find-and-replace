@@ -53,9 +53,13 @@ typedef struct global_ty {
 	int mode;
 	int cflags;
 	int eflags;
+	int confirm;
 	jstr_re_ty regex;
 } global_ty;
 global_ty G = { .mode = MODE_PRINT_STDOUT };
+
+int G_confirm_pass = 0;
+int G_matches_found = 0;
 
 JSTR_FUNC
 static jstr_ret_ty
@@ -209,6 +213,166 @@ err:
 	return JSTR_RET_ERR;
 }
 
+typedef struct {
+	size_t start;
+	size_t end;
+} match_t;
+
+static void
+add_match(match_t **matches, size_t *cap, size_t *cnt, size_t start, size_t end)
+{
+	if (*cnt >= *cap) {
+		*cap = *cap == 0 ? 16 : *cap * 2;
+		match_t *new_matches = realloc(*matches, *cap * sizeof(match_t));
+		DIE_IF(!new_matches, "%s", "Out of memory allocating matches.\n");
+		*matches = new_matches;
+	}
+	(*matches)[*cnt].start = start;
+	(*matches)[*cnt].end = end;
+	(*cnt)++;
+}
+
+static size_t
+get_line_start(const char *data, size_t file_size, size_t idx)
+{
+	if (idx == 0) return 0;
+	if (idx > file_size) idx = file_size;
+	size_t i = idx;
+	while (i > 0) {
+		if (data[i - 1] == '\n') {
+			return i;
+		}
+		i--;
+	}
+	return 0;
+}
+
+static size_t
+get_line_end(const char *data, size_t file_size, size_t idx)
+{
+	if (idx >= file_size) return file_size;
+	size_t i = idx;
+	while (i < file_size) {
+		if (data[i] == '\n') {
+			return i;
+		}
+		i++;
+	}
+	return file_size;
+}
+
+static size_t
+get_line_number(const char *data, size_t idx)
+{
+	size_t line_num = 1;
+	for (size_t i = 0; i < idx; ++i) {
+		if (data[i] == '\n') {
+			line_num++;
+		}
+	}
+	return line_num;
+}
+
+static jstr_ret_ty
+confirm_scan_file(const jstr_twoway_ty *R t,
+                  const jstr_ty *R buf,
+                  const char *R fname,
+                  size_t fname_len,
+                  const char *R find,
+                  const size_t find_len,
+                  const char *R rplc,
+                  const size_t rplc_len)
+{
+	match_t *matches = NULL;
+	size_t matches_cap = 0;
+	size_t matches_cnt = 0;
+
+	if (G.mode & MODE_USE_REGEX) {
+		if (find_len > 0) {
+			size_t curr = 0;
+			regmatch_t rm;
+			int eflags = G.eflags;
+			while (curr < buf->size) {
+				int r = jstr_re_exec_len(&G.regex, buf->data + curr, buf->size - curr, 1, &rm, eflags | (curr > 0 ? REG_NOTBOL : 0));
+				if (r == JSTR_RE_RET_NOMATCH) break;
+				if (r != JSTR_RE_RET_NOERROR) {
+					break;
+				}
+				size_t m_start = curr + rm.rm_so;
+				size_t m_end = curr + rm.rm_eo;
+				add_match(&matches, &matches_cap, &matches_cnt, m_start, m_end);
+				curr = m_end;
+				if (rm.rm_eo == rm.rm_so) {
+					curr++;
+				}
+				if (G.n == 1) break;
+			}
+		}
+	} else {
+		if (find_len > 0) {
+			size_t curr = 0;
+			while (curr < buf->size) {
+				const char *p = jstr_memmem_exec(t, buf->data + curr, buf->size - curr, find, find_len);
+				if (!p) break;
+				size_t m_start = p - buf->data;
+				size_t m_end = m_start + find_len;
+				add_match(&matches, &matches_cap, &matches_cnt, m_start, m_end);
+				curr = m_end;
+				if (G.n == 1) break;
+			}
+		}
+	}
+
+	if (matches_cnt > 0) {
+		G_matches_found = 1;
+		size_t start_idx = 0;
+		while (start_idx < matches_cnt) {
+			size_t end_idx = start_idx;
+			while (end_idx + 1 < matches_cnt) {
+				size_t prev_line_end = get_line_end(buf->data, buf->size, matches[end_idx].end);
+				size_t curr_line_start = get_line_start(buf->data, buf->size, matches[end_idx + 1].start);
+				if (curr_line_start <= prev_line_end) {
+					end_idx++;
+				} else {
+					break;
+				}
+			}
+
+			size_t block_start = get_line_start(buf->data, buf->size, matches[start_idx].start);
+			size_t block_end = get_line_end(buf->data, buf->size, matches[end_idx].end);
+			size_t line_num = get_line_number(buf->data, matches[start_idx].start);
+
+			printf("%s:%zu:", fname, line_num);
+
+			size_t p = block_start;
+			for (size_t k = start_idx; k <= end_idx; ++k) {
+				if (matches[k].start > p) {
+					fwrite(buf->data + p, 1, matches[k].start - p, stdout);
+				}
+				printf("\x1b[31m");
+				fwrite(buf->data + matches[k].start, 1, matches[k].end - matches[k].start, stdout);
+				printf("\x1b[0m");
+
+				printf("\x1b[32m");
+				fwrite(rplc, 1, rplc_len, stdout);
+				printf("\x1b[0m");
+
+				p = matches[k].end;
+			}
+			if (block_end > p) {
+				fwrite(buf->data + p, 1, block_end - p, stdout);
+			}
+			printf("\n");
+
+			start_idx = end_idx + 1;
+		}
+		free(matches);
+	}
+
+	return JSTR_RET_SUCC;
+	(void)fname_len;
+}
+
 static jstr_ret_ty
 process_file(const jstr_twoway_ty *R t,
              jstr_ty *R buf,
@@ -234,6 +398,11 @@ process_file(const jstr_twoway_ty *R t,
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
+
+	if (G_confirm_pass) {
+		return confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len);
+	}
+
 #if 0
 	if (ft == FT_UNKNOWN)
 		if (jstr_io_isbinary(buf->data, JSTR_MIN(64, file_size)))
@@ -306,6 +475,47 @@ init_defaults()
 	G.n = 1;
 }
 
+static void
+validate_confirm(int argc, char **argv)
+{
+	int has_c = 0;
+	int has_i = 0;
+	int has_files = 0;
+	int end_flags = 0;
+	for (int j = 3; j < argc; ++j) {
+		const char *arg = argv[j];
+		if (arg[0] == '-' && !end_flags) {
+			if (arg[1] == '-') {
+				if (arg[2] == '\0') {
+					end_flags = 1;
+				} else if (strcmp(arg + 2, "include") == 0 || strcmp(arg + 2, "exclude") == 0) {
+					j++;
+				}
+				continue;
+			}
+			for (const char *p = arg + 1; *p; ++p) {
+				if (*p == 'c') {
+					has_c = 1;
+				} else if (*p == 'i') {
+					has_i = 1;
+					break;
+				}
+			}
+		} else {
+			has_files = 1;
+		}
+	}
+	if (has_c) {
+		G.confirm = 1;
+		if (!has_i) {
+			jstr_errdie("%s: -c requires -i\n", argv[0]);
+		}
+		if (!has_files) {
+			jstr_errdie("%s: -c does not work with stdin\n", argv[0]);
+		}
+	}
+}
+
 /* clang-format off */
 
 const char *usage =
@@ -318,6 +528,9 @@ const char *usage =
 	_("  -i[SUFFIX]\n")
 	_("    Replace files in-place. The default is printing to stdout.\n")
 	_("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
+	_("  -c\n")
+	_("    Confirm functionality. Displays all proposed replacements and asks\n")
+	_("    for user confirmation ('y') before modifying files in-place.\n")
 	_("  -r\n")
 	_("    Recurse on the directories in FILES.\n")
 	_("  --include GLOB\n")
@@ -380,6 +593,7 @@ main(int argc, char **argv)
 		fprintf(fp, "%s", usage);
 		return ret;
 	}
+	validate_confirm(argc, argv);
 	struct stat st;
 	int ret;
 	args_ty a;
@@ -394,6 +608,13 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
+	if (G.confirm) {
+		G_confirm_pass = 1;
+	} else {
+		G_confirm_pass = 0;
+	}
+
+run_pass:;
 	int end_of_flags = 0;
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
@@ -468,6 +689,9 @@ use_regex_flag:
 						printf("%s", usage);
 						exit(EXIT_SUCCESS);
 						break;
+					case 'c':
+						G.confirm = 1;
+						break;
 					case 'l':
 						G.mode |= MODE_PRINT_CHANGES;
 						break;
@@ -510,6 +734,28 @@ process:
 		} else {
 			fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", ARG);
 			exit(EXIT_FAILURE);
+		}
+	}
+	if (G_confirm_pass) {
+		if (G_matches_found) {
+			printf("Confirm changes? [y/N]: ");
+			fflush(stdout);
+			char answer[100];
+			if (!fgets(answer, sizeof(answer), stdin)) {
+				fprintf(stderr, "Aborted.\n");
+				exit(EXIT_FAILURE);
+			}
+			if (strcmp(answer, "y\n") != 0 && strcmp(answer, "y") != 0) {
+				fprintf(stderr, "Aborted.\n");
+				exit(EXIT_FAILURE);
+			}
+			G_confirm_pass = 0;
+			G.mode &= ~MODE_HAVE_FILES;
+			jstr_free_j(&buf);
+			buf = (jstr_ty)JSTR_INIT;
+			goto run_pass;
+		} else {
+			return EXIT_SUCCESS;
 		}
 	}
 	/* If no file was passed, read from stdin. */

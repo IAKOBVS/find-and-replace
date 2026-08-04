@@ -5,7 +5,7 @@ It is a truth universally acknowledged, that substituting fixed strings with sed
 ## Installation:
 
 ```
-sudo ./setup && ./compile && ./install
+sudo ./setup && ./build && ./install
 ```
 
 ## Dependencies
@@ -24,6 +24,9 @@ Options:
   -i[SUFFIX]
     Replace files in-place. The default is printing to stdout.
     If SUFFIX is provided, backup the original file suffixed with SUFFIX.
+  -c
+    Confirm functionality. Displays all proposed replacements and asks
+    for user confirmation ('y') before modifying files in-place.
   -r
     Recurse on the directories in FILES.
   --include GLOB
@@ -51,9 +54,10 @@ Options:
 
 FIND and REPLACE shall be placed in that exact order.
 
-\b, \f, \n, \r, \t, \v, and \ooo (octal) in FIND and REPLACE will be unescaped.
+, ,
+, , 	, , and \ooo (octal) in FIND and REPLACE will be unescaped.
 Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.
-For example: '\\(this\\)' and '\\1' instead of '\(this\)' and '\1', unlike what
+For example: '\(this\)' and '\1' instead of '\(this\)' and '', unlike what
 you would do with sed.
 
 Filenames shall not start with - as they will be interpreted as a flag.

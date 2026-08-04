@@ -15,7 +15,7 @@ https://github.com/IAKOBVS/jstring: for the string replacement and filesystem fu
 ## Usage:
 
 ```
-find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...
+Usage: find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...
 Options:
   -G (default)
     Replace first occurence of FIND with REPLACE.

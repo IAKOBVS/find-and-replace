@@ -819,21 +819,25 @@ t_flag_order_z_Z() {
 }
 
 t_confirm_yes() {
-	td=$1; printf 'hello world\nla la la\n' > "$td/f"
+	td=$1; echo 'hello world' > "$td/f"; echo 'la la la' >> "$td/f"
 	out=$(echo 'y' | "$PROG" hello bye -c -i "$td/f" 2>&1)
 	content=$(cat "$td/f")
-	echo "$out" | grep -q 'f:1:' && [ "$content" = "$(printf 'bye world\nla la la\n')" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out] content=[$content]" > "$td/result"
+	echo 'bye world' > "$td/exp"
+	echo 'la la la' >> "$td/exp"
+	echo "$out" | grep -q 'f:1:' && cmp -s "$td/f" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: out=[$out] content=[$content]" > "$td/result"
 }
 
 t_confirm_abort() {
-	td=$1; printf 'hello world\nla la la\n' > "$td/f"
+	td=$1; echo 'hello world' > "$td/f"; echo 'la la la' >> "$td/f"
 	rc=0; out=$(echo 'n' | "$PROG" hello bye -c -i "$td/f" 2>&1) || rc=$?
 	content=$(cat "$td/f")
-	[ "$rc" -ne 0 ] && echo "$out" | grep -q 'Aborted.' && [ "$content" = "$(printf 'hello world\nla la la\n')" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] content=[$content]" > "$td/result"
+	echo 'hello world' > "$td/exp"
+	echo 'la la la' >> "$td/exp"
+	[ "$rc" -ne 0 ] && echo "$out" | grep -q 'Aborted.' && cmp -s "$td/f" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] content=[$content]" > "$td/result"
 }
 
 t_confirm_no_inplace_error() {
-	td=$1; printf 'hello\n' > "$td/f"
+	td=$1; echo 'hello' > "$td/f"
 	rc=0; out=$("$PROG" hello bye -c "$td/f" 2>&1) || rc=$?
 	[ "$rc" -ne 0 ] && echo "$out" | grep -q 'requires' && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out]" > "$td/result"
 }
@@ -845,7 +849,7 @@ t_confirm_stdin_error() {
 }
 
 t_confirm_multi_matches() {
-	td=$1; printf 'la la la\n' > "$td/f"
+	td=$1; echo 'la la la' > "$td/f"
 	out=$(echo 'y' | "$PROG" la lu -g -c -i "$td/f" 2>&1)
 	count=$(echo "$out" | grep -c 'f:1:')
 	[ "$count" -eq 1 ] && echo PASS > "$td/result" || echo "FAIL: expected 1 line with f:1:, got $count in [$out]" > "$td/result"

@@ -281,14 +281,33 @@ get_line_number(const char *data, size_t idx)
 }
 
 static void
+print_size_t(size_t val)
+{
+	char buf[32];
+	size_t idx = sizeof(buf);
+	if (val == 0) {
+		buf[--idx] = '0';
+	} else {
+		while (val > 0) {
+			buf[--idx] = '0' + (val % 10);
+			val /= 10;
+		}
+	}
+	jstr_io_fwrite(buf + idx, 1, sizeof(buf) - idx, stdout);
+}
+
+static void
 print_segment(const char *data, size_t len, const char *fname, size_t *curr_line_num, int *at_line_start)
 {
 	for (size_t i = 0; i < len; ++i) {
 		if (*at_line_start) {
-			printf("%s:%zu:", fname, *curr_line_num);
+			jstr_io_fwrite(fname, 1, strlen(fname), stdout);
+			jstr_io_putchar(':');
+			print_size_t(*curr_line_num);
+			jstr_io_putchar(':');
 			*at_line_start = 0;
 		}
-		putchar(data[i]);
+		jstr_io_putchar(data[i]);
 		if (data[i] == '\n') {
 			(*curr_line_num)++;
 			*at_line_start = 1;
@@ -372,20 +391,20 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				if (matches[k].start > p) {
 					print_segment(buf->data + p, matches[k].start - p, fname, &curr_line_num, &at_line_start);
 				}
-				printf(COLOR_RED);
+				jstr_io_fwrite(COLOR_RED, 1, strlen(COLOR_RED), stdout);
 				print_segment(buf->data + matches[k].start, matches[k].end - matches[k].start, fname, &curr_line_num, &at_line_start);
-				printf(COLOR_RESET);
+				jstr_io_fwrite(COLOR_RESET, 1, strlen(COLOR_RESET), stdout);
 
-				printf(COLOR_GREEN);
+				jstr_io_fwrite(COLOR_GREEN, 1, strlen(COLOR_GREEN), stdout);
 				print_segment(rplc, rplc_len, fname, &curr_line_num, &at_line_start);
-				printf(COLOR_RESET);
+				jstr_io_fwrite(COLOR_RESET, 1, strlen(COLOR_RESET), stdout);
 
 				p = matches[k].end;
 			}
 			if (block_end > p) {
 				print_segment(buf->data + p, block_end - p, fname, &curr_line_num, &at_line_start);
 			}
-			printf("\n");
+			jstr_io_putchar('\n');
 
 			start_idx = end_idx + 1;
 		}
@@ -498,47 +517,6 @@ init_defaults()
 	G.n = 1;
 }
 
-static void
-validate_confirm(int argc, char **argv)
-{
-	int has_c = 0;
-	int has_i = 0;
-	int has_files = 0;
-	int end_flags = 0;
-	for (int j = ARG_START_IDX; j < argc; ++j) {
-		const char *arg = argv[j];
-		if (arg[0] == '-' && !end_flags) {
-			if (arg[1] == '-') {
-				if (arg[2] == '\0') {
-					end_flags = 1;
-				} else if (strcmp(arg + 2, "include") == 0 || strcmp(arg + 2, "exclude") == 0) {
-					j++;
-				}
-				continue;
-			}
-			for (const char *p = arg + 1; *p; ++p) {
-				if (*p == 'c') {
-					has_c = 1;
-				} else if (*p == 'i') {
-					has_i = 1;
-					break;
-				}
-			}
-		} else {
-			has_files = 1;
-		}
-	}
-	if (has_c) {
-		G.confirm = 1;
-		if (!has_i) {
-			jstr_errdie("%s: -c requires -i\n", argv[0]);
-		}
-		if (!has_files) {
-			jstr_errdie("%s: -c does not work with stdin\n", argv[0]);
-		}
-	}
-}
-
 /* clang-format off */
 
 const char *usage =
@@ -616,7 +594,6 @@ main(int argc, char **argv)
 		fprintf(fp, "%s", usage);
 		return ret;
 	}
-	validate_confirm(argc, argv);
 	struct stat st;
 	int ret;
 	args_ty a;
@@ -631,6 +608,22 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
+	{
+		int has_confirm = 0;
+		int j;
+		for (j = ARG_START_IDX; j < argc; ++j) {
+			if (strcmp(argv[j], "--") == 0) {
+				break;
+			}
+			if (argv[j][0] == '-' && argv[j][1] != '-') {
+				if (strchr(argv[j], 'c')) {
+					has_confirm = 1;
+					break;
+				}
+			}
+		}
+		G.confirm = has_confirm;
+	}
 	if (G.confirm) {
 		G_confirm_pass = 1;
 	} else {
@@ -760,20 +753,26 @@ process:
 		}
 	}
 	if (G_confirm_pass) {
+		if (!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))) {
+			jstr_errdie("%s: -c requires -i\n", argv[0]);
+		}
+		if (!(G.mode & MODE_HAVE_FILES)) {
+			jstr_errdie("%s: -c does not work with stdin\n", argv[0]);
+		}
 		if (G_matches_found) {
-			printf("Confirm changes? [y/N]: ");
-			fflush(stdout);
-			char answer[ANSWER_BUF_SIZE];
-			if (!fgets(answer, sizeof(answer), stdin)) {
-				fprintf(stderr, "Aborted.\n");
-				exit(EXIT_FAILURE);
-			}
-			if (strcmp(answer, "y\n") != 0 && strcmp(answer, "y") != 0) {
-				fprintf(stderr, "Aborted.\n");
+			jstr_io_fwrite("Confirm changes? [y/N]: ", 1, S_LEN("Confirm changes? [y/N]: "), stdout);
+			jstr_io_fflush(stdout);
+			int c = jstr_io_getchar();
+			if (c != 'y') {
+				jstr_io_fwrite("Aborted.\n", 1, S_LEN("Aborted.\n"), stderr);
 				exit(EXIT_FAILURE);
 			}
 			G_confirm_pass = 0;
 			G.mode &= ~MODE_HAVE_FILES;
+			if (G.mode & MODE_USE_REGEX) {
+				jstr_re_free(&G.regex);
+			}
+			G.mode &= ~MODE_COMPILED;
 			jstr_free_j(&buf);
 			buf = (jstr_ty)JSTR_INIT;
 			goto run_pass;

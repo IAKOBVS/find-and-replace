@@ -54,10 +54,9 @@ Options:
 
 FIND and REPLACE shall be placed in that exact order.
 
-, ,
-, , 	, , and \ooo (octal) in FIND and REPLACE will be unescaped.
+\b, \f, \n, \r, \t, \v, and \ooo (octal) in FIND and REPLACE will be unescaped.
 Otherwise, unescaped backslashes will be removed, so use two backslashes for a backslash.
-For example: '\(this\)' and '\1' instead of '\(this\)' and '', unlike what
+For example: '\\(this\\)' and '\\1' instead of '\(this\)' and '\1', unlike what
 you would do with sed.
 
 Filenames shall not start with - as they will be interpreted as a flag.

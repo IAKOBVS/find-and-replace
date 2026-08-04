@@ -34,6 +34,13 @@
 
 #define DO_FREE 0
 
+#define ARG_START_IDX       3
+#define INITIAL_MATCHES_CAP 16
+#define ANSWER_BUF_SIZE     100
+#define COLOR_RED           "\x1b[31m"
+#define COLOR_GREEN         "\x1b[32m"
+#define COLOR_RESET         "\x1b[0m"
+
 typedef enum {
 	MODE_PRINT_STDOUT = 1 << 0,
 	MODE_PRINT_FILE = 1 << 1,
@@ -222,7 +229,7 @@ static void
 add_match(match_t **matches, size_t *cap, size_t *cnt, size_t start, size_t end)
 {
 	if (*cnt >= *cap) {
-		*cap = *cap == 0 ? 16 : *cap * 2;
+		*cap = *cap == 0 ? INITIAL_MATCHES_CAP : *cap * 2;
 		match_t *new_matches = realloc(*matches, *cap * sizeof(match_t));
 		DIE_IF(!new_matches, "%s", "Out of memory allocating matches.\n");
 		*matches = new_matches;
@@ -349,13 +356,13 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				if (matches[k].start > p) {
 					fwrite(buf->data + p, 1, matches[k].start - p, stdout);
 				}
-				printf("\x1b[31m");
+				printf(COLOR_RED);
 				fwrite(buf->data + matches[k].start, 1, matches[k].end - matches[k].start, stdout);
-				printf("\x1b[0m");
+				printf(COLOR_RESET);
 
-				printf("\x1b[32m");
+				printf(COLOR_GREEN);
 				fwrite(rplc, 1, rplc_len, stdout);
-				printf("\x1b[0m");
+				printf(COLOR_RESET);
 
 				p = matches[k].end;
 			}
@@ -482,7 +489,7 @@ validate_confirm(int argc, char **argv)
 	int has_i = 0;
 	int has_files = 0;
 	int end_flags = 0;
-	for (int j = 3; j < argc; ++j) {
+	for (int j = ARG_START_IDX; j < argc; ++j) {
 		const char *arg = argv[j];
 		if (arg[0] == '-' && !end_flags) {
 			if (arg[1] == '-') {
@@ -618,7 +625,7 @@ run_pass:;
 	int end_of_flags = 0;
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
-	for (i = 3; ARG; ++i) {
+	for (i = ARG_START_IDX; ARG; ++i) {
 		if (*ARG == '-' && !end_of_flags) {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
@@ -740,7 +747,7 @@ process:
 		if (G_matches_found) {
 			printf("Confirm changes? [y/N]: ");
 			fflush(stdout);
-			char answer[100];
+			char answer[ANSWER_BUF_SIZE];
 			if (!fgets(answer, sizeof(answer), stdin)) {
 				fprintf(stderr, "Aborted.\n");
 				exit(EXIT_FAILURE);

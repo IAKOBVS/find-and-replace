@@ -280,6 +280,22 @@ get_line_number(const char *data, size_t idx)
 	return line_num;
 }
 
+static void
+print_segment(const char *data, size_t len, const char *fname, size_t *curr_line_num, int *at_line_start)
+{
+	for (size_t i = 0; i < len; ++i) {
+		if (*at_line_start) {
+			printf("%s:%zu:", fname, *curr_line_num);
+			*at_line_start = 0;
+		}
+		putchar(data[i]);
+		if (data[i] == '\n') {
+			(*curr_line_num)++;
+			*at_line_start = 1;
+		}
+	}
+}
+
 static jstr_ret_ty
 confirm_scan_file(const jstr_twoway_ty *R t,
                   const jstr_ty *R buf,
@@ -349,25 +365,25 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			size_t block_end = get_line_end(buf->data, buf->size, matches[end_idx].end);
 			size_t line_num = get_line_number(buf->data, matches[start_idx].start);
 
-			printf("%s:%zu:", fname, line_num);
-
+			size_t curr_line_num = line_num;
+			int at_line_start = 1;
 			size_t p = block_start;
 			for (size_t k = start_idx; k <= end_idx; ++k) {
 				if (matches[k].start > p) {
-					fwrite(buf->data + p, 1, matches[k].start - p, stdout);
+					print_segment(buf->data + p, matches[k].start - p, fname, &curr_line_num, &at_line_start);
 				}
 				printf(COLOR_RED);
-				fwrite(buf->data + matches[k].start, 1, matches[k].end - matches[k].start, stdout);
+				print_segment(buf->data + matches[k].start, matches[k].end - matches[k].start, fname, &curr_line_num, &at_line_start);
 				printf(COLOR_RESET);
 
 				printf(COLOR_GREEN);
-				fwrite(rplc, 1, rplc_len, stdout);
+				print_segment(rplc, rplc_len, fname, &curr_line_num, &at_line_start);
 				printf(COLOR_RESET);
 
 				p = matches[k].end;
 			}
 			if (block_end > p) {
-				fwrite(buf->data + p, 1, block_end - p, stdout);
+				print_segment(buf->data + p, block_end - p, fname, &curr_line_num, &at_line_start);
 			}
 			printf("\n");
 

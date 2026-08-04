@@ -24,6 +24,9 @@ Options:
   -i[SUFFIX]
     Replace files in-place. The default is printing to stdout.
     If SUFFIX is provided, backup the original file suffixed with SUFFIX.
+  -c
+    Confirm functionality. Displays all proposed replacements and asks
+    for user confirmation ('y') before modifying files in-place.
   -r
     Recurse on the directories in FILES.
   --include GLOB

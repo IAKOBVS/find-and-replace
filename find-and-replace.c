@@ -441,7 +441,7 @@ process_file(const jstr_twoway_ty *R t,
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 
-	if (G_confirm_pass) {
+	if (G.confirm && G_confirm_pass) {
 		return confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len);
 	}
 
@@ -608,27 +608,7 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
-	{
-		int has_confirm = 0;
-		int j;
-		for (j = ARG_START_IDX; j < argc; ++j) {
-			if (strcmp(argv[j], "--") == 0) {
-				break;
-			}
-			if (argv[j][0] == '-' && argv[j][1] != '-') {
-				if (strchr(argv[j], 'c')) {
-					has_confirm = 1;
-					break;
-				}
-			}
-		}
-		G.confirm = has_confirm;
-	}
-	if (G.confirm) {
-		G_confirm_pass = 1;
-	} else {
-		G_confirm_pass = 0;
-	}
+	G_confirm_pass = 1;
 
 run_pass:;
 	int end_of_flags = 0;
@@ -753,31 +733,33 @@ process:
 		}
 	}
 	if (G_confirm_pass) {
-		if (!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))) {
-			jstr_errdie("%s: -c requires -i\n", argv[0]);
-		}
-		if (!(G.mode & MODE_HAVE_FILES)) {
-			jstr_errdie("%s: -c does not work with stdin\n", argv[0]);
-		}
-		if (G_matches_found) {
-			jstr_io_fwrite("Confirm changes? [y/N]: ", 1, S_LEN("Confirm changes? [y/N]: "), stdout);
-			jstr_io_fflush(stdout);
-			int c = jstr_io_getchar();
-			if (c != 'y') {
-				jstr_io_fwrite("Aborted.\n", 1, S_LEN("Aborted.\n"), stderr);
-				exit(EXIT_FAILURE);
+		if (G.confirm) {
+			if (!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))) {
+				jstr_errdie("%s: -c requires -i\n", argv[0]);
 			}
-			G_confirm_pass = 0;
-			G.mode &= ~MODE_HAVE_FILES;
-			if (G.mode & MODE_USE_REGEX) {
-				jstr_re_free(&G.regex);
+			if (!(G.mode & MODE_HAVE_FILES)) {
+				jstr_errdie("%s: -c does not work with stdin\n", argv[0]);
 			}
-			G.mode &= ~MODE_COMPILED;
-			jstr_free_j(&buf);
-			buf = (jstr_ty)JSTR_INIT;
-			goto run_pass;
-		} else {
-			return EXIT_SUCCESS;
+			if (G_matches_found) {
+				jstr_io_fwrite("Confirm changes? [y/N]: ", 1, S_LEN("Confirm changes? [y/N]: "), stdout);
+				jstr_io_fflush(stdout);
+				int c = jstr_io_getchar();
+				if (c != 'y') {
+					jstr_io_fwrite("Aborted.\n", 1, S_LEN("Aborted.\n"), stderr);
+					exit(EXIT_FAILURE);
+				}
+				G_confirm_pass = 0;
+				G.mode &= ~MODE_HAVE_FILES;
+				if (G.mode & MODE_USE_REGEX) {
+					jstr_re_free(&G.regex);
+				}
+				G.mode &= ~MODE_COMPILED;
+				jstr_free_j(&buf);
+				buf = (jstr_ty)JSTR_INIT;
+				goto run_pass;
+			} else {
+				return EXIT_SUCCESS;
+			}
 		}
 	}
 	/* If no file was passed, read from stdin. */

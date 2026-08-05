@@ -855,6 +855,31 @@ t_confirm_multi_matches() {
 	[ "$count" -eq 1 ] && echo PASS > "$td/result" || echo "FAIL: expected 1 line with f:1:, got $count in [$out]" > "$td/result"
 }
 
+t_confirm_no_match() {
+	td=$1; echo 'hello world' > "$td/f"
+	out=$("$PROG" abc def -c -i "$td/f" < /dev/null)
+	content=$(cat "$td/f")
+	[ "$out" = "" ] && [ "$content" = 'hello world' ] && echo PASS > "$td/result" || echo "FAIL: out=[$out] content=[$content]" > "$td/result"
+}
+
+t_confirm_multiline_match() {
+	td=$1; echo 'hello' > "$td/f"; echo 'world' >> "$td/f"
+	out=$(echo 'y' | "$PROG" 'hello\nworld' 'hi' -c -i -R "$td/f" 2>&1)
+	content=$(cat "$td/f")
+	echo 'hi' > "$td/exp"
+	echo "$out" | grep -q 'f:1:' && echo "$out" | grep -q 'f:2:' && cmp -s "$td/f" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: out=[$out] content=[$content]" > "$td/result"
+}
+
+t_confirm_recursive() {
+	td=$1; mkdir -p "$td/sub"
+	echo 'la la' > "$td/sub/f1"
+	echo 'la la la' > "$td/sub/f2"
+	out=$(echo 'y' | "$PROG" la lu -g -c -i -r "$td/sub" 2>&1)
+	c1=$(cat "$td/sub/f1")
+	c2=$(cat "$td/sub/f2")
+	echo "$out" | grep -q 'f1:1:' && echo "$out" | grep -q 'f2:1:' && [ "$c1" = 'lu lu' ] && [ "$c2" = 'lu lu lu' ] && echo PASS > "$td/result" || echo "FAIL: c1=[$c1] c2=[$c2]" > "$td/result"
+}
+
 printf '\n=== find-and-replace tests ===\n\n'
 
 # List all test functions here
@@ -985,6 +1010,9 @@ t_confirm_abort
 t_confirm_no_inplace_error
 t_confirm_stdin_error
 t_confirm_multi_matches
+t_confirm_no_match
+t_confirm_multiline_match
+t_confirm_recursive
 "
 
 # Launch tests in batches of MAX_JOBS at a time to avoid FD exhaustion

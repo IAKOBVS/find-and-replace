@@ -580,7 +580,7 @@ int
 main(int argc, char **argv)
 {
 	if (jstr_nullchk(argv[1])) {
-		fprintf(stderr, "%s", usage);
+		jstr_io_fwrite(usage, 1, strlen(usage), stderr);
 		return EXIT_FAILURE;
 	}
 	if (jstr_nullchk(argv[2])) {
@@ -591,7 +591,7 @@ main(int argc, char **argv)
 			fp = stdout;
 			ret = EXIT_SUCCESS;
 		}
-		fprintf(fp, "%s", usage);
+		jstr_io_fwrite(usage, 1, strlen(usage), fp);
 		return ret;
 	}
 	struct stat st;
@@ -702,7 +702,7 @@ use_regex_flag:
 						G.n = (size_t)-1;
 						break;
 					case 'h':
-						printf("%s", usage);
+						jstr_io_fwrite(usage, 1, strlen(usage), stdout);
 						exit(EXIT_SUCCESS);
 						break;
 					case 'c':
@@ -718,7 +718,10 @@ use_regex_flag:
 						G.cflags &= ~JSTR_RE_CF_NEWLINE;
 						break;
 					default:
-						fprintf(stderr, "find-and-replace: invalid flag '-%c'. See usage below:\n\n%s", *argp, usage);
+						jstr_io_fwrite("find-and-replace: invalid flag '-", 1, S_LEN("find-and-replace: invalid flag '-"), stderr);
+						jstr_io_putchar(*argp);
+						jstr_io_fwrite("'. See usage below:\n\n", 1, S_LEN("'. See usage below:\n\n"), stderr);
+						jstr_io_fwrite(usage, 1, strlen(usage), stderr);
 						exit(EXIT_FAILURE);
 						break;
 					}
@@ -748,7 +751,9 @@ process:
 				DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
 			}
 		} else {
-			fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", ARG);
+			jstr_io_fwrite("find-and-replace: ", 1, S_LEN("find-and-replace: "), stderr);
+			jstr_io_fwrite(ARG, 1, strlen(ARG), stderr);
+			jstr_io_fwrite(" is not a regular file or directory.\n", 1, S_LEN(" is not a regular file or directory.\n"), stderr);
 			exit(EXIT_FAILURE);
 		}
 	}

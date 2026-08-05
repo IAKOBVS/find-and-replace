@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 t_backup_content_identity() {

@@ -3,7 +3,8 @@
 PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
-CFLAGS='-march=native -O2'
+CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings'
+# CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings -fanalyzer'
 LFLAGS=""
 CC=$(readlink "$(command -v cc)")
 if [ "$COVERAGE" = "1" ]; then
@@ -11,5 +12,5 @@ if [ "$COVERAGE" = "1" ]; then
 	LFLAGS="--coverage"
 fi
 #shellcheck disable=SC2086
-cc "$DIR/$PROG.c" -o "$OUTDIR/$PROG" $CFLAGS -I"$DIR/lib/jstring/build/include" -L"$DIR/lib/jstring/build/lib" -ljstr $LFLAGS || exit
-echo "cc $DIR/$PROG.c -o $DIR/$PROG $CFLAGS -I$DIR/lib/jstring/build/include -L$DIR/lib/jstring/build/lib -ljstr $LFLAGS"
+cc "$DIR/$PROG.c" -o "$OUTDIR/$PROG" $CFLAGS -I"$DIR/lib/jstring/build/include" -I"./lib/jstring/build/include" -L"$DIR/lib/jstring/build/lib" -L"./lib/jstring/build/lib" -ljstr $LFLAGS || exit
+echo "cc $DIR/$PROG.c -o $DIR/$PROG $CFLAGS -I$DIR/lib/jstring/build/include -I./lib/jstring/build/include -L$DIR/lib/jstring/build/lib -L./lib/jstring/build/lib -ljstr $LFLAGS"

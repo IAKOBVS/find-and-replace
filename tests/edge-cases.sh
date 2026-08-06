@@ -1,19 +1,6 @@
-#!/bin/sh
-# Parallel find-and-replace integration tests (Edge Cases - Corrected)
+#!/bin/bash
+. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROG="$PROG_DIR/find-and-replace"
-export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-PASS=0
-FAIL=0
-
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-
-td_root=$(mktemp -d)
-trap 'rm -rf "$td_root"' EXIT
-
-# Updated: Accepts exit 0 if that is the tool's design for empty find
 t_edge_empty_find() {
 	td=$1; out=$(printf 'text\n' | "$PROG" '' 'replacement' 2>/dev/null)
 	[ "$out" = 'text' ] && echo PASS > "$td/result" || echo "FAIL: expected [text], got [$out]" > "$td/result"
@@ -44,7 +31,6 @@ t_edge_overlapping_matches() {
 	[ "$out" = 'Xba' ] && echo PASS > "$td/result" || echo "FAIL: expected [Xba] got [$out]" > "$td/result"
 }
 
-# Updated: Uses physical newlines for the multi-line match assertion
 t_edge_match_empty_lines() {
 	td=$1; out=$(printf '\n\n' | "$PROG" '^$' 'EMPTY' -REg 2>/dev/null)
 	expected=$(printf 'EMPTY\nEMPTY')
@@ -78,7 +64,7 @@ t_edge_massive_line() {
 }
 
 t_edge_replacement_longer_than_buffer() {
-	td=$1; 
+	td=$1
 	out=$(printf 'x\n' | "$PROG" 'x' '0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789' 2>/dev/null)
 	[ "$out" = '0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789' ] && echo PASS > "$td/result" || echo "FAIL: long replacement string failed" > "$td/result"
 }
@@ -91,7 +77,6 @@ t_edge_empty_file_inplace() {
 
 t_edge_regex_anchor_z() {
 	td=$1; out=$(printf 'abc\ndef\n' | "$PROG" '^abc$' 'MATCH' -Rz 2>/dev/null)
-	# With -z (no REG_NEWLINE), $ only matches at end of string, so ^abc$ doesn't match abc\n
 	[ "$out" = "$(printf 'abc\ndef')" ] || [ "$out" = "$(printf 'abc\ndef\n')" ] && echo PASS > "$td/result" || echo "FAIL: expected unchanged got [$(printf '%s' "$out" | tr '\n' '.')]" > "$td/result"
 }
 
@@ -119,8 +104,6 @@ t_edge_nonexistent_dir_recursive() {
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: nonexistent dir with -r should error" > "$td/result"
 }
 
-printf '\n=== find-and-replace edge case tests ===\n\n'
-
 TESTS="
 t_edge_empty_find
 t_edge_missing_trailing_newline
@@ -141,23 +124,4 @@ t_edge_unicode_bytes
 t_edge_readonly_file_backup
 t_edge_nonexistent_dir_recursive
 "
-
-for t in $TESTS; do
-	(
-		mkdir -p "$td_root/$t"
-		"$t" "$td_root/$t"
-	) &
-done
-wait
-
-for t in $TESTS; do
-	r=$(cat "$td_root/$t/result" 2>/dev/null)
-	case "$r" in
-		PASS*) PASS=$((PASS+1)); green PASS ;;
-		FAIL*) FAIL=$((FAIL+1)); red "FAIL (${r#FAIL: })" ;;
-		*)     FAIL=$((FAIL+1)); red "FAIL ($t: no result)" ;;
-	esac
-done
-
-printf '\n=== %d passed, %d failed ===\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] && exit 0 || exit 1
+run_suite "edge case tests" "$TESTS"

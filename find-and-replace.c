@@ -15,6 +15,7 @@
 
 #include <fnmatch.h>
 
+/* Die-with-message helpers and short argument aliases used in main(). */
 #define DIE_IF_PRINT(x, fmt, ...)                      \
 	do {                                           \
 		if (jstr_unlikely(x))                  \
@@ -34,8 +35,17 @@
 #define _(x) x
 #define SEP  '/'
 
+/* ANSI escape codes used to highlight the -c confirm mode preview. */
+#define COLOR_RED           "\x1b[31m"
+#define COLOR_GREEN         "\x1b[32m"
+#define COLOR_RESET         "\x1b[0m"
+#define CONFIRM_PROMPT      "Confirm changes? [y/N]: "
+#define CONFIRM_ABORTED     "Aborted.\n"
+#define INITIAL_MATCHES_CAP 16
+
 #define DO_FREE 0
 
+/* Mode bits tracked in G.mode: where output goes and what FIND means. */
 typedef enum {
 	MODE_PRINT_STDOUT = 1 << 0,
 	MODE_PRINT_FILE = 1 << 1,
@@ -48,6 +58,7 @@ typedef enum {
 	MODE_CONFIRM = 1 << 8,
 } mode_ty;
 
+/* Process-wide settings gathered from the command line. */
 typedef struct global_ty {
 	const char *include_glob;
 	const char *bak_suffix;
@@ -60,6 +71,14 @@ typedef struct global_ty {
 } global_ty;
 global_ty G = { .mode = MODE_PRINT_STDOUT };
 
+/* 1 while in the -c dry-run pass: process_file only scans/reports matches
+ * instead of modifying files. Reset before the second (real) pass. */
+int G_confirm_pass = 0;
+/* Set by the scan pass when at least one match exists; decides whether the
+ * confirmation prompt is shown. */
+int G_matches_found = 0;
+
+/* stat() wrapper: returns JSTR_RET_ERR (instead of failing silently) on error. */
 JSTR_FUNC
 static jstr_ret_ty
 xstat(const char *R file,
@@ -72,6 +91,8 @@ err:
 	JSTR_RETURN_ERR(JSTR_RET_ERR);
 }
 
+/* True if FNAME exists at all. Used only to detect backup-name collisions;
+ * access() is called with F_OK alone so read-only files still count. */
 static int
 file_exists(const char *R fname)
 {
@@ -121,6 +142,9 @@ process_buffer(const jstr_twoway_ty *R t,
                const char *R rplc,
                const size_t rplc_len)
 {
+	/* Holds the length of the replaced output. As a size_t when the fixed
+	 * and regex paths both store a length; the regex variant returns a
+	 * signed offset type that may hold a negative error code. */
 	union u {
 		size_t zu;
 		jstr_re_off_ty d;
@@ -129,6 +153,7 @@ process_buffer(const jstr_twoway_ty *R t,
 	char *bakp = NULL;
 	char bak[JSTR_IO_PATH_MAX];
 	if (G.mode & MODE_USE_REGEX) {
+		/* The regex engine rejects empty patterns, so short-circuit them. */
 		if (jstr_unlikely(find_len == 0)) {
 			changed.zu = 0;
 		} else {
@@ -140,20 +165,25 @@ process_buffer(const jstr_twoway_ty *R t,
 			changed.zu = (size_t)changed.d;
 		}
 	} else {
+		/* Fixed-string path uses the precompiled Two-Way matcher. */
 		changed.zu = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
 		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	/* Append newline if has space */
+	/* Keep the final buffer newline-terminated so file output ends cleanly. */
 	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity >= buf->size + S_LEN("\n") + 1)
 		buf->size = JSTR_PTR_DIFF(jstr_append_len_unsafe_p(buf->data, buf->size, "\n", 1), buf->data);
 	if (G.mode & MODE_PRINT_STDOUT) {
+		/* Default mode: write the (replaced) buffer to stdout. */
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	} else {
+		/* In-place mode (-i): nothing to do if nothing changed. */
 		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
 		if (G.mode & MODE_PRINT_FILE_BACKUP) {
+			/* -iSUFFIX: rename the original aside, then write the new file. */
 			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
 				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -169,6 +199,8 @@ process_buffer(const jstr_twoway_ty *R t,
 			if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		} else {
+			/* Plain -i: write to a temp file next to the original, then
+			 * rename it over the original for an atomic replace. */
 			bakp = bak;
 			if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak))) {
 				jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
@@ -198,6 +230,12 @@ process_buffer(const jstr_twoway_ty *R t,
 			}
 			bakp = NULL;
 		}
+		/* The file was successfully rewritten in place: report its name on
+		 * stderr (never stdout) so the caller can see what changed. */
+		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stderr) != fname_len))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		if (G.mode & MODE_PRINT_CHANGES) {
 			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -214,6 +252,207 @@ err:
 	return JSTR_RET_ERR;
 }
 
+/* One byte range of a find occurrence, relative to the start of the file. */
+typedef struct match_ty {
+	size_t start;
+	size_t end;
+} match_ty;
+
+/* Append one match range to the dynamically grown matches array. */
+static void
+add_match(match_ty *R *R matches,
+          size_t *R cap,
+          size_t *R cnt,
+          size_t start,
+          size_t end)
+{
+	if (*cnt >= *cap) {
+		*cap = *cap == 0 ? INITIAL_MATCHES_CAP : *cap * 2;
+		match_ty *const new_matches = (match_ty *)realloc(*matches, *cap * sizeof(match_ty));
+		DIE_IF(!new_matches, "%s", "Out of memory allocating matches.\n");
+		*matches = new_matches;
+	}
+	(*matches)[*cnt].start = start;
+	(*matches)[*cnt].end = end;
+	++*cnt;
+}
+
+/* Return the offset of the first byte of the line containing IDX. */
+static size_t
+get_line_start(const char *R data, size_t size, size_t idx)
+{
+	if (idx > size)
+		idx = size;
+	while (idx > 0 && data[idx - 1] != '\n')
+		--idx;
+	return idx;
+}
+
+/* Return one past the last byte of the line containing IDX (the index of the
+ * terminating '\n', or SIZE if the line is not newline-terminated). */
+static size_t
+get_line_end(const char *R data, size_t size, size_t idx)
+{
+	while (idx < size && data[idx] != '\n')
+		++idx;
+	return idx;
+}
+
+/* Count the 1-based line number of byte offset IDX. */
+static size_t
+get_line_number(const char *R data, size_t size, size_t idx)
+{
+	size_t line = 1;
+	size_t i;
+	for (i = 0; i < idx && i < size; ++i)
+		if (data[i] == '\n')
+			++line;
+	return line;
+}
+
+/* Write VAL in decimal to stdout without using printf. */
+static void
+print_size_t(size_t val)
+{
+	char buf[3 * sizeof(val) + 2];
+	size_t i = sizeof(buf);
+	if (val == 0)
+		buf[--i] = '0';
+	while (val > 0) {
+		buf[--i] = (char)('0' + val % 10);
+		val /= 10;
+	}
+	jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
+}
+
+/* Write a byte range to stdout, emitting the "file:line:" prefix lazily: the
+ * prefix is printed only when a line boundary is crossed, so that a single
+ * highlighted span that wraps across lines still gets a prefix per line and
+ * the prefix never lands inside a highlight block. */
+static void
+print_segment(const char *R data,
+              size_t len,
+              const char *R fname,
+              size_t fname_len,
+              size_t *R line,
+              int *R at_line_start)
+{
+	size_t i;
+	for (i = 0; i < len; ++i) {
+		if (*at_line_start) {
+			jstr_io_fwrite(fname, 1, fname_len, stdout);
+			jstr_io_putchar(':');
+			print_size_t(*line);
+			jstr_io_putchar(':');
+			*at_line_start = 0;
+		}
+		jstr_io_putchar(data[i]);
+		if (data[i] == '\n') {
+			++*line;
+			*at_line_start = 1;
+		}
+	}
+}
+
+static jstr_ret_ty
+confirm_scan_file(const jstr_twoway_ty *R t,
+                  const jstr_ty *R buf,
+                  const char *R fname,
+                  size_t fname_len,
+                  const char *R find,
+                  size_t find_len,
+                  const char *R rplc,
+                  size_t rplc_len)
+{
+	/* Collect every match range so they can be grouped by line for display. */
+	match_ty *matches = NULL;
+	size_t cap = 0;
+	size_t cnt = 0;
+	if (G.mode & MODE_USE_REGEX) {
+		if (find_len > 0) {
+			size_t off = 0;
+			regmatch_t rm = { 0 };
+			/* Search from each offset onward, mirroring the replacement loop
+			 * in process_buffer so the preview matches what will be changed. */
+			while (off < buf->size) {
+				int eflags = G.eflags;
+				/* '^' must not match again mid-line unless a newline anchor
+				 * is active and the previous byte was a newline. */
+				if (off > 0 && !(G.cflags & JSTR_RE_CF_NEWLINE && buf->data[off - 1] == '\n'))
+					eflags |= REG_NOTBOL;
+				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 1, &rm, eflags);
+				if (ret == JSTR_RE_RET_NOMATCH)
+					break;
+				if (ret != JSTR_RE_RET_NOERROR)
+					break;
+				const size_t m_start = off + (size_t)rm.rm_so;
+				const size_t m_end = off + (size_t)rm.rm_eo;
+				add_match(&matches, &cap, &cnt, m_start, m_end);
+				if (G.n == 1)
+					break;
+				off = m_end;
+				/* Force progress on a zero-length match (e.g. '^$'). */
+				if (rm.rm_so == rm.rm_eo)
+					++off;
+			}
+		}
+	} else {
+		if (find_len > 0) {
+			size_t off = 0;
+			/* Fixed-string pass uses the precompiled Two-Way matcher. */
+			while (off < buf->size) {
+				const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
+				if (p == NULL)
+					break;
+				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
+				const size_t m_end = m_start + find_len;
+				add_match(&matches, &cap, &cnt, m_start, m_end);
+				if (G.n == 1)
+					break;
+				off = m_end;
+			}
+		}
+	}
+	if (cnt > 0) {
+		G_matches_found = 1;
+		/* Print one line per original source line: merge all matches that
+		 * fall on the same line into a single block so the "file:line:"
+		 * prefix is printed only once per line. */
+		size_t i = 0;
+		while (i < cnt) {
+			/* Group consecutive matches that lie on the same line into one block. */
+			size_t j = i;
+			while (j + 1 < cnt && get_line_start(buf->data, buf->size, matches[j + 1].start) <= get_line_end(buf->data, buf->size, matches[j].end))
+				++j;
+			const size_t block_start = get_line_start(buf->data, buf->size, matches[i].start);
+			const size_t block_end = get_line_end(buf->data, buf->size, matches[j].end);
+			size_t line = get_line_number(buf->data, buf->size, matches[i].start);
+			size_t p = block_start;
+			int at_line_start = 1;
+			size_t k;
+			/* Between, in, and after each match of the block: untouched text
+			 * is printed plain, matched text in red, replacement in green. */
+			for (k = i; k <= j; ++k) {
+				if (matches[k].start > p)
+					print_segment(buf->data + p, matches[k].start - p, fname, fname_len, &line, &at_line_start);
+				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+				print_segment(buf->data + matches[k].start, matches[k].end - matches[k].start, fname, fname_len, &line, &at_line_start);
+				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+				print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
+				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				p = matches[k].end;
+			}
+			if (block_end > p)
+				print_segment(buf->data + p, block_end - p, fname, fname_len, &line, &at_line_start);
+			jstr_io_putchar('\n');
+			i = j + 1;
+		}
+	}
+	free(matches);
+	return JSTR_RET_SUCC;
+}
+
 static jstr_ret_ty
 process_file(const jstr_twoway_ty *R t,
              jstr_ty *R buf,
@@ -226,20 +465,28 @@ process_file(const jstr_twoway_ty *R t,
              const size_t rplc_len)
 {
 	const size_t file_size = (size_t)st->st_size;
+	/* A fixed-string find longer than the whole file cannot match. */
 	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len)
 		return JSTR_RET_SUCC;
 	/* Preallocate the length of the replace string. */
+	/* Worst-case output size = input + (longer replace) + trailing newline. */
 	if (rplc_len > find_len && !(G.mode & MODE_USE_REGEX))
 		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	/* Skip files with NUL bytes in the first 1 KiB. */
 	if (jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size)))
 		return JSTR_RET_SUCC;
+	/* During the -c dry-run pass, only scan and preview; the real edit
+	 * happens on the second pass after the user confirms. */
+	if (G_confirm_pass && (G.mode & MODE_CONFIRM))
+		return confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len);
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
 	return ret;
 }
 
+/* Per-directory-traversal context passed through ftw to callback_file. */
 typedef struct args_ty {
 	jstr_ty *buf;
 	const char *find;
@@ -249,6 +496,7 @@ typedef struct args_ty {
 	const jstr_twoway_ty *t;
 } args_ty;
 
+/* ftw callback: process every regular file the traversal yields. */
 static JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 {
 	const args_ty *const a = args;
@@ -257,11 +505,14 @@ static JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 	return JSTR_RET_SUCC;
 }
 
+/* Glob matcher state shared by --include/--exclude. */
 typedef struct matcher_args_ty {
 	const char *include_glob;
 	const char *exclude_glob;
 } matcher_args_ty;
 
+/* ftw matcher: return 1 to skip a file. --include only admits files whose
+ * basename matches; --exclude skips files whose basename matches. */
 static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 {
 	matcher_args_ty *a = (matcher_args_ty *)args;
@@ -275,6 +526,8 @@ static JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 	(void)fname_len;
 }
 
+/* Compile FIND once (regex or Two-Way fixed-string matcher) into the global
+ * state; MODE_COMPILED prevents recompilation on the second -c pass. */
 static jstr_ret_ty
 compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 {
@@ -315,6 +568,11 @@ const char *usage =
 	_("  -i[SUFFIX]\n")
 	_("    Replace files in-place. The default is printing to stdout.\n")
 	_("    If SUFFIX is provided, backup the original file suffixed with SUFFIX.\n")
+	_("  -c\n")
+	_("    Confirm mode. Dry-run scans the files and prints all matches in\n")
+	_("    file:line:line_content format, with the text to remove in red and the\n")
+	_("    replacement text in green. Prompts for confirmation ('y') before\n")
+	_("    modifying files in-place. Requires -i and at least one file.\n")
 	_("  -r\n")
 	_("    Recurse on the directories in FILES.\n")
 	_("  --include GLOB\n")
@@ -362,12 +620,13 @@ const char *usage =
 int
 main(int argc, char **argv)
 {
+	/* FIND/REPLACE are the first two arguments; missing -> print usage. */
 	if (jstr_nullchk(argv[1])) {
 		fprintf(stderr, "%s", usage);
 		return EXIT_FAILURE;
 	}
 	if (jstr_nullchk(argv[2])) {
-		/* -h */
+		/* Only one extra argument: treat "-h" as help, otherwise usage error. */
 		FILE *fp = stderr;
 		int ret = EXIT_FAILURE;
 		if (!strcmp(argv[1], "-h")) {
@@ -385,12 +644,17 @@ main(int argc, char **argv)
 	a.t = &t;
 	a.find = (const char *)FIND;
 	a.rplc = (const char *)RPLC;
+	/* Unescape \n, \t, ... in place; the unescaped length is the diff. */
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.include_glob = NULL;
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
+	/* -c does two full passes over the arguments: pass 1 (G_confirm_pass=1)
+	 * only scans and previews, pass 2 (after 'y') performs the real edits. */
+	G_confirm_pass = 1;
+run_pass:;
 	int end_of_flags = 0;
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
@@ -398,9 +662,11 @@ main(int argc, char **argv)
 		if (*ARG == '-' && !end_of_flags) {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
+				/* Plain -i: rewrite the file in place (no backup). */
 				if (ARG[2] == '\0') {
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
 				} else {
+					/* -iSUFFIX: keep the original as FILE + SUFFIX backup. */
 					G.bak_suffix = ARG + sizeof("-i") - 1;
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE_BACKUP;
@@ -452,13 +718,13 @@ main(int argc, char **argv)
 						G.cflags |= JSTR_RE_CF_ICASE;
 						goto use_regex_flag;
 					case 'R':
+					/* -E and -I imply -R: fall through to enable regex mode. */
 use_regex_flag:
 						G.mode |= MODE_USE_REGEX;
 						break;
 					case 'Z':
 						G.cflags |= JSTR_RE_CF_NEWLINE;
 						break;
-					/* TODO: implement */
 					case 'c':
 						G.mode |= MODE_CONFIRM;
 						break;
@@ -488,6 +754,7 @@ done_single:;
 			}
 			continue;
 		}
+		/* Non-flag argument: a file (or directory with -r) to process. */
 		G.mode |= MODE_HAVE_FILES;
 		ret = xstat(ARG, &st);
 		DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
@@ -495,15 +762,18 @@ done_single:;
 		if (IS_REG(st.st_mode)) {
 			const size_t fname_len = strlen(ARG);
 			if (!m.exclude_glob) {
-process:
+			process:
 				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
 			} else {
+				/* --exclude also filters files named on the command line. */
 				const char *fname = jstr_memrchr(ARG, SEP, fname_len);
 				fname = (fname != NULL && *(fname + 1)) ? fname + 1 : ARG;
 				if (fnmatch(m.exclude_glob, fname, 0))
 					goto process;
 			}
 		} else if (IS_DIR(st.st_mode)) {
+			/* Directories are only followed with -r; --include/--exclude are
+			 * enforced by the ftw matcher during the traversal. */
 			if (G.mode & MODE_USE_RECURSIVE) {
 				a.buf = &buf;
 				DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
@@ -513,8 +783,37 @@ process:
 			exit(EXIT_FAILURE);
 		}
 	}
+	/* End of the -c dry-run pass: no file has been touched yet. */
+	if (G_confirm_pass && (G.mode & MODE_CONFIRM)) {
+		if (!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))
+			jstr_errdie("%s: -c requires -i.\n", argv[0]);
+		if (!(G.mode & MODE_HAVE_FILES))
+			jstr_errdie("%s: -c does not work with stdin.\n", argv[0]);
+		if (G_matches_found) {
+			jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout);
+			jstr_io_fflush(stdout);
+			/* Only an explicit 'y' proceeds; anything else aborts and leaves
+			 * every file untouched. */
+			if (jstr_io_getchar() != 'y') {
+				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
+				exit(EXIT_FAILURE);
+			}
+			/* Reset all per-run state so the second pass performs the real
+			 * in-place edits with the same arguments. */
+			G_confirm_pass = 0;
+			G_matches_found = 0;
+			G.mode &= ~MODE_HAVE_FILES;
+			if (G.mode & MODE_USE_REGEX)
+				jstr_re_free(&G.regex);
+			G.mode &= ~MODE_COMPILED;
+			jstr_free_j(&buf);
+			goto run_pass;
+		}
+		return EXIT_SUCCESS;
+	}
 	/* If no file was passed, read from stdin. */
 	if (!(G.mode & MODE_HAVE_FILES)) {
+		/* In-place output and backups are meaningless without a real file. */
 		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.mode & MODE_PRINT_STDOUT)))
 			jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
 		if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))

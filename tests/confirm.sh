@@ -33,14 +33,14 @@ t_confirm_no_match() {
 t_confirm_multiline_regex() {
 	td=$1; printf 'hello\nworld\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null)
-	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$out" | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_multi_same_line() {
 	td=$1; printf 'la la\nla la\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" la lu -c -i -g "$td/f" 2>/dev/null)
 	[ "$(cat "$td/f")" = 'lu lu
-lu lu' ] && [ "$(printf '%s\n' "$out" | grep -c "$td/f:")" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+lu lu' ] && [ "$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -c "$td/f:")" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_recursive() {
@@ -67,7 +67,14 @@ t_confirm_stderr_no_report_on_abort() {
 	[ "$(cat "$td/err")" = 'Aborted.' ] && echo PASS > "$td/result" || echo "FAIL: stderr=[$(cat "$td/err")]" > "$td/result"
 }
 
+t_confirm_regex_backref() {
+	td=$1; printf 'abc-123\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" '([a-z]+)-([0-9]+)' 'Letters: \\1, Numbers: \\2' -c -i -E "$td/f" 2>/dev/null)
+	[ "$(cat "$td/f")" = 'Letters: abc, Numbers: 123' ] && printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Letters: abc, Numbers: 123" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+}
+
 TESTS="
+t_confirm_regex_backref
 t_confirm_yes
 t_confirm_abort
 t_confirm_no_inplace_err

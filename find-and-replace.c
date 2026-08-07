@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#define JSTR_PANIC                0
-#define JSTR_USE_UNLOCKED_IO_READ 1
+#define JSTR_PANIC                 0
+#define JSTR_USE_UNLOCKED_IO_READ  1
 #define JSTR_USE_UNLOCKED_IO_WRITE 1
 
 #include <jstr/jstr.h>
@@ -41,7 +41,7 @@
 #define COLOR_RESET         "\x1b[0m"
 #define CONFIRM_PROMPT      "Confirm changes? [y/N]: "
 #define CONFIRM_ABORTED     "Aborted.\n"
-#define INITIAL_MATCHES_CAP 16
+#define INITIAL_MATCHES_CAP 8
 
 #define DO_FREE 0
 
@@ -58,6 +58,34 @@ typedef enum {
 	MODE_CONFIRM = 1 << 8,
 } mode_ty;
 
+/* One byte range of a find occurrence, relative to the start of the file. */
+typedef struct match_ty {
+	size_t start;
+	size_t end;
+} match_ty;
+
+typedef struct matches_ty {
+	size_t cap;
+	size_t size;
+	match_ty *data;
+} matches_ty;
+
+/* One file collected during the -c scan pass: its name, stat, and full
+ * content. The content buffer is stolen from the shared buf so pass 2 edits
+ * it from memory instead of re-walking argv/ftw or re-reading the file. */
+typedef struct file_ty {
+	char *fname;
+	size_t fname_len;
+	struct stat st;
+	jstr_ty content;
+} file_ty;
+
+typedef struct files_ty {
+	size_t cap;
+	size_t size;
+	file_ty *data;
+} files_ty;
+
 /* Process-wide settings gathered from the command line. */
 typedef struct global_ty {
 	const char *include_glob;
@@ -67,30 +95,18 @@ typedef struct global_ty {
 	int mode;
 	int cflags;
 	int eflags;
+	/* Set by the scan pass when at least one match exists; decides whether the
+	 * confirmation prompt is shown. */
+	unsigned int matches_found;
+	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
+	 * instead of modifying files. Reset before the second (real) pass. */
+	int confirm_pass;
 	jstr_re_ty regex;
+	matches_ty matches;
+	/* Growable list of files to edit once the user confirms. */
+	files_ty files;
 } global_ty;
 global_ty G = { .mode = MODE_PRINT_STDOUT };
-
-/* 1 while in the -c dry-run pass: process_file only scans/reports matches
- * instead of modifying files. Reset before the second (real) pass. */
-int G_confirm_pass = 0;
-/* Set by the scan pass when at least one match exists; decides whether the
- * confirmation prompt is shown. */
-int G_matches_found = 0;
-
-/* One file collected during the -c scan pass: its name, stat, and full
- * content. The content buffer is stolen from the shared buf so pass 2 edits
- * it from memory instead of re-walking argv/ftw or re-reading the file. */
-typedef struct cached_file_ty {
-	char *fname;
-	size_t fname_len;
-	struct stat st;
-	jstr_ty content;
-} cached_file_ty;
-/* Growable list of files to edit once the user confirms. */
-static cached_file_ty *cached_files = NULL;
-static size_t cached_cnt = 0;
-static size_t cached_cap = 0;
 
 /* stat() wrapper: returns JSTR_RET_ERR (instead of failing silently) on error. */
 JSTR_FUNC
@@ -266,15 +282,9 @@ err:
 	return JSTR_RET_ERR;
 }
 
-/* One byte range of a find occurrence, relative to the start of the file. */
-typedef struct match_ty {
-	size_t start;
-	size_t end;
-} match_ty;
-
 /* Append one match range to the dynamically grown matches array. */
 static void
-add_match(match_ty *R *R matches,
+add_match(match_ty * R * R matches,
           size_t *R cap,
           size_t *R cnt,
           size_t start,
@@ -295,26 +305,26 @@ add_match(match_ty *R *R matches,
  * ftw->dirpath is a transient buffer reused across callbacks; the content
  * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
 static void
-add_cached_file(const char *R fname,
-                size_t fname_len,
-                const struct stat *st,
-                jstr_ty *R buf)
+add_file(const char *R fname,
+         size_t fname_len,
+         const struct stat *st,
+         jstr_ty *R buf)
 {
-	if (cached_cnt >= cached_cap) {
-		cached_cap = cached_cap == 0 ? INITIAL_MATCHES_CAP : cached_cap * 2;
-		cached_file_ty *const new_cached = (cached_file_ty *)realloc(cached_files, cached_cap * sizeof(cached_file_ty));
-		DIE_IF(!new_cached, "%s", "Out of memory allocating cached files.\n");
-		cached_files = new_cached;
+	if (G.files.size >= G.files.cap) {
+		G.files.cap = G.files.cap == 0 ? INITIAL_MATCHES_CAP : G.files.cap * 2;
+		file_ty *const tmp = (file_ty *)realloc(G.files.data, G.files.cap * sizeof(file_ty));
+		DIE_IF(!tmp, "%s", "Out of memory allocating cached files.\n");
+		G.files.data = tmp;
 	}
-	cached_files[cached_cnt].fname = (char *)malloc(fname_len + 1);
-	DIE_IF(!cached_files[cached_cnt].fname, "%s", "Out of memory copying cached filename.\n");
-	jstr_strcpy_len(cached_files[cached_cnt].fname, fname, fname_len);
-	cached_files[cached_cnt].fname_len = fname_len;
-	cached_files[cached_cnt].st = *st;
+	G.files.data[G.files.size].fname = (char *)malloc(fname_len + 1);
+	DIE_IF(!G.files.data[G.files.size].fname, "%s", "Out of memory copying cached filename.\n");
+	jstr_strcpy_len(G.files.data[G.files.size].fname, fname, fname_len);
+	G.files.data[G.files.size].fname_len = fname_len;
+	G.files.data[G.files.size].st = *st;
 	/* Take ownership of the already-read content and reset the shared buffer. */
-	cached_files[cached_cnt].content = *buf;
+	G.files.data[G.files.size].content = *buf;
 	*buf = (jstr_ty)JSTR_INIT;
-	++cached_cnt;
+	++G.files.size;
 }
 
 /* Return the offset of the first byte of the line containing IDX. */
@@ -380,9 +390,13 @@ print_segment(const char *R data,
 	size_t i;
 	for (i = 0; i < len; ++i) {
 		if (*at_line_start) {
+			jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 			jstr_io_fwrite(fname, 1, fname_len, stdout);
+			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			jstr_io_putchar(':');
+			jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 			print_size_t(*line);
+			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			jstr_io_putchar(':');
 			*at_line_start = 0;
 		}
@@ -406,9 +420,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
                   size_t *R out_matches)
 {
 	/* Collect every match range so they can be grouped by line for display. */
-	match_ty *matches = NULL;
-	size_t cap = 0;
-	size_t cnt = 0;
+	G.matches.size = 0;
 	if (G.mode & MODE_USE_REGEX) {
 		if (find_len > 0) {
 			size_t off = 0;
@@ -428,7 +440,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = off + (size_t)rm.rm_so;
 				const size_t m_end = off + (size_t)rm.rm_eo;
-				add_match(&matches, &cap, &cnt, m_start, m_end);
+				add_match(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
 				if (G.n == 1)
 					break;
 				off = m_end;
@@ -447,42 +459,42 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
 				const size_t m_end = m_start + find_len;
-				add_match(&matches, &cap, &cnt, m_start, m_end);
+				add_match(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
 				if (G.n == 1)
 					break;
 				off = m_end;
 			}
 		}
 	}
-	if (cnt > 0) {
-		G_matches_found = 1;
+	if (G.matches.size > 0) {
+		G.matches_found = 1;
 		/* Print one line per original source line: merge all matches that
 		 * fall on the same line into a single block so the "file:line:"
 		 * prefix is printed only once per line. */
 		size_t i = 0;
-		while (i < cnt) {
+		while (i < G.matches.size) {
 			/* Group consecutive matches that lie on the same line into one block. */
 			size_t j = i;
-			while (j + 1 < cnt && get_line_start(buf->data, buf->size, matches[j + 1].start) <= get_line_end(buf->data, buf->size, matches[j].end))
+			while (j + 1 < G.matches.size && get_line_start(buf->data, buf->size, G.matches.data[j + 1].start) <= get_line_end(buf->data, buf->size, G.matches.data[j].end))
 				++j;
-			const size_t block_start = get_line_start(buf->data, buf->size, matches[i].start);
-			const size_t block_end = get_line_end(buf->data, buf->size, matches[j].end);
-			size_t line = get_line_number(buf->data, buf->size, matches[i].start);
+			const size_t block_start = get_line_start(buf->data, buf->size, G.matches.data[i].start);
+			const size_t block_end = get_line_end(buf->data, buf->size, G.matches.data[j].end);
+			size_t line = get_line_number(buf->data, buf->size, G.matches.data[i].start);
 			size_t p = block_start;
 			int at_line_start = 1;
 			size_t k;
 			/* Between, in, and after each match of the block: untouched text
 			 * is printed plain, matched text in red, replacement in green. */
 			for (k = i; k <= j; ++k) {
-				if (matches[k].start > p)
-					print_segment(buf->data + p, matches[k].start - p, fname, fname_len, &line, &at_line_start);
+				if (G.matches.data[k].start > p)
+					print_segment(buf->data + p, G.matches.data[k].start - p, fname, fname_len, &line, &at_line_start);
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				print_segment(buf->data + matches[k].start, matches[k].end - matches[k].start, fname, fname_len, &line, &at_line_start);
+				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 				print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				p = matches[k].end;
+				p = G.matches.data[k].end;
 			}
 			if (block_end > p)
 				print_segment(buf->data + p, block_end - p, fname, fname_len, &line, &at_line_start);
@@ -490,8 +502,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			i = j + 1;
 		}
 	}
-	free(matches);
-	*out_matches = cnt;
+	*out_matches = G.matches.size;
 	return JSTR_RET_SUCC;
 }
 
@@ -523,12 +534,12 @@ process_file(const jstr_twoway_ty *R t,
 	/* During the -c dry-run pass, only scan and preview; the real edit
 	 * happens on the second pass after the user confirms. The file's content
 	 * is recorded so pass 2 edits it from memory without re-reading disk. */
-	if (G_confirm_pass && (G.mode & MODE_CONFIRM)) {
+	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
 		size_t matches = 0;
 		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
 		/* Only files with matches need editing on pass 2; steal their buffer. */
 		if (matches > 0)
-			add_cached_file(fname, fname_len, st, buf);
+			add_file(fname, fname_len, st, buf);
 		return ret;
 	}
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
@@ -700,10 +711,10 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
-	/* -c does two full passes: pass 1 (G_confirm_pass=1) only scans and
+	/* -c does two full passes: pass 1 (G.confirm_pass=1) only scans and
 	 * previews while collecting the file list; pass 2 (after 'y') re-reads
 	 * and edits each cached file. */
-	G_confirm_pass = 1;
+	G.confirm_pass = 1;
 	int end_of_flags = 0;
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
@@ -767,7 +778,7 @@ main(int argc, char **argv)
 						G.cflags |= JSTR_RE_CF_ICASE;
 						goto use_regex_flag;
 					case 'R':
-					/* -E and -I imply -R: fall through to enable regex mode. */
+						/* -E and -I imply -R: fall through to enable regex mode. */
 use_regex_flag:
 						G.mode |= MODE_USE_REGEX;
 						break;
@@ -811,7 +822,7 @@ done_single:;
 		if (IS_REG(st.st_mode)) {
 			const size_t fname_len = strlen(ARG);
 			if (!m.exclude_glob) {
-			process:
+process:
 				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
 			} else {
 				/* --exclude also filters files named on the command line. */
@@ -833,12 +844,12 @@ done_single:;
 		}
 	}
 	/* End of the -c dry-run pass: no file has been touched yet. */
-	if (G_confirm_pass && (G.mode & MODE_CONFIRM)) {
+	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
 		if (!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))
 			jstr_errdie("%s: -c requires -i.\n", argv[0]);
 		if (!(G.mode & MODE_HAVE_FILES))
 			jstr_errdie("%s: -c does not work with stdin.\n", argv[0]);
-		if (G_matches_found) {
+		if (G.matches_found) {
 			jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout);
 			jstr_io_fflush(stdout);
 			/* Only an explicit 'y' proceeds; anything else aborts and leaves
@@ -850,12 +861,11 @@ done_single:;
 			/* Second pass: edit each cached file's content from memory; the
 			 * buffers were read once during the scan, so no re-stat or
 			 * re-read is needed. The regex/twoway stay compiled. */
-			G_confirm_pass = 0;
-			G_matches_found = 0;
-			for (i = 0; i < cached_cnt; ++i) {
-				if (jstr_chk(process_buffer(&t, &cached_files[i].content, cached_files[i].fname, cached_files[i].fname_len, &cached_files[i].st, a.find, a.find_len, a.rplc, a.rplc_len)))
-					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", cached_files[i].fname, a.find, a.rplc);
-			}
+			G.confirm_pass = 0;
+			G.matches_found = 0;
+			for (i = 0; i < G.files.size; ++i)
+				if (jstr_chk(process_buffer(&t, &G.files.data[i].content, G.files.data[i].fname, G.files.data[i].fname_len, &G.files.data[i].st, a.find, a.find_len, a.rplc, a.rplc_len)))
+					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", G.files.data[i].fname, a.find, a.rplc);
 			return EXIT_SUCCESS;
 		}
 		return EXIT_SUCCESS;
@@ -872,6 +882,10 @@ done_single:;
 		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 	}
 #if DO_FREE /* We don't need to free since we're exiting. */
+	for (i = 0; i < G.files.size; ++i)
+		if (free(G.files.data[i].content))
+	free(G.files.data);
+	free(G.matches.data);
 	jstr_re_free(&G.regex);
 	jstr_free_j(&buf);
 #endif

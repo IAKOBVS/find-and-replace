@@ -443,7 +443,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				 * is active and the previous byte was a newline. */
 				if (off > 0 && !(G.cflags & JSTR_RE_CF_NEWLINE && buf->data[off - 1] == '\n'))
 					eflags |= REG_NOTBOL;
-				regmatch_t rm;
+				regmatch_t rm = {0};
 				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 1, &rm, eflags);
 				if (ret == JSTR_RE_RET_NOMATCH)
 					break;
@@ -501,8 +501,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				/* TODO: fix (buggy regex preview)
-				 * .* \\w* */
+				/* TODO: fix (buggy regex replace preview) */
 				if (!(G.mode & MODE_USE_REGEX)) {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 					print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);

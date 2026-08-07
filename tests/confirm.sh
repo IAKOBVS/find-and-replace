@@ -32,13 +32,13 @@ t_confirm_no_match() {
 
 t_confirm_multiline_regex() {
 	td=$1; printf 'hello\nworld\n' > "$td/f"
-	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null)
+	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
 	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$out" | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_multi_same_line() {
 	td=$1; printf 'la la\nla la\n' > "$td/f"
-	out=$(printf 'y\n' | "$PROG" la lu -c -i -g "$td/f" 2>/dev/null)
+	out=$(printf 'y\n' | "$PROG" la lu -c -i -g "$td/f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
 	[ "$(cat "$td/f")" = 'lu lu
 lu lu' ] && [ "$(printf '%s\n' "$out" | grep -c "$td/f:")" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
@@ -67,6 +67,12 @@ t_confirm_stderr_no_report_on_abort() {
 	[ "$(cat "$td/err")" = 'Aborted.' ] && echo PASS > "$td/result" || echo "FAIL: stderr=[$(cat "$td/err")]" > "$td/result"
 }
 
+t_confirm_greedy_regex() {
+	td=$1; printf 'hello\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" '.*' world -c -i -g -R "$td/f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(cat "$td/f")" = 'worldworld' ] && printf '%s' "$out" | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -79,5 +85,6 @@ t_confirm_recursive
 t_confirm_backup
 t_confirm_stderr_reports_changed
 t_confirm_stderr_no_report_on_abort
+t_confirm_greedy_regex
 "
 run_suite "confirm tests" "$TESTS"

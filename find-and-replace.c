@@ -731,17 +731,14 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE_BACKUP;
 				}
-				continue;
-			}
 			/* -- flag */
-			if (ARG[1] == '-') {
+			} else if (ARG[1] == '-') {
 				/* --include */
 				if (!strcmp(ARG + 2, "include")) {
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --include flag.\n");
 					m.include_glob = ARG;
-					continue;
 				}
 				/* --exclude */
 				if (!strcmp(ARG + 2, "exclude")) {
@@ -749,17 +746,13 @@ main(int argc, char **argv)
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --exclude flag.\n");
 					m.exclude_glob = ARG;
-					continue;
 				}
 				/* bare "--": stop flag parsing */
 				if (ARG[2] == '\0') {
 					end_of_flags = 1;
-					continue;
 				}
-				continue;
-			}
 			/* Single-dash flags, allow combinations */
-			{
+			} else {
 				const char *argp = ARG + 1;
 				for (;; ++argp) {
 					switch (*argp) {
@@ -812,7 +805,6 @@ use_regex_flag:
 				}
 done_single:;
 			}
-			continue;
 		}
 		/* Non-flag argument: a file (or directory with -r) to process. */
 		G.mode |= MODE_HAVE_FILES;

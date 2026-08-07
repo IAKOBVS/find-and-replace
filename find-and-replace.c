@@ -36,14 +36,18 @@
 #define SEP  '/'
 
 /* ANSI escape codes used to highlight the -c confirm mode preview. */
-#define COLOR_RED           "\x1b[31m"
-#define COLOR_GREEN         "\x1b[32m"
-#define COLOR_RESET         "\x1b[0m"
-#define CONFIRM_PROMPT      "Confirm changes? [y/N]: "
-#define CONFIRM_ABORTED     "Aborted.\n"
-#define INITIAL_MATCHES_CAP 8
+#define COLOR_RED       "\x1b[31m"
+#define COLOR_GREEN     "\x1b[32m"
+#define COLOR_RESET     "\x1b[0m"
+#define CONFIRM_PROMPT  "Confirm changes? [y/N]: "
+#define CONFIRM_ABORTED "Aborted.\n"
+#define MATCHES_CAP_MIN 8
+#define FILES_CAP_MIN   8
 
 #define DO_FREE 0
+
+/* Max size of total file content to keep in memory.  */
+#define FILE_CACHE_MAX (16 * JSTR_IO_GIB)
 
 /* Mode bits tracked in G.mode: where output goes and what FIND means. */
 typedef enum {
@@ -76,13 +80,15 @@ typedef struct matches_ty {
 typedef struct file_ty {
 	char *fname;
 	size_t fname_len;
-	struct stat st;
+	size_t content_size;
+	unsigned int st_mode;
 	jstr_ty content;
 } file_ty;
 
 typedef struct files_ty {
 	size_t cap;
 	size_t size;
+	size_t total_content_size;
 	file_ty *data;
 } files_ty;
 
@@ -284,47 +290,53 @@ err:
 
 /* Append one match range to the dynamically grown matches array. */
 static void
-match_add(match_ty * R * R matches,
-          size_t *R cap,
-          size_t *R cnt,
-          size_t start,
-          size_t end)
+match_pushback(matches_ty *R matches,
+               size_t start,
+               size_t end)
 {
-	if (*cnt >= *cap) {
-		*cap = *cap == 0 ? INITIAL_MATCHES_CAP : *cap * 2;
-		match_ty *const new_matches = (match_ty *)realloc(*matches, *cap * sizeof(match_ty));
+	if (matches->size >= matches->cap) {
+		matches->cap = (matches->cap == 0 ? MATCHES_CAP_MIN : matches->cap * 2);
+		match_ty *const new_matches = (match_ty *)realloc(matches->data, matches->cap * sizeof(match_ty));
 		DIE_IF(!new_matches, "%s", "Out of memory allocating matches.\n");
-		*matches = new_matches;
+		matches->data = new_matches;
 	}
-	(*matches)[*cnt].start = start;
-	(*matches)[*cnt].end = end;
-	++*cnt;
+	(matches->data)[matches->size].start = start;
+	(matches->data)[matches->size].end = end;
+	++matches->size;
 }
 
 /* Append one file to the -c confirm cache. The name is strdup'd because
  * ftw->dirpath is a transient buffer reused across callbacks; the content
  * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
 static void
-file_add(const char *R fname,
-         size_t fname_len,
-         const struct stat *st,
-         jstr_ty *R buf)
+file_pushback(files_ty *files,
+	      const char *R fname,
+              size_t fname_len,
+              const struct stat *st,
+              jstr_ty *R buf)
 {
-	if (G.files.size >= G.files.cap) {
-		G.files.cap = G.files.cap == 0 ? INITIAL_MATCHES_CAP : G.files.cap * 2;
-		file_ty *const tmp = (file_ty *)realloc(G.files.data, G.files.cap * sizeof(file_ty));
+	if (files->size >= files->cap) {
+		files->cap = (files->cap == 0 ? FILES_CAP_MIN : files->cap * 2);
+		file_ty *const tmp = (file_ty *)realloc(files->data, files->cap * sizeof(file_ty));
 		DIE_IF(!tmp, "%s", "Out of memory allocating cached files.\n");
-		G.files.data = tmp;
+		files->data = tmp;
 	}
-	G.files.data[G.files.size].fname = (char *)malloc(fname_len + 1);
-	DIE_IF(!G.files.data[G.files.size].fname, "%s", "Out of memory copying cached filename.\n");
-	jstr_strcpy_len(G.files.data[G.files.size].fname, fname, fname_len);
-	G.files.data[G.files.size].fname_len = fname_len;
-	G.files.data[G.files.size].st = *st;
+	file_ty *file = &files->data[files->size];
+	file->fname = (char *)malloc(fname_len + 1);
+	DIE_IF(!file->fname, "%s", "Out of memory copying cached filename.\n");
+	jstr_strcpy_len(file->fname, fname, fname_len);
+	file->fname_len = fname_len;
+	file->content_size = (size_t)st->st_size;
+	file->st_mode = st->st_mode;
 	/* Take ownership of the already-read content and reset the shared buffer. */
-	G.files.data[G.files.size].content = *buf;
-	*buf = (jstr_ty)JSTR_INIT;
-	++G.files.size;
+	if (jstr_likely(files->total_content_size < FILE_CACHE_MAX)) {
+		file->content = *buf;
+		*buf = (jstr_ty)JSTR_INIT;
+		files->total_content_size += file->content_size;
+	} else {
+		file->content = (jstr_ty)JSTR_INIT;
+	}
+	++files->size;
 }
 
 /* Return the offset of the first byte of the line containing IDX. */
@@ -423,16 +435,15 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	G.matches.size = 0;
 	if (G.mode & MODE_USE_REGEX) {
 		if (find_len > 0) {
-			size_t off = 0;
-			regmatch_t rm = { 0 };
 			/* Search from each offset onward, mirroring the replacement loop
 			 * in process_buffer so the preview matches what will be changed. */
-			while (off < buf->size) {
+			for (size_t off = 0; off < buf->size; ) {
 				int eflags = G.eflags;
 				/* '^' must not match again mid-line unless a newline anchor
 				 * is active and the previous byte was a newline. */
 				if (off > 0 && !(G.cflags & JSTR_RE_CF_NEWLINE && buf->data[off - 1] == '\n'))
 					eflags |= REG_NOTBOL;
+				regmatch_t rm;
 				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 1, &rm, eflags);
 				if (ret == JSTR_RE_RET_NOMATCH)
 					break;
@@ -440,7 +451,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = off + (size_t)rm.rm_so;
 				const size_t m_end = off + (size_t)rm.rm_eo;
-				match_add(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
+				match_pushback(&G.matches, m_start, m_end);
 				if (G.n == 1)
 					break;
 				off = m_end;
@@ -451,15 +462,14 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		}
 	} else {
 		if (find_len > 0) {
-			size_t off = 0;
 			/* Fixed-string pass uses the precompiled Two-Way matcher. */
-			while (off < buf->size) {
+			for (size_t off = 0; off < buf->size; ) {
 				const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
 				if (p == NULL)
 					break;
 				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
 				const size_t m_end = m_start + find_len;
-				match_add(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
+				match_pushback(&G.matches, m_start, m_end);
 				if (G.n == 1)
 					break;
 				off = m_end;
@@ -491,9 +501,13 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
-				print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
-				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				/* TODO: fix (buggy regex preview)
+				 * .* \\w* */
+				if (!(G.mode & MODE_USE_REGEX)) {
+					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+					print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
+					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				}
 				p = G.matches.data[k].end;
 			}
 			if (block_end > p)
@@ -539,7 +553,7 @@ process_file(const jstr_twoway_ty *R t,
 		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
 		/* Only files with matches need editing on pass 2; steal their buffer. */
 		if (matches > 0)
-			file_add(fname, fname_len, st, buf);
+			file_pushback(&G.files, fname, fname_len, st, buf);
 		return ret;
 	}
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
@@ -676,6 +690,19 @@ const char *usage =
 	_("If no file was passed, read from stdin.\n");
 
 /* clang-format on */
+
+static void
+cleanup()
+{
+#if DO_FREE /* We don't need to free since we're exiting. */
+	for (i = 0; i < G.files.size; ++i)
+		if (free(G.files.data[i].content))
+			free(G.files.data);
+	free(G.matches.data);
+	jstr_re_free(&G.regex);
+	jstr_free_j(&buf);
+#endif
+}
 
 int
 main(int argc, char **argv)
@@ -863,32 +890,34 @@ process:
 			 * re-read is needed. The regex/twoway stay compiled. */
 			G.confirm_pass = 0;
 			G.matches_found = 0;
-			for (i = 0; i < G.files.size; ++i)
-				if (jstr_chk(process_buffer(&t, &G.files.data[i].content, G.files.data[i].fname, G.files.data[i].fname_len, &G.files.data[i].st, a.find, a.find_len, a.rplc, a.rplc_len)))
-					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", G.files.data[i].fname, a.find, a.rplc);
-			return EXIT_SUCCESS;
+			struct stat st_file;
+			for (i = 0; i < G.files.size; ++i) {
+				file_ty *file = &G.files.data[i];
+				/* Read the file if the content is not in memory. */
+				if (jstr_unlikely(file->content.data == NULL)) {
+					jstr_empty_j(&buf);
+					DIE_IF(jstr_reserve_j(&buf, file->content_size), "%s", "Out of memory reading a file.\n");
+					DIE_IF(jstr_io_readfile_len_j(&buf, file->fname, 0, file->content_size), "%s", "Can't read a file->\n");
+				}
+				st_file.st_mode = file->st_mode;
+				if (jstr_chk(process_buffer(&t, &file->content, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
+					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find, a.rplc);
+			}
 		}
-		return EXIT_SUCCESS;
+	} else {
+		/* If no file was passed, read from stdin. */
+		if (!(G.mode & MODE_HAVE_FILES)) {
+			/* In-place output and backups are meaningless without a real file. */
+			if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.mode & MODE_PRINT_STDOUT)))
+				jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
+			if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
+				jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
+			DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)), "%s", "Failed reading stdin.\n");
+			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
+			DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+		}
 	}
-	/* If no file was passed, read from stdin. */
-	if (!(G.mode & MODE_HAVE_FILES)) {
-		/* In-place output and backups are meaningless without a real file. */
-		if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.mode & MODE_PRINT_STDOUT)))
-			jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
-		if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
-			jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
-		DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)), "%s", "Failed reading stdin.\n");
-		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
-		DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
-	}
-#if DO_FREE /* We don't need to free since we're exiting. */
-	for (i = 0; i < G.files.size; ++i)
-		if (free(G.files.data[i].content))
-	free(G.files.data);
-	free(G.matches.data);
-	jstr_re_free(&G.regex);
-	jstr_free_j(&buf);
-#endif
+	cleanup();
 	return EXIT_SUCCESS;
 	(void)argc;
 }

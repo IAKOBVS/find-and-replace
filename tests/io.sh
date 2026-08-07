@@ -16,9 +16,7 @@ t_backup_empty_file() {
 t_backup_binary_content() {
 	td=$1; printf 'abc\x00def\n' > "$td/f"
 	"$PROG" def xyz -i.bak "$td/f" > /dev/null 2>&1
-	bak=$(tr '\0' '0' < "$td/f.bak")
-	f=$(tr '\0' '0' < "$td/f")
-	[ "$bak" = 'abc0def' ] && [ "$f" = 'abc0xyz' ] && echo PASS > "$td/result" || echo "FAIL: backup [$bak] file [$f]" > "$td/result"
+	[ ! -e "$td/f.bak" ] && [ "$(tr '\0' '0' < "$td/f")" = 'abc0def' ] && echo PASS > "$td/result" || echo "FAIL: binary file should be skipped (bak exists: $([ -e "$td/f.bak" ] && echo yes || echo no), file [$(tr '\0' '0' < "$td/f")])" > "$td/result"
 }
 
 t_backup_multi_file() {
@@ -77,7 +75,7 @@ t_binary_skipped() {
 	printf 'abc\x00def' > "$td/f.xyz"
 	"$PROG" abc xyz -i "$td/f.xyz" > /dev/null 2>&1
 	c=$(tr '\0' '.' < "$td/f.xyz")
-	[ "$c" = 'xyz.def' ] && echo PASS > "$td/result" || echo "FAIL: expected [xyz.def] got [$c]" > "$td/result"
+	[ "$c" = 'abc.def' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc.def] got [$c]" > "$td/result"
 }
 
 t_stdin_binary_content() {

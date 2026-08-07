@@ -78,6 +78,20 @@ int G_confirm_pass = 0;
  * confirmation prompt is shown. */
 int G_matches_found = 0;
 
+/* One file collected during the -c scan pass: its name, stat, and full
+ * content. The content buffer is stolen from the shared buf so pass 2 edits
+ * it from memory instead of re-walking argv/ftw or re-reading the file. */
+typedef struct cached_file_ty {
+	char *fname;
+	size_t fname_len;
+	struct stat st;
+	jstr_ty content;
+} cached_file_ty;
+/* Growable list of files to edit once the user confirms. */
+static cached_file_ty *cached_files = NULL;
+static size_t cached_cnt = 0;
+static size_t cached_cap = 0;
+
 /* stat() wrapper: returns JSTR_RET_ERR (instead of failing silently) on error. */
 JSTR_FUNC
 static jstr_ret_ty
@@ -277,6 +291,32 @@ add_match(match_ty *R *R matches,
 	++*cnt;
 }
 
+/* Append one file to the -c confirm cache. The name is strdup'd because
+ * ftw->dirpath is a transient buffer reused across callbacks; the content
+ * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
+static void
+add_cached_file(const char *R fname,
+                size_t fname_len,
+                const struct stat *st,
+                jstr_ty *R buf)
+{
+	if (cached_cnt >= cached_cap) {
+		cached_cap = cached_cap == 0 ? INITIAL_MATCHES_CAP : cached_cap * 2;
+		cached_file_ty *const new_cached = (cached_file_ty *)realloc(cached_files, cached_cap * sizeof(cached_file_ty));
+		DIE_IF(!new_cached, "%s", "Out of memory allocating cached files.\n");
+		cached_files = new_cached;
+	}
+	cached_files[cached_cnt].fname = (char *)malloc(fname_len + 1);
+	DIE_IF(!cached_files[cached_cnt].fname, "%s", "Out of memory copying cached filename.\n");
+	jstr_strcpy_len(cached_files[cached_cnt].fname, fname, fname_len);
+	cached_files[cached_cnt].fname_len = fname_len;
+	cached_files[cached_cnt].st = *st;
+	/* Take ownership of the already-read content and reset the shared buffer. */
+	cached_files[cached_cnt].content = *buf;
+	*buf = (jstr_ty)JSTR_INIT;
+	++cached_cnt;
+}
+
 /* Return the offset of the first byte of the line containing IDX. */
 static size_t
 get_line_start(const char *R data, size_t size, size_t idx)
@@ -362,7 +402,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
                   const char *R find,
                   size_t find_len,
                   const char *R rplc,
-                  size_t rplc_len)
+                  size_t rplc_len,
+                  size_t *R out_matches)
 {
 	/* Collect every match range so they can be grouped by line for display. */
 	match_ty *matches = NULL;
@@ -450,6 +491,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		}
 	}
 	free(matches);
+	*out_matches = cnt;
 	return JSTR_RET_SUCC;
 }
 
@@ -479,9 +521,16 @@ process_file(const jstr_twoway_ty *R t,
 	if (jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size)))
 		return JSTR_RET_SUCC;
 	/* During the -c dry-run pass, only scan and preview; the real edit
-	 * happens on the second pass after the user confirms. */
-	if (G_confirm_pass && (G.mode & MODE_CONFIRM))
-		return confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len);
+	 * happens on the second pass after the user confirms. The file's content
+	 * is recorded so pass 2 edits it from memory without re-reading disk. */
+	if (G_confirm_pass && (G.mode & MODE_CONFIRM)) {
+		size_t matches = 0;
+		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
+		/* Only files with matches need editing on pass 2; steal their buffer. */
+		if (matches > 0)
+			add_cached_file(fname, fname_len, st, buf);
+		return ret;
+	}
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
 	return ret;
 }
@@ -651,10 +700,10 @@ main(int argc, char **argv)
 	m.exclude_glob = NULL;
 	jstr_ty buf = JSTR_INIT;
 	init_defaults();
-	/* -c does two full passes over the arguments: pass 1 (G_confirm_pass=1)
-	 * only scans and previews, pass 2 (after 'y') performs the real edits. */
+	/* -c does two full passes: pass 1 (G_confirm_pass=1) only scans and
+	 * previews while collecting the file list; pass 2 (after 'y') re-reads
+	 * and edits each cached file. */
 	G_confirm_pass = 1;
-run_pass:;
 	int end_of_flags = 0;
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
@@ -798,16 +847,16 @@ done_single:;
 				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
 				exit(EXIT_FAILURE);
 			}
-			/* Reset all per-run state so the second pass performs the real
-			 * in-place edits with the same arguments. */
+			/* Second pass: edit each cached file's content from memory; the
+			 * buffers were read once during the scan, so no re-stat or
+			 * re-read is needed. The regex/twoway stay compiled. */
 			G_confirm_pass = 0;
 			G_matches_found = 0;
-			G.mode &= ~MODE_HAVE_FILES;
-			if (G.mode & MODE_USE_REGEX)
-				jstr_re_free(&G.regex);
-			G.mode &= ~MODE_COMPILED;
-			jstr_free_j(&buf);
-			goto run_pass;
+			for (i = 0; i < cached_cnt; ++i) {
+				if (jstr_chk(process_buffer(&t, &cached_files[i].content, cached_files[i].fname, cached_files[i].fname_len, &cached_files[i].st, a.find, a.find_len, a.rplc, a.rplc_len)))
+					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", cached_files[i].fname, a.find, a.rplc);
+			}
+			return EXIT_SUCCESS;
 		}
 		return EXIT_SUCCESS;
 	}

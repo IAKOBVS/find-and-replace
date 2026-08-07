@@ -66,6 +66,7 @@ typedef enum {
 typedef struct match_ty {
 	size_t start;
 	size_t end;
+	regmatch_t rm[10];
 } match_ty;
 
 typedef struct matches_ty {
@@ -292,7 +293,8 @@ err:
 static void
 match_pushback(matches_ty *R matches,
                size_t start,
-               size_t end)
+               size_t end,
+               const regmatch_t *rm)
 {
 	if (matches->size >= matches->cap) {
 		matches->cap = (matches->cap == 0 ? MATCHES_CAP_MIN : matches->cap * 2);
@@ -302,6 +304,11 @@ match_pushback(matches_ty *R matches,
 	}
 	(matches->data)[matches->size].start = start;
 	(matches->data)[matches->size].end = end;
+	if (rm) {
+		memcpy((matches->data)[matches->size].rm, rm, 10 * sizeof(regmatch_t));
+	} else {
+		memset((matches->data)[matches->size].rm, 0, 10 * sizeof(regmatch_t));
+	}
 	++matches->size;
 }
 
@@ -431,6 +438,18 @@ confirm_scan_file(const jstr_twoway_ty *R t,
                   size_t rplc_len,
                   size_t *R out_matches)
 {
+	int backref = 0;
+	const unsigned char *rplc_backref1 = NULL;
+	const unsigned char *rplc_backref1_e = NULL;
+	if (G.mode & MODE_USE_REGEX) {
+		rplc_backref1 = (const unsigned char *)jstr_internal_re_rplcbackreffirst(rplc, rplc_len);
+		if (rplc_backref1 != NULL) {
+			backref = 1;
+			rplc_backref1_e = (const unsigned char *)jstr_internal_re_rplcbackreflast(rplc_backref1, rplc_len - JSTR_DIFF(rplc_backref1, rplc));
+			if (rplc_backref1_e == NULL)
+				rplc_backref1_e = rplc_backref1 + 2;
+		}
+	}
 	/* Collect every match range so they can be grouped by line for display. */
 	G.matches.size = 0;
 	if (G.mode & MODE_USE_REGEX) {
@@ -443,20 +462,21 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				 * is active and the previous byte was a newline. */
 				if (off > 0 && !(G.cflags & JSTR_RE_CF_NEWLINE && buf->data[off - 1] == '\n'))
 					eflags |= REG_NOTBOL;
-				regmatch_t rm = {0};
-				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 1, &rm, eflags);
+				regmatch_t rm[10];
+				memset(rm, 0, sizeof(rm));
+				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 10, rm, eflags);
 				if (ret == JSTR_RE_RET_NOMATCH)
 					break;
 				if (ret != JSTR_RE_RET_NOERROR)
 					break;
-				const size_t m_start = off + (size_t)rm.rm_so;
-				const size_t m_end = off + (size_t)rm.rm_eo;
-				match_pushback(&G.matches, m_start, m_end);
+				const size_t m_start = off + (size_t)rm[0].rm_so;
+				const size_t m_end = off + (size_t)rm[0].rm_eo;
+				match_pushback(&G.matches, m_start, m_end, rm);
 				if (G.n == 1)
 					break;
 				off = m_end;
 				/* Force progress on a zero-length match (e.g. '^$'). */
-				if (rm.rm_so == rm.rm_eo)
+				if (rm[0].rm_so == rm[0].rm_eo)
 					++off;
 			}
 		}
@@ -469,7 +489,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
 				const size_t m_end = m_start + find_len;
-				match_pushback(&G.matches, m_start, m_end);
+				match_pushback(&G.matches, m_start, m_end, NULL);
 				if (G.n == 1)
 					break;
 				off = m_end;
@@ -501,8 +521,26 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				/* TODO: fix (buggy regex replace preview) */
-				if (!(G.mode & MODE_USE_REGEX)) {
+				if (G.mode & MODE_USE_REGEX) {
+					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+					if (backref) {
+#if JSTR_DEBUG
+						size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len, 10);
+#else
+						size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
+#endif
+						char *rplc_buf = (char *)malloc(rplcwbackref_len + 1);
+						DIE_IF(!rplc_buf, "%s", "Out of memory allocating replacement buffer.\n");
+						const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
+						jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)rplc_buf, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
+						rplc_buf[rplcwbackref_len] = '\0';
+						print_segment(rplc_buf, rplcwbackref_len, fname, fname_len, &line, &at_line_start);
+						free(rplc_buf);
+					} else {
+						print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
+					}
+					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				} else {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 					print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
 					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);

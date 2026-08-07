@@ -33,14 +33,16 @@ t_confirm_no_match() {
 t_confirm_multiline_regex() {
 	td=$1; printf 'hello\nworld\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null)
-	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$out" | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_multi_same_line() {
 	td=$1; printf 'la la\nla la\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" la lu -c -i -g "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	[ "$(cat "$td/f")" = 'lu lu
-lu lu' ] && [ "$(printf '%s\n' "$out" | grep -c "$td/f:")" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+lu lu' ] && [ "$(printf '%s\n' "$clean_out" | grep -c "$td/f:")" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_recursive() {
@@ -67,6 +69,20 @@ t_confirm_stderr_no_report_on_abort() {
 	[ "$(cat "$td/err")" = 'Aborted.' ] && echo PASS > "$td/result" || echo "FAIL: stderr=[$(cat "$td/err")]" > "$td/result"
 }
 
+t_confirm_regex_preview_dot_star_g() {
+	td=$1; printf 'hello\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" ".*" "world" -gc -i -R "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(cat "$td/f")" = 'worldworld' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:helloworldworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_regex_preview_backref() {
+	td=$1; printf 'hello\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" "(h)ello" '\\1world' -gc -i -E "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:hellohworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -79,5 +95,7 @@ t_confirm_recursive
 t_confirm_backup
 t_confirm_stderr_reports_changed
 t_confirm_stderr_no_report_on_abort
+t_confirm_regex_preview_dot_star_g
+t_confirm_regex_preview_backref
 "
 run_suite "confirm tests" "$TESTS"

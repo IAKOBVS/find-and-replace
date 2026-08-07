@@ -284,7 +284,7 @@ err:
 
 /* Append one match range to the dynamically grown matches array. */
 static void
-add_match(match_ty * R * R matches,
+match_add(match_ty * R * R matches,
           size_t *R cap,
           size_t *R cnt,
           size_t start,
@@ -305,7 +305,7 @@ add_match(match_ty * R * R matches,
  * ftw->dirpath is a transient buffer reused across callbacks; the content
  * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
 static void
-add_file(const char *R fname,
+file_add(const char *R fname,
          size_t fname_len,
          const struct stat *st,
          jstr_ty *R buf)
@@ -329,7 +329,7 @@ add_file(const char *R fname,
 
 /* Return the offset of the first byte of the line containing IDX. */
 static size_t
-get_line_start(const char *R data, size_t size, size_t idx)
+line_get_start(const char *R data, size_t size, size_t idx)
 {
 	if (idx > size)
 		idx = size;
@@ -341,7 +341,7 @@ get_line_start(const char *R data, size_t size, size_t idx)
 /* Return one past the last byte of the line containing IDX (the index of the
  * terminating '\n', or SIZE if the line is not newline-terminated). */
 static size_t
-get_line_end(const char *R data, size_t size, size_t idx)
+line_get_end(const char *R data, size_t size, size_t idx)
 {
 	while (idx < size && data[idx] != '\n')
 		++idx;
@@ -350,7 +350,7 @@ get_line_end(const char *R data, size_t size, size_t idx)
 
 /* Count the 1-based line number of byte offset IDX. */
 static size_t
-get_line_number(const char *R data, size_t size, size_t idx)
+line_get_number(const char *R data, size_t size, size_t idx)
 {
 	size_t line = 1;
 	size_t i;
@@ -440,7 +440,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = off + (size_t)rm.rm_so;
 				const size_t m_end = off + (size_t)rm.rm_eo;
-				add_match(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
+				match_add(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
 				if (G.n == 1)
 					break;
 				off = m_end;
@@ -459,7 +459,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
 				const size_t m_end = m_start + find_len;
-				add_match(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
+				match_add(&G.matches.data, &G.matches.cap, &G.matches.size, m_start, m_end);
 				if (G.n == 1)
 					break;
 				off = m_end;
@@ -475,11 +475,11 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		while (i < G.matches.size) {
 			/* Group consecutive matches that lie on the same line into one block. */
 			size_t j = i;
-			while (j + 1 < G.matches.size && get_line_start(buf->data, buf->size, G.matches.data[j + 1].start) <= get_line_end(buf->data, buf->size, G.matches.data[j].end))
+			while (j + 1 < G.matches.size && line_get_start(buf->data, buf->size, G.matches.data[j + 1].start) <= line_get_end(buf->data, buf->size, G.matches.data[j].end))
 				++j;
-			const size_t block_start = get_line_start(buf->data, buf->size, G.matches.data[i].start);
-			const size_t block_end = get_line_end(buf->data, buf->size, G.matches.data[j].end);
-			size_t line = get_line_number(buf->data, buf->size, G.matches.data[i].start);
+			const size_t block_start = line_get_start(buf->data, buf->size, G.matches.data[i].start);
+			const size_t block_end = line_get_end(buf->data, buf->size, G.matches.data[j].end);
+			size_t line = line_get_number(buf->data, buf->size, G.matches.data[i].start);
 			size_t p = block_start;
 			int at_line_start = 1;
 			size_t k;
@@ -539,7 +539,7 @@ process_file(const jstr_twoway_ty *R t,
 		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
 		/* Only files with matches need editing on pass 2; steal their buffer. */
 		if (matches > 0)
-			add_file(fname, fname_len, st, buf);
+			file_add(fname, fname_len, st, buf);
 		return ret;
 	}
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);

@@ -112,6 +112,7 @@ typedef struct global_ty {
 	matches_ty matches;
 	/* Growable list of files to edit once the user confirms. */
 	files_ty files;
+	jstr_ty rplc_buf;
 } global_ty;
 global_ty G = { .mode = MODE_PRINT_STDOUT };
 
@@ -465,26 +466,24 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					continue;
 				}
 				int eflags = G.eflags;
-				/* '^' must not match again mid-line unless a newline anchor
-				 * is active and the previous byte was a newline. */
-				if (off > 0 && !(G.cflags & JSTR_RE_CF_NEWLINE && buf->data[off - 1] == '\n'))
-					eflags |= REG_NOTBOL;
 				regmatch_t rm[10];
 				memset(rm, 0, sizeof(rm));
 				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 10, rm, eflags);
+				/* Force progress on a zero-length match (e.g. '^$'). */
 				if (ret == JSTR_RE_RET_NOMATCH)
 					break;
 				if (ret != JSTR_RE_RET_NOERROR)
 					break;
+				if (rm[0].rm_so == rm[0].rm_eo) {
+					++off;
+					continue;
+				}
 				const size_t m_start = off + (size_t)rm[0].rm_so;
 				const size_t m_end = off + (size_t)rm[0].rm_eo;
 				match_pushback(&G.matches, m_start, m_end, rm);
 				if (G.n == 1)
 					break;
 				off = m_end;
-				/* Force progress on a zero-length match (e.g. '^$'). */
-				if (rm[0].rm_so == rm[0].rm_eo)
-					++off;
 			}
 		}
 	} else {
@@ -531,18 +530,14 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				if (G.mode & MODE_USE_REGEX) {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 					if (backref) {
-#if JSTR_DEBUG
-						size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len, 10);
-#else
 						size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
-#endif
-						char *rplc_buf = (char *)malloc(rplcwbackref_len + 1);
-						DIE_IF(!rplc_buf, "%s", "Out of memory allocating replacement buffer.\n");
+						jstr_empty_j(&G.rplc_buf);
+						DIE_IF(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1), "%s", "Out of memory.\n");
+						DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
 						const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
-						jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)rplc_buf, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
-						rplc_buf[rplcwbackref_len] = '\0';
-						print_segment(rplc_buf, rplcwbackref_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
-						free(rplc_buf);
+						jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
+						G.rplc_buf.data[rplcwbackref_len] = '\0';
+						print_segment(G.rplc_buf.data, rplcwbackref_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
 					} else {
 						print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
 					}
@@ -745,6 +740,7 @@ cleanup()
 	free(G.matches.data);
 	jstr_re_free(&G.regex);
 	jstr_free_j(&buf);
+	jstr_free_j(&G.rplc_buf);
 #endif
 }
 

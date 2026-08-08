@@ -457,6 +457,10 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			/* Search from each offset onward, mirroring the replacement loop
 			 * in process_buffer so the preview matches what will be changed. */
 			for (size_t off = 0; off < buf->size; ) {
+				if ((G.cflags & JSTR_RE_CF_NEWLINE) && buf->data[off] == '\n') {
+					++off;
+					continue;
+				}
 				int eflags = G.eflags;
 				/* '^' must not match again mid-line unless a newline anchor
 				 * is active and the previous byte was a newline. */

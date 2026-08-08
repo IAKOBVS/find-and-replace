@@ -190,6 +190,14 @@ process_buffer(const jstr_twoway_ty *R t,
 	int fd_tmp = -1;
 	char *bakp = NULL;
 	char bak[JSTR_IO_PATH_MAX];
+	int chopped = 0;
+	if ((G.mode & MODE_USE_REGEX) && (G.cflags & JSTR_RE_CF_NEWLINE)) {
+		if (buf->size > 0 && buf->data[buf->size - 1] == '\n') {
+			buf->size--;
+			buf->data[buf->size] = '\0';
+			chopped = 1;
+		}
+	}
 	if (G.mode & MODE_USE_REGEX) {
 		/* The regex engine rejects empty patterns, so short-circuit them. */
 		if (jstr_unlikely(find_len == 0)) {
@@ -207,6 +215,13 @@ process_buffer(const jstr_twoway_ty *R t,
 		changed.zu = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
 		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	if (chopped) {
+		if (jstr_unlikely(jstr_chk(jstr_reserve_j(buf, buf->size + 2)))) {
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		}
+		buf->data[buf->size++] = '\n';
+		buf->data[buf->size] = '\0';
 	}
 	/* Append newline if has space */
 	/* Keep the final buffer newline-terminated so file output ends cleanly. */
@@ -445,6 +460,12 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	int backref = 0;
 	const unsigned char *rplc_backref1 = NULL;
 	const unsigned char *rplc_backref1_e = NULL;
+	jstr_ty local_buf = *buf;
+	if ((G.mode & MODE_USE_REGEX) && (G.cflags & JSTR_RE_CF_NEWLINE)) {
+		if (local_buf.size > 0 && local_buf.data[local_buf.size - 1] == '\n') {
+			local_buf.size--;
+		}
+	}
 	if (G.mode & MODE_USE_REGEX) {
 		rplc_backref1 = (const unsigned char *)jstr_internal_re_rplcbackreffirst(rplc, rplc_len);
 		if (rplc_backref1 != NULL) {
@@ -460,40 +481,40 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		if (find_len > 0) {
 			/* Search from each offset onward, mirroring the replacement loop
 			 * in process_buffer so the preview matches what will be changed. */
-			for (size_t off = 0; off < buf->size; ) {
-				if ((G.cflags & JSTR_RE_CF_NEWLINE) && buf->data[off] == '\n') {
+			for (size_t off = 0; off < local_buf.size; ) {
+				if ((G.cflags & JSTR_RE_CF_NEWLINE) && local_buf.data[off] == '\n') {
 					++off;
 					continue;
 				}
 				int eflags = G.eflags;
 				regmatch_t rm[10];
 				memset(rm, 0, sizeof(rm));
-				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 10, rm, eflags);
+				const int ret = jstr_re_exec_len(&G.regex, local_buf.data + off, local_buf.size - off, 10, rm, eflags);
 				/* Force progress on a zero-length match (e.g. '^$'). */
 				if (ret == JSTR_RE_RET_NOMATCH)
 					break;
 				if (ret != JSTR_RE_RET_NOERROR)
 					break;
-				if (rm[0].rm_so == rm[0].rm_eo) {
-					++off;
-					continue;
-				}
 				const size_t m_start = off + (size_t)rm[0].rm_so;
 				const size_t m_end = off + (size_t)rm[0].rm_eo;
 				match_pushback(&G.matches, m_start, m_end, rm);
 				if (G.n == 1)
 					break;
-				off = m_end;
+				if (rm[0].rm_so == rm[0].rm_eo) {
+					off = m_end + 1;
+				} else {
+					off = m_end;
+				}
 			}
 		}
 	} else {
 		if (find_len > 0) {
 			/* Fixed-string pass uses the precompiled Two-Way matcher. */
-			for (size_t off = 0; off < buf->size; ) {
-				const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
+			for (size_t off = 0; off < local_buf.size; ) {
+				const char *const p = (const char *)jstr_memmem_exec(t, local_buf.data + off, local_buf.size - off, find, find_len);
 				if (p == NULL)
 					break;
-				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
+				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, local_buf.data);
 				const size_t m_end = m_start + find_len;
 				match_pushback(&G.matches, m_start, m_end, NULL);
 				if (G.n == 1)
@@ -511,11 +532,11 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		while (i < G.matches.size) {
 			/* Group consecutive matches that lie on the same line into one block. */
 			size_t j = i;
-			while (j + 1 < G.matches.size && line_get_start(buf->data, buf->size, G.matches.data[j + 1].start) <= line_get_end(buf->data, buf->size, G.matches.data[j].end))
+			while (j + 1 < G.matches.size && line_get_start(local_buf.data, local_buf.size, G.matches.data[j + 1].start) <= line_get_end(local_buf.data, local_buf.size, G.matches.data[j].end))
 				++j;
-			const size_t block_start = line_get_start(buf->data, buf->size, G.matches.data[i].start);
-			const size_t block_end = line_get_end(buf->data, buf->size, G.matches.data[j].end);
-			size_t line = line_get_number(buf->data, buf->size, G.matches.data[i].start);
+			const size_t block_start = line_get_start(local_buf.data, local_buf.size, G.matches.data[i].start);
+			const size_t block_end = line_get_end(local_buf.data, local_buf.size, G.matches.data[j].end);
+			size_t line = line_get_number(local_buf.data, local_buf.size, G.matches.data[i].start);
 			size_t p = block_start;
 			int at_line_start = 1;
 			size_t k;
@@ -523,9 +544,9 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			 * is printed plain, matched text in red, replacement in green. */
 			for (k = i; k <= j; ++k) {
 				if (G.matches.data[k].start > p)
-					print_segment(buf->data + p, G.matches.data[k].start - p, fname, fname_len, &line, &at_line_start, NULL);
+					print_segment(local_buf.data + p, G.matches.data[k].start - p, fname, fname_len, &line, &at_line_start, NULL);
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start, COLOR_RED);
+				print_segment(local_buf.data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start, COLOR_RED);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				if (G.mode & MODE_USE_REGEX) {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
@@ -534,7 +555,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 						jstr_empty_j(&G.rplc_buf);
 						DIE_IF(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1), "%s", "Out of memory.\n");
 						DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
-						const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
+						const unsigned char *mtc_src = (const unsigned char *)local_buf.data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
 						jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
 						G.rplc_buf.data[rplcwbackref_len] = '\0';
 						print_segment(G.rplc_buf.data, rplcwbackref_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
@@ -550,7 +571,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				p = G.matches.data[k].end;
 			}
 			if (block_end > p)
-				print_segment(buf->data + p, block_end - p, fname, fname_len, &line, &at_line_start, NULL);
+				print_segment(local_buf.data + p, block_end - p, fname, fname_len, &line, &at_line_start, NULL);
 			jstr_io_putchar('\n');
 			i = j + 1;
 		}

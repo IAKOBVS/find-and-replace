@@ -33,7 +33,7 @@ t_edge_overlapping_matches() {
 
 t_edge_match_empty_lines() {
 	td=$1; out=$(printf '\n\n' | "$PROG" '^$' 'EMPTY' -REg 2>/dev/null)
-	expected=$(printf 'EMPTY\n\n')
+	expected=$(printf 'EMPTY\nEMPTY\n')
 	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: multi-line mismatch" > "$td/result"
 }
 
@@ -104,6 +104,29 @@ t_edge_nonexistent_dir_recursive() {
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: nonexistent dir with -r should error" > "$td/result"
 }
 
+t_edge_empty_match_trailing_newline() {
+	td=$1
+	out=$(printf 'hell\n' | "$PROG" '()' 'x' -R -E -g 2>/dev/null)
+	expected=$(printf 'xhxexlxlx\n')
+	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: expected [$expected] got [$out]" > "$td/result"
+}
+
+t_edge_empty_match_trailing_newline_z() {
+	td=$1
+	out=$(printf 'hell\n' | "$PROG" '()' 'x' -R -E -g -z 2>/dev/null)
+	expected=$(printf 'xhxexlxlx\nx')
+	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: expected [$expected] got [$out]" > "$td/result"
+}
+
+t_edge_empty_match_confirm() {
+	td=$1
+	printf 'hell\n' > "$td/f"
+	out=$(echo 'y' | "$PROG" '()' 'x' -R -E -g -i -c "$td/f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+	content=$(cat "$td/f")
+	expected_content=$(printf 'xhxexlxlx\n')
+	[ "$content" = "$expected_content" ] && echo PASS > "$td/result" || echo "FAIL: confirm content got [$content]" > "$td/result"
+}
+
 TESTS="
 t_edge_empty_find
 t_edge_missing_trailing_newline
@@ -123,5 +146,8 @@ t_edge_many_matches
 t_edge_unicode_bytes
 t_edge_readonly_file_backup
 t_edge_nonexistent_dir_recursive
+t_edge_empty_match_trailing_newline
+t_edge_empty_match_trailing_newline_z
+t_edge_empty_match_confirm
 "
 run_suite "edge case tests" "$TESTS"

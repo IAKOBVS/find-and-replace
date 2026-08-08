@@ -458,12 +458,21 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	G.matches.size = 0;
 	if (G.mode & MODE_USE_REGEX) {
 		if (find_len > 0) {
+			/*
+			 * Scan for regex matches on the file buffer.
+			 * Mirror the state machine in jstr_internal_re_rplcn_backref_len_from_exec
+			 * to precisely align the on-the-fly confirm preview with actual replacements.
+			 */
 			size_t off = 0;
-			int prev_zero = 1;
+			int prev_zero = 1; /* Tracks if the previous match was zero-length. */
 			size_t n = G.n;
 			if (buf->size == 0)
 				n = 1;
 			while (n) {
+				/*
+				 * Stop if we are starting search at the end of the string, unless the
+				 * previous match was zero-length (which lets us match anchors at EOF).
+				 */
 				int matched_at_end = (off == buf->size);
 				if (matched_at_end) {
 					if (!prev_zero)
@@ -471,6 +480,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				} else if (off > buf->size) {
 					break;
 				}
+				/* Dynamically compute the eflags (like REG_NOTBOL) based on offset. */
 				const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
 				regmatch_t rm[10];
 				memset(rm, 0, sizeof(rm));
@@ -481,13 +491,19 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					const size_t m_end = off + (size_t)rm[0].rm_eo;
 					match_pushback(&G.matches, m_start, m_end, rm);
 					--n;
+					/* Set the next search pointer to the end of the match. */
 					size_t next_src = m_end;
+					/*
+					 * If the match was zero-length (e.g. ^$ or empty group), advance
+					 * past one character to prevent infinite loops, copying that character plain.
+					 */
 					if (match_len == 0) {
 						if (next_src < buf->size) {
 							++next_src;
 						}
 					}
 					off = next_src;
+					/* If the match occurred at the end of the string, stop immediately. */
 					if (matched_at_end)
 						break;
 					prev_zero = (match_len == 0);

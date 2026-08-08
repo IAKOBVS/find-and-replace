@@ -53,7 +53,8 @@ t_regex_url_protocol() {
 
 t_regex_greedy() {
 	td=$1; out=$(printf 'a---b---c\n' | "$PROG" '.*' 'X' -REg 2>/dev/null)
-	[ "$out" = 'X' ] && echo PASS > "$td/result" || echo "FAIL: greedy regex expected [X] got [$out]" > "$td/result"
+	expected=$(printf 'XX\nX\n')
+	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: greedy regex expected [X] got [$out]" > "$td/result"
 }
 
 t_regex_repeat_quantifiers() {

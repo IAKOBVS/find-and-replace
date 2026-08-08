@@ -73,7 +73,16 @@ t_confirm_regex_preview_dot_star_g() {
 	td=$1; printf 'hello\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" ".*" "world" -gc -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'worldworld' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:helloworldworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'world' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:helloworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_regex_preview_skip_newline() {
+	td=$1; printf ' b\n b\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" ".* b" "b" -gc -i -RE "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	# Under latest jstring, ".* b" replaced with "b" (with REG_NEWLINE) produces "b\nb\n"
+	[ "$(cat "$td/f")" = 'b
+b' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1: bb" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_backref() {
@@ -96,6 +105,7 @@ t_confirm_backup
 t_confirm_stderr_reports_changed
 t_confirm_stderr_no_report_on_abort
 t_confirm_regex_preview_dot_star_g
+t_confirm_regex_preview_skip_newline
 t_confirm_regex_preview_backref
 "
 run_suite "confirm tests" "$TESTS"

@@ -12,5 +12,5 @@ if [ "$COVERAGE" = "1" ]; then
 	LFLAGS="--coverage"
 fi
 #shellcheck disable=SC2086
-cc "$DIR/$PROG.c" -o "$OUTDIR/$PROG" $CFLAGS -ljstr $LFLAGS || exit
+cc "$DIR/$PROG.c" -o "$OUTDIR/$PROG" $CFLAGS -I"$DIR/lib/jstring/build/include" -L"$DIR/lib/jstring/build/lib" -Wl,-rpath,"$DIR/lib/jstring/build/lib" -ljstr $LFLAGS || exit
 echo "cc $DIR/$PROG.c -o $DIR/$PROG $CFLAGS -ljstr $LFLAGS"

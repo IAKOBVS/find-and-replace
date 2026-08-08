@@ -458,32 +458,60 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	G.matches.size = 0;
 	if (G.mode & MODE_USE_REGEX) {
 		if (find_len > 0) {
-			/* Search from each offset onward, mirroring the replacement loop
-			 * in process_buffer so the preview matches what will be changed. */
-			for (size_t off = 0; off < buf->size; ) {
-				if ((G.cflags & JSTR_RE_CF_NEWLINE) && buf->data[off] == '\n') {
-					++off;
-					continue;
+			/*
+			 * Scan for regex matches on the file buffer.
+			 * Mirror the state machine in jstr_internal_re_rplcn_backref_len_from_exec
+			 * to precisely align the on-the-fly confirm preview with actual replacements.
+			 */
+			size_t off = 0;
+			int prev_zero = 1; /* Tracks if the previous match was zero-length. */
+			size_t n = G.n;
+			if (buf->size == 0)
+				n = 1;
+			while (n) {
+				/*
+				 * Stop if we are starting search at the end of the string, unless the
+				 * previous match was zero-length (which lets us match anchors at EOF).
+				 */
+				int matched_at_end = (off == buf->size);
+				if (matched_at_end) {
+					if (!prev_zero)
+						break;
+				} else if (off > buf->size) {
+					break;
 				}
-				int eflags = G.eflags;
+				/* Dynamically compute the eflags (like REG_NOTBOL) based on offset. */
+				const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
 				regmatch_t rm[10];
 				memset(rm, 0, sizeof(rm));
-				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 10, rm, eflags);
-				/* Force progress on a zero-length match (e.g. '^$'). */
-				if (ret == JSTR_RE_RET_NOMATCH)
+				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 10, rm, eflags_curr);
+				if (ret == JSTR_RE_RET_NOERROR) {
+					const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
+					const size_t m_start = off + (size_t)rm[0].rm_so;
+					const size_t m_end = off + (size_t)rm[0].rm_eo;
+					match_pushback(&G.matches, m_start, m_end, rm);
+					--n;
+					/* Set the next search pointer to the end of the match. */
+					size_t next_src = m_end;
+					/*
+					 * If the match was zero-length (e.g. ^$ or empty group), advance
+					 * past one character to prevent infinite loops, copying that character plain.
+					 */
+					if (match_len == 0) {
+						if (next_src < buf->size) {
+							++next_src;
+						}
+					}
+					off = next_src;
+					/* If the match occurred at the end of the string, stop immediately. */
+					if (matched_at_end)
+						break;
+					prev_zero = (match_len == 0);
+				} else if (ret == JSTR_RE_RET_NOMATCH) {
 					break;
-				if (ret != JSTR_RE_RET_NOERROR)
+				} else {
 					break;
-				if (rm[0].rm_so == rm[0].rm_eo) {
-					++off;
-					continue;
 				}
-				const size_t m_start = off + (size_t)rm[0].rm_so;
-				const size_t m_end = off + (size_t)rm[0].rm_eo;
-				match_pushback(&G.matches, m_start, m_end, rm);
-				if (G.n == 1)
-					break;
-				off = m_end;
 			}
 		}
 	} else {

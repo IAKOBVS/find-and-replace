@@ -73,7 +73,8 @@ t_confirm_regex_preview_dot_star_g() {
 	td=$1; printf 'hello\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" ".*" "world" -gc -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'world' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:helloworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	expected_file=$(printf 'worldworld\nworld')
+	[ "$(cat "$td/f")" = "$expected_file" ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:helloworldworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_skip_newline() {

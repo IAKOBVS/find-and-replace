@@ -404,7 +404,8 @@ print_segment(const char *R data,
               const char *R fname,
               size_t fname_len,
               size_t *R line,
-              int *R at_line_start)
+              int *R at_line_start,
+              const char *active_color)
 {
 	size_t i;
 	for (i = 0; i < len; ++i) {
@@ -417,6 +418,8 @@ print_segment(const char *R data,
 			print_size_t(*line);
 			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			jstr_io_putchar(':');
+			if (active_color)
+				jstr_io_fwrite(active_color, 1, strlen(active_color), stdout);
 			*at_line_start = 0;
 		}
 		jstr_io_putchar(data[i]);
@@ -521,9 +524,9 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			 * is printed plain, matched text in red, replacement in green. */
 			for (k = i; k <= j; ++k) {
 				if (G.matches.data[k].start > p)
-					print_segment(buf->data + p, G.matches.data[k].start - p, fname, fname_len, &line, &at_line_start);
+					print_segment(buf->data + p, G.matches.data[k].start - p, fname, fname_len, &line, &at_line_start, NULL);
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start);
+				print_segment(buf->data + G.matches.data[k].start, G.matches.data[k].end - G.matches.data[k].start, fname, fname_len, &line, &at_line_start, COLOR_RED);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				if (G.mode & MODE_USE_REGEX) {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
@@ -538,21 +541,21 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 						const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
 						jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)rplc_buf, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
 						rplc_buf[rplcwbackref_len] = '\0';
-						print_segment(rplc_buf, rplcwbackref_len, fname, fname_len, &line, &at_line_start);
+						print_segment(rplc_buf, rplcwbackref_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
 						free(rplc_buf);
 					} else {
-						print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
+						print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
 					}
 					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				} else {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
-					print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start);
+					print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
 					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				}
 				p = G.matches.data[k].end;
 			}
 			if (block_end > p)
-				print_segment(buf->data + p, block_end - p, fname, fname_len, &line, &at_line_start);
+				print_segment(buf->data + p, block_end - p, fname, fname_len, &line, &at_line_start, NULL);
 			jstr_io_putchar('\n');
 			i = j + 1;
 		}

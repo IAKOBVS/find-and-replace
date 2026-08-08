@@ -110,6 +110,7 @@ typedef struct global_ty {
 	int confirm_pass;
 	jstr_re_ty regex;
 	matches_ty matches;
+	jstr_ty content_buf;
 	/* Growable list of files to edit once the user confirms. */
 	files_ty files;
 	jstr_ty rplc_buf;
@@ -191,6 +192,11 @@ process_buffer(const jstr_twoway_ty *R t,
 	char *bakp = NULL;
 	char bak[JSTR_IO_PATH_MAX];
 	if (G.mode & MODE_USE_REGEX) {
+		/* Temporarily remove trailing newline. */
+		if (buf->size && buf->data[buf->size - 1] == '\n') {
+			buf->data[buf->size - 1] = '\0';
+			--buf->size;
+		}
 		/* The regex engine rejects empty patterns, so short-circuit them. */
 		if (jstr_unlikely(find_len == 0)) {
 			changed.zu = 0;
@@ -210,8 +216,8 @@ process_buffer(const jstr_twoway_ty *R t,
 	}
 	/* Append newline if has space */
 	/* Keep the final buffer newline-terminated so file output ends cleanly. */
-	if (buf->size && buf->data[buf->size - 1] != '\n' && buf->capacity >= buf->size + S_LEN("\n") + 1)
-		buf->size = JSTR_PTR_DIFF(jstr_append_len_unsafe_p(buf->data, buf->size, "\n", 1), buf->data);
+	if (buf->size && buf->data[buf->size - 1] != '\n')
+		DIE_IF(jstr_pushback_j(buf, '\n'), "%s", "Out of memory.\n");
 	if (G.mode & MODE_PRINT_STDOUT) {
 		/* Default mode: write the (replaced) buffer to stdout. */
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
@@ -762,13 +768,15 @@ static void
 cleanup()
 {
 #if DO_FREE /* We don't need to free since we're exiting. */
-	for (i = 0; i < G.files.size; ++i)
-		if (free(G.files.data[i].content))
-			free(G.files.data);
+	for (unsigned int i = 0; i < G.files.size; ++i) {
+		free(G.files.data[i].content.data);
+		free(G.files.data[i].fname);
+	}
+	free(G.files.data);
 	free(G.matches.data);
 	jstr_re_free(&G.regex);
-	jstr_free_j(&buf);
 	jstr_free_j(&G.rplc_buf);
+	jstr_free_j(&G.content_buf);
 #endif
 }
 
@@ -804,7 +812,6 @@ main(int argc, char **argv)
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	m.include_glob = NULL;
 	m.exclude_glob = NULL;
-	jstr_ty buf = JSTR_INIT;
 	init_defaults();
 	/* -c does two full passes: pass 1 (G.confirm_pass=1) only scans and
 	 * previews while collecting the file list; pass 2 (after 'y') re-reads
@@ -918,7 +925,7 @@ done_single:;
 			const size_t fname_len = strlen(ARG);
 			if (!m.exclude_glob) {
 process:
-				DIE_IF(jstr_chk(process_file(&t, &buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
+				DIE_IF(jstr_chk(process_file(&t, &G.content_buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
 			} else {
 				/* --exclude also filters files named on the command line. */
 				const char *fname = jstr_memrchr(ARG, SEP, fname_len);
@@ -930,7 +937,7 @@ process:
 			/* Directories are only followed with -r; --include/--exclude are
 			 * enforced by the ftw matcher during the traversal. */
 			if (G.mode & MODE_USE_RECURSIVE) {
-				a.buf = &buf;
+				a.buf = &G.content_buf;
 				DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (m.include_glob || m.exclude_glob) ? matcher : NULL, &m)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, m.include_glob ? "1" : "0");
 			}
 		} else {
@@ -963,9 +970,9 @@ process:
 				file_ty *file = &G.files.data[i];
 				/* Read the file if the content is not in memory. */
 				if (jstr_unlikely(file->content.data == NULL)) {
-					jstr_empty_j(&buf);
-					DIE_IF(jstr_reserve_j(&buf, file->content_size), "%s", "Out of memory reading a file.\n");
-					DIE_IF(jstr_io_readfile_len_j(&buf, file->fname, 0, file->content_size), "%s", "Can't read a file->\n");
+					jstr_empty_j(&G.content_buf);
+					DIE_IF(jstr_reserve_j(&G.content_buf, file->content_size), "%s", "Out of memory reading a file.\n");
+					DIE_IF(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size), "%s", "Can't read a file->\n");
 				}
 				st_file.st_mode = file->st_mode;
 				if (jstr_chk(process_buffer(&t, &file->content, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
@@ -980,9 +987,9 @@ process:
 				jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
 			if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
 				jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
-			DIE_IF(jstr_chk(jstr_io_readstdin_j(&buf)), "%s", "Failed reading stdin.\n");
+			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
-			DIE_IF(jstr_chk(process_buffer(&t, &buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+			DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 		}
 	}
 	cleanup();

@@ -112,7 +112,6 @@ typedef struct global_ty {
 	matches_ty matches;
 	/* Growable list of files to edit once the user confirms. */
 	files_ty files;
-	jstr_ty rplc_buf;
 } global_ty;
 global_ty G = { .mode = MODE_PRINT_STDOUT };
 
@@ -443,15 +442,9 @@ confirm_scan_file(const jstr_twoway_ty *R t,
                   size_t *R out_matches)
 {
 	int backref = 0;
-	const unsigned char *rplc_backref1 = NULL;
-	const unsigned char *rplc_backref1_e = NULL;
 	if (G.mode & MODE_USE_REGEX) {
-		rplc_backref1 = (const unsigned char *)jstr_internal_re_rplcbackreffirst(rplc, rplc_len);
-		if (rplc_backref1 != NULL) {
+		if (jstr_internal_re_rplcbackreffirst(rplc, rplc_len) != NULL) {
 			backref = 1;
-			rplc_backref1_e = (const unsigned char *)jstr_internal_re_rplcbackreflast(rplc_backref1, rplc_len - JSTR_DIFF(rplc_backref1, rplc));
-			if (rplc_backref1_e == NULL)
-				rplc_backref1_e = rplc_backref1 + 2;
 		}
 	}
 	/* Collect every match range so they can be grouped by line for display. */
@@ -530,14 +523,42 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				if (G.mode & MODE_USE_REGEX) {
 					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 					if (backref) {
-						size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
-						jstr_empty_j(&G.rplc_buf);
-						DIE_IF(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1), "%s", "Out of memory.\n");
-						DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
 						const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
-						jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
-						G.rplc_buf.data[rplcwbackref_len] = '\0';
-						print_segment(G.rplc_buf.data, rplcwbackref_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
+						const unsigned char *rplc_ptr = (const unsigned char *)rplc;
+						const unsigned char *rplc_end = (const unsigned char *)rplc + rplc_len;
+						const unsigned char *rplc_o = rplc_ptr;
+						for (;;) {
+							rplc_o = rplc_ptr;
+							rplc_ptr = (const unsigned char *)memchr(rplc_ptr, '\\', JSTR_DIFF(rplc_end, rplc_ptr));
+							if (jstr_nullchk(rplc_ptr))
+								break;
+							if (rplc_ptr > rplc_o) {
+								print_segment((const char *)rplc_o, JSTR_DIFF(rplc_ptr, rplc_o), fname, fname_len, &line, &at_line_start, COLOR_GREEN);
+							}
+							if (jstr_unlikely(rplc_ptr == rplc_end - 1)) {
+								/* Trailing backslash. Print it and stop. */
+								print_segment("\\", 1, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
+								rplc_o = rplc_end;
+								break;
+							}
+							int c = *(rplc_ptr + 1);
+							if (jstr_likely(jstr_isdigit(c))) {
+								c -= '0';
+								const regmatch_t *rm = G.matches.data[k].rm;
+								if (rm[c].rm_so != -1) {
+									print_segment((const char *)(mtc_src + rm[c].rm_so), (size_t)(rm[c].rm_eo - rm[c].rm_so), fname, fname_len, &line, &at_line_start, COLOR_GREEN);
+								}
+							} else {
+								char escape_seq[2];
+								escape_seq[0] = '\\';
+								escape_seq[1] = (char)c;
+								print_segment(escape_seq, 2, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
+							}
+							rplc_ptr += 2;
+						}
+						if (rplc_end > rplc_o) {
+							print_segment((const char *)rplc_o, JSTR_DIFF(rplc_end, rplc_o), fname, fname_len, &line, &at_line_start, COLOR_GREEN);
+						}
 					} else {
 						print_segment(rplc, rplc_len, fname, fname_len, &line, &at_line_start, COLOR_GREEN);
 					}
@@ -740,7 +761,6 @@ cleanup()
 	free(G.matches.data);
 	jstr_re_free(&G.regex);
 	jstr_free_j(&buf);
-	jstr_free_j(&G.rplc_buf);
 #endif
 }
 

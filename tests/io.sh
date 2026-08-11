@@ -78,6 +78,25 @@ t_binary_skipped() {
 	[ "$c" = 'abc.def' ] && echo PASS > "$td/result" || echo "FAIL: expected [abc.def] got [$c]" > "$td/result"
 }
 
+t_large_text_file_processed() {
+	td=$1
+	i=0; : > "$td/f"
+	while [ $i -lt 200 ]; do printf 'hello world\n' >> "$td/f"; i=$((i + 1)); done
+	[ "$(wc -c < "$td/f")" -gt 1024 ] || { echo "FAIL: fixture too small" > "$td/result"; return; }
+	"$PROG" hello goodbye -i -g "$td/f" > /dev/null 2>&1
+	left=$(grep -c hello "$td/f")
+	[ "$left" = 0 ] && echo PASS > "$td/result" || echo "FAIL: >1KiB text file skipped (hello left: [$left])" > "$td/result"
+}
+
+t_binary_nul_past_kib_processed() {
+	td=$1
+	i=0; : > "$td/f"
+	while [ $i -lt 120 ]; do printf 'aaaaaaaa\n' >> "$td/f"; i=$((i + 1)); done
+	printf '\x00def\n' >> "$td/f"
+	"$PROG" def xyz -i "$td/f" > /dev/null 2>&1
+	grep -q xyz "$td/f" && echo PASS > "$td/result" || echo "FAIL: late-NUL file was skipped" > "$td/result"
+}
+
 t_stdin_binary_content() {
 	td=$1
 	printf 'abc\x00def' | "$PROG" abc xyz -g 2>/dev/null > "$td/out"
@@ -148,6 +167,8 @@ t_inplace_identical
 t_backup_twice
 t_inplace_multi_file_mixed
 t_binary_skipped
+t_large_text_file_processed
+t_binary_nul_past_kib_processed
 t_stdin_binary_content
 t_non_regular_file
 t_readonly_dir_inplace

@@ -1,35 +1,63 @@
 # find-and-replace
 
-Single-file C CLI tool (`find-and-replace.c`, ~525 lines) for fixed-string or regex find-and-replace on files, with optional recursion, glob filtering, and in-place editing with backups.
+Multi-file C CLI tool (common header `common.h` + `main.c`, `files.c`,
+`process.c`, `confirm.c`, ~1100 lines) for fixed-string or regex
+find-and-replace on files, with optional recursion, glob filtering, and
+in-place editing with backups.
 
 ## Setup & build
 
 ```
 sudo ./setup   # clones lib/jstring from github.com/IAKOBVS/jstring, compiles + tests it
-./compile      # links against lib/jstring/build/lib/libjstr.so
+./compile      # parallel-compiles the 4 translation units, links against lib/jstring/build/lib/libjstr.so
 sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 ```
 
+- `./compile` compiles all `*.c` units **in parallel** (`cc -c ... &` + `wait`), then links
 - `COVERAGE=1 ./compile` builds with `--coverage` flags for `gcov` analysis
 - `./update` runs `git restore && ./update` inside `lib/jstring` (update jstring dependency)
-- `./generate-readme` rebuilds `README.md` from `.README.md` + usage strings in source
-- `./coverage` builds with coverage, runs all tests, and runs `gcov`
+- `./generate-readme` rebuilds `README.md` from `.README.md` + usage strings in `main.c`
+- `./coverage` builds with coverage, runs all tests, and runs `gcov` on all 4 units
+
+## Source layout
+
+| File | Purpose |
+|---|---|
+| `common.h` | Includes, shared macros (`DIE_IF`, `S_LEN`, `R`, MODE_* bits), core types (`mode_ty`, `match_ty`, `matches_ty`, `file_ty`, `files_ty`, `global_ty`), `extern global_ty G` |
+| `files.h` | `args_ty`, `matcher_args_ty`, `FILE_CACHE_MAX`/`FILES_CAP_MIN`, prototypes for `xstat`, `file_exists`, `callback_file`, `matcher`, `file_pushback` |
+| `process.h` | Prototypes for `process_buffer`, `process_file` |
+| `confirm.h` | Colors/prompt macros, `MATCHES_CAP_MIN`, prototype for `confirm_scan_file` |
+| `main.c` | `main`, flag/file-argument parsing, `usage`, `compile`, `init_defaults`, `cleanup`; defines `G` |
+| `files.c` | `xstat`, `file_exists`, ftw callbacks (`callback_file`, `matcher`), `ft_ty` |
+| `process.c` | `process_buffer`, `process_file` |
+| `confirm.c` | `-c` scan/preview: `confirm_scan_file`, `match_pushback`, `file_pushback`, line helpers, printers |
+
+Related functions share a namespace prefix (`process_*`, `match_*`, `line_*`,
+`print_*`, `file_*`, `confirm_*`); types keep their original names (`mode_ty`,
+`match_ty`, ...) and the global is `global_ty G`. Only functions called across
+TUs are non-static; their prototypes live in the module headers
+(`files.h`/`process.h`/`confirm.h`, all of which include `common.h`).
 
 ## Key facts
 
 - **Only ANSI C features** - no VLAs, no `//` comments, no C99+ features beyond what POSIX requires
 - **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - linked via `lib/jstring/build/lib/libjstr.so`
-- **Include path**: `lib/jstring/build/include/` (not `lib/jstring/include/`)
+- **Include path**: `lib/jstring/build/include/` passed via `-I` (pinned checkout, not `/usr/local/include`)
 - **Code style**: no comments, SPDX MIT header, `clang-format off/on` around the usage string
-- **Usage strings** are defined with `_(...)` macro calls in source; `generate-readme` parses these with `grep '_('`
-- `.gitignore` ignores `find-and-replace` binary and `jstring/` (symlink/lib dir)
+- **Usage strings** are defined with `_(...)` macro calls in `main.c`; `generate-readme` parses these with `grep '_('`
+- `.gitignore` ignores `find-and-replace` binary, `*.o`, and `jstring/` (symlink/lib dir)
 - **No linter/formatter** beyond compiler flags (`-Wall -Wextra -Wpedantic`)
 - **No CI** workflows
+- **jstring .so gotcha**: `lib/jstring/scripts/test` rebuilds `libjstr.so` with
+  `-fsanitize=address`. Re-run `lib/jstring/./compile` (non-ASan) after any
+  jstring `./test` run, before linking the tool.
+- **`sudo ./install` in `lib/jstring` is optional**: the tool compiles against
+  the pinned `lib/jstring/build/{include,lib}`, so `/usr/local` copies may be stale.
 
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (153 tests)
+./compile && tests/run.sh   # all deterministic suites (12 suites, 174 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
@@ -45,12 +73,13 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 | Regex | `tests/regex.sh` | 14 | BRE/ERE, backreferences, anchors with `-Z`/`-z`, regex in in-place, escape in regex |
 | Files | `tests/files.sh` | 22 | Multi-file, recursive, `--include`/`--exclude`, dash filenames, deep/many-file recursion |
 | Errors | `tests/errors.sh` | 15 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive |
-| IO | `tests/io.sh` | 19 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
+| IO | `tests/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
 | Escape | `tests/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
 | Empty | `tests/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
 | Misc | `tests/misc.sh` | 6 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
 | Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
 | Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
+| Confirm | `tests/confirm.sh` | 19 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
@@ -90,11 +119,11 @@ done
 
 Each test runs as a background subshell. After `MAX_JOBS` (32) launches, `wait` blocks until the batch finishes. The final incomplete batch is waited for after the loop. This prevents running all N tests simultaneously, which could exhaust file descriptors on systems with low `ulimit -n`.
 
-All 11 deterministic suites run concurrently at the file level via `tests/run.sh`, each with its own internal batch-wait jobserver for test-level parallelism.
+All 12 deterministic suites run concurrently at the file level via `tests/run.sh`, each with its own internal batch-wait jobserver for test-level parallelism.
 
-### Coverage: 86% of executable lines
+### Coverage: 88.8% of executable lines
 
-Coverage measured via `gcov` after running all 153 deterministic tests (17 basic + 14 flags + 14 regex + 22 files + 15 errors + 19 io + 9 escape + 5 empty + 6 misc + 18 edge + 14 complex).
+Coverage measured via `gcov` after running all 174 deterministic tests (17 basic + 14 flags + 14 regex + 22 files + 15 errors + 21 io + 9 escape + 5 empty + 6 misc + 18 edge + 14 complex + 19 confirm).
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -163,7 +192,7 @@ Coverage measured via `gcov` after running all 153 deterministic tests (17 basic
 
 - **`lib/jstring/tests/test-replace-edge.c`** — 8 edge-case tests for `jstr_rplcn_len_from_exec` / `jstr_rplc_len_from_exec`: empty find, empty replace, find>input, multiple replacements (n=3), shorter/longer replacement, overlapping matches, n=0.
 
-### Session 2 additions (8 new tests, 153 deterministic total)
+### Session 2 additions (8 new tests, 155 deterministic total)
 
 8 new tests added: `t_recursive_empty_dir`, `t_recursive_partial_fail`, `t_dash_filename_no_double_dash`, `t_include_glob_no_match`, `t_long_backup_suffix_collision`, `t_stdin_binary_content`, `t_escape_various_in_replace`, `t_empty_find_stdin_only`. Tests now live in category files under `tests/`.
 
@@ -193,9 +222,116 @@ Coverage measured via `gcov` after running all 153 deterministic tests (17 basic
 
 # Handoff: find-and-replace
 
+## Session 4: `-c` confirm preview rewritten (unified diff → `file:line:` lines)
+
+### What changed
+
+The `-c` dry-run preview prints each removed line as `FNAME:LINE:-<content>`
+(red) and each replacement line as `FNAME:LINE:+<content>` (green), combining
+the old `file:line:` prefix with the `-`/`+` line markers:
+
+- Every printed line is a `-` or `+` line. The `--- FNAME` / `+++ FNAME` file
+  headers and `@@ -START[,COUNT] +START[,COUNT] @@` hunk headers are gone; the
+  whole line (prefix included) is colored red for `-` and green for `+`. Colors
+  stay unconditional (no `isatty()` gating).
+- All matches on the same source line are merged into one block (one old/new
+  pair per changed line); unchanged following lines never leak into a block.
+- The replacement is assembled once per block into `G.new_buf` (backrefs
+  expanded through `G.rplc_buf`), so the `+` side is exactly what the second
+  pass writes. `new_buf` is cached in `G` so its allocation is reused across
+  blocks and files.
+
+Helpers in `find-and-replace.c`: `match_line_end` (:403), `print_line_prefix`
+(:427), `print_diff_lines` (:446). `print_segment`, `print_hunk_range`,
+`print_hunk_header`, and the `---`/`+++`/`@@` emission were removed.
+
+### Line-number helpers optimized (incremental counter)
+
+`line_get_start`/`line_get_end` now use `jstr_memrchr`/`memchr` instead of
+linear byte loops, and the per-block `line_get_number` byte scan was replaced
+with a per-file `line_counter_ty` that counts newlines incrementally over the
+monotonic block loop (O(size) total per file, not O(blocks x offset)).
+`print_diff_lines` scans with `memchr`; the `len == 0`/`len > 0` tail split
+became a single `trailing_nl` branch. Verified identical output on a
+10 000-line, 100-block preview. `count_newlines` was removed in favor of
+`jstr_countchr_len`.
+
+### Format rules
+
+- The `-` side uses the original file's line numbers; the `+` side numbers the
+  **new** file, shifted by the cumulative net change of every previous block
+  (`new_shift`), like real diff.
+- Line counts follow GNU conventions: a trailing `\n` terminates the last line
+  rather than starting a new one; a replacement ending in `\n` (or empty) renders
+  an extra empty `+` line only when the block's terminating `\n` survives
+  (`trailing_nl`). A fully-deleted region prints an empty `-` line.
+
+### Bugs found & fixed in the rewrite
+
+| # | Bug | Root cause | Fix | File:Line |
+|---|---|---|---|---|
+| 18 | Preview regex scan didn't strip trailing newline | `process_buffer` removes the final `\n` before running regex (:194-199) but `confirm_scan_file` scanned the full buffer, so `.*` matched an extra empty EOF position (previewed `+worldworld`, engine writes `world`) | Scan region is now `scan_size = size - 1` when the buffer ends in `\n` | `find-and-replace.c:521` |
+| 19 | Block overran into the next line when a match consumed its `\n` | `line_get_end(match.end)` extended the block into the following unchanged line (`b\n` delete previewed `-b -c +c`) | `match_line_end` returns `end-1` when `data[end-1] == '\n'`; used in both the grouping condition and `block_end` | `find-and-replace.c:403-409, 597-601` |
+| 20 | Old-side line count inflated when block ended in `\n` | Old `count_newlines+1` double-counted a block whose last byte was the consumed terminator | With `match_line_end` the block never ends in its own terminator, so `count_newlines + 1` is exact (empty block = 1 empty line) | `find-and-replace.c:638` |
+| 21 | `print_hunk_header` args swapped | `new_line`/`new_count` passed in reverse produced wrong `+` ranges | Passed `(old_line, old_count, new_line, new_count)`; the function was later removed when the format dropped hunk headers | (was line 662) |
+| 22 | Every file >1 KiB silently skipped | `jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size))` passes `sz=1024` while the buffer holds `file_size` bytes, so `strlen(buf) != sz` for any >1024-byte NUL-free file → misclassified as binary → `process_file` returned early | Bound the NUL scan instead of comparing lengths: `memchr(buf->data, '\0', JSTR_MIN(1024, file_size))`. `jstr_io_isbinary` is inherently whole-file (`strlen(buf) != sz`) and cannot express a 1 KiB window. Regression tests `t_large_text_file_processed` (NUL-free >1 KiB processed) and `t_binary_nul_past_kib_processed` (NUL after byte 1024 → still processed) in `tests/io.sh` | `find-and-replace.c:688` |
+
+### Stale test expectations fixed (pre-existing failures, unrelated to preview)
+
+Confirmed failing on the pre-change binary (jstring behavior drift):
+
+| Test | Was | Now |
+|---|---|---|
+| `tests/complex.sh` `t_regex_greedy` | `.*`→`X` -g on `a---b---c\n` expected `XX\nX\n` | engine writes `X\n` (whole-string match) |
+| `tests/edge-cases.sh` `t_edge_match_empty_lines` | `^$`→`EMPTY` -g on `\n\n` expected 3 EMPTYs | engine writes 2 EMPTYs |
+| `tests/confirm.sh` `t_confirm_regex_preview_dot_star_g` | `expected_file` was `worldworld\nworld` | engine writes `world\n` |
+
+### Tests updated for the diff format
+
+`tests/confirm.sh` assertions now grep the `file:line:`-prefixed `-`/`+`
+format: `-- '-hello'`/`-- '+hi'` (multiline + backref), `-- '- b'`/`-- '+b'`
+(skip_newline), `-- '-hello'`/`-- '+world'` (dot_star_g), and
+`grep -c -- '-la la'` == 2 / `+lu lu` == 2 (multi_same_line). No `@@`/`---`
+lines are emitted, asserted by negative greps in multiline_regex.
+
+### Files changed
+
+- `find-and-replace.c` — preview rewrite + `scan_size` fix + usage text
+- `tests/confirm.sh` — assertions updated to diff format + stale `expected_file`
+- `tests/complex.sh`, `tests/edge-cases.sh` — stale expectations
+- `QUIRKS.md` §3 — rewritten for the unified-diff preview
+- `README.md` — regenerated (`./generate-readme`); `.README.md` install line
+  `./build` → `./compile` (no `./build` script exists)
+
+### Verification
+
+- `tests/run.sh`: 11 suites, 0 failed
+- `tests/confirm.sh`: 19 passed (14 format tests + 5 line-number tests: `new_shift` across multi-hunk blocks, no-trailing-newline input, empty `-`/`+` lines for deleted regions and line insertions, and a 50-block/5000-line file exercising the incremental `line_counter_ty` and guarding the >1 KiB skip fix)
+- `tests/fuzz.sh 60`: 0 crashes
+- Hunk headers/line counts manually cross-checked against `diff -u` region-only
+  equivalents for: single-line, replacement with embedded `\n`, mid-file /
+  last-line / sole-line deletes, no-trailing-newline input, empty-line insertion,
+  multi-line find, regex alternation with `-g`, backrefs, and multi-hunk shifts.
+
+## Session 5: line helpers → memchr, incremental counter; >1 KiB skip bug found
+
+- Replaced `line_get_start`/`line_get_end` byte loops with `jstr_memrchr`/
+  `memchr`; `line_get_number` (per-block byte scan) with a per-file
+  `line_counter_ty` incremental newline counter; simplified `print_diff_lines`
+  tail; removed `count_newlines` in favor of `jstr_countchr_len`. Preview output
+  byte-identical to Session 4 (verified on a 10 000-line, 100-block file).
+- Discovered pre-existing bug #22: every file > 1 KiB was silently skipped
+  because `jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size))` passed
+  `sz=1024` while the buffer holds `file_size` bytes (`strlen(buf) != sz` for any
+  NUL-free file > 1024 bytes → misclassified binary). Fixed at
+  `find-and-replace.c:688` with a length-bounded NUL scan
+  (`memchr(buf->data, '\0', JSTR_MIN(1024, file_size))`), regression tests
+  `t_large_text_file_processed` and `t_binary_nul_past_kib_processed` in
+  `tests/io.sh`. Now 155 deterministic tests.
+
 ## Bugs found & fixed (17 total)
 
-### Tool bugs (find-and-replace.c)
+### Tool bugs (pre-split `find-and-replace.c`, historical line numbers)
 
 | # | Bug | Root cause | Fix | File:Line |
 |---|---|---|---|---|
@@ -260,9 +396,7 @@ New file at `lib/jstring/tests/test-replace-edge.c` testing:
 - Overlapping matches (Two-Way, no overlap)
 - N=0 (no replacements)
 
-## Remaining uncovered lines (34)
-
-All OS-level or dead-code error paths requiring fault injection: disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors.
+## Remaining uncovered lines (34)All OS-level or dead-code error paths requiring fault injection: disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors.
 
 ## Critical: How to implement the TODO
 
@@ -315,13 +449,13 @@ All OS-level or dead-code error paths requiring fault injection: disk-full, perm
 
 ### Where to make changes
 
-| File | Lines | Purpose |
+| File | Location | Purpose |
 |---|---|---|
-| `find-and-replace.c` | 390-472 (flag loop), 474-508 (file loop) | `end_of_flags` fix |
-| `find-and-replace.c` | 142 | Newline capacity check (`>=` already fixed) |
-| `find-and-replace.c` | 275-290 | `compile()` hoisting |
-| `find-and-replace.c` | 293-299 | `init_defaults()` idempotency |
-| `find-and-replace.c` | 302-354 | Usage string fixes |
+| `main.c` | `main` argument loop | `end_of_flags` fix (known limitation, Item 35) |
+| `process.c` | `process_buffer` | Newline capacity check (`>=` already fixed) |
+| `main.c` | `compile` | `compile()` hoisting per-file (Item 21) |
+| `main.c` | `init_defaults` | `init_defaults()` idempotency (Item 23) |
+| `main.c` | `usage` | Usage string fixes |
 | `lib/jstring/include/replace.h` | ~1079 | Integer overflow fix |
 | `lib/jstring/include/regex.h` | ~693 | Empty-buffer regex matching |
 | Category files in `tests/` | Each file's TESTS list | New tests location |
@@ -334,4 +468,83 @@ All OS-level or dead-code error paths requiring fault injection: disk-full, perm
 - Tests registered in TESTS heredoc variable at end of file
 - Stderr redirected to `/dev/null` unless error output is tested
 - `$PROG` = path to binary (set in `tests/lib.sh`)
+
+## Session 6: split single file into 4 TUs with `fr_` namespacing
+
+### What changed
+
+`find-and-replace.c` (1068 lines) was deleted and split into a shared header,
+three module headers, and 4 translation units that `./compile` builds
+**in parallel**:
+
+| File | Contents |
+|---|---|
+| `common.h` | Includes, macros (`DIE_IF`, `S_LEN`, `R`, MODE_* bits), core types (`mode_ty`, `match_ty`, `matches_ty`, `file_ty`, `files_ty`, `global_ty`), `extern global_ty G` |
+| `files.h` | `args_ty`, `matcher_args_ty`, `FILE_CACHE_MAX`/`FILES_CAP_MIN`, `xstat`, `file_exists`, `callback_file`, `matcher`, `file_pushback` |
+| `process.h` | `process_buffer`, `process_file` |
+| `confirm.h` | Colors/prompt macros, `MATCHES_CAP_MIN`, `confirm_scan_file` |
+| `main.c` | `usage`, `compile`, `init_defaults`, `cleanup`, `main`, flag/file parsing; defines `global_ty G` |
+| `files.c` | `xstat`, `file_exists`, ftw `callback_file`/`matcher`, `ft_ty` + `#if 0` `exttype` |
+| `process.c` | `process_buffer`, `process_file` |
+| `confirm.c` | `-c` scan/preview: `confirm_scan_file`, `match_pushback`, `file_pushback`, `line_*`/`line_counter_*`/`match_line_end`, `print_size_t`/`print_line_prefix`/`print_diff_lines` |
+
+### Naming
+
+Functions are grouped by shared namespace prefixes instead of a blanket `fr_`
+prefix, so related functions are recognizable at a glance:
+
+- `process_*`: `process_buffer`, `process_file` (replacement engine)
+- `confirm_*`: `confirm_scan_file` (-c dry-run scan/preview)
+- `match_*`: `match_pushback`, `match_line_end` (match-list helpers)
+- `line_*`: `line_get_start`, `line_get_end`, `line_counter_init`,
+  `line_counter_get` (line addressing for the preview)
+- `print_*`: `print_size_t`, `print_line_prefix`, `print_diff_lines` (preview output)
+- `file_*`: `file_exists`, `file_pushback` (filesystem + confirm cache)
+- ftw: `callback_file`, `matcher`; stat wrapper: `xstat`
+- main: `usage`, `compile`, `init_defaults`, `cleanup`, `main`
+
+Types keep their original names (`mode_ty`, `match_ty`, `files_ty`, ...), as
+does the global `global_ty G`. Non-static functions are exactly those called
+from another TU (prototypes in `files.h`/`process.h`/`confirm.h`): `xstat`,
+`file_exists`, `callback_file`, `matcher`, `file_pushback`, `process_buffer`,
+`process_file`, `confirm_scan_file`. Everything else is `static` in its TU.
+
+### Build scripts
+
+- `./compile` now compiles `main.c files.c process.c confirm.c` in
+  parallel (`cc -c ... &` + per-pid `wait`, fail on any), then links
+  `$OBJS -o find-and-replace`. `COVERAGE=1 COVERAGE_OUTDIR=$TMPDIR` still works
+  (objects + `.gcno` land in OUTDIR).
+- **`./compile` now passes `-I $DIR/lib/jstring/build/include -L $DIR/lib/jstring/build/lib`**
+  so the tool builds against the pinned `lib/jstring` checkout instead of stale
+  `/usr/local` copies. This was needed because `/usr/local/include/jstr` was too
+  old to declare `jstr_io_isbinary_atleast`; `sudo ./install` in `lib/jstring` is
+  now optional.
+- `./coverage` runs `gcov` on all 4 sources and aggregates a single summary.
+- `./generate-readme` greps `main.c` for the usage string.
+
+### Build gotcha discovered
+
+`lib/jstring/scripts/test` rebuilds `libjstr.so` with `-fsanitize=address`;
+linking the tool against it fails on undefined `__asan_*` refs. Re-run
+`lib/jstring/./compile` (non-ASan) after any jstring `./test`, before tool builds.
+
+### Tests
+
+- `tests/run.sh` now includes `confirm.sh` (was a 12th suite never wired in):
+  **12 suites, 174 deterministic tests**.
+- `./test` → 12 suites + 250 fuzz iterations: all green.
+- Coverage: **88.8%** of executable lines (up from 86% — confirm preview is now
+  exercised in the default run). Remaining uncovered lines are the same
+  OS-level/dead-code error paths (disk-full, permission, OOM, temp-file errors,
+  `-l` flag, `-h` with single arg, pass-2 re-read when the in-memory cache
+  limit is exceeded).
+- README regenerated: the `-c` option block now appears (was missing before).
+
+### Not changed
+
+- Binary name is still `find-and-replace`; tests reference only `$PROG`.
+- `#if 0` `exttype` block moved verbatim into `files.c`.
+- `end_of_flags` leak, regex empty-buffer short-circuit, and binary-detection
+  `#if 0` remain known limitations (unchanged).
 

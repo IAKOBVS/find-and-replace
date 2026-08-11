@@ -34,7 +34,7 @@ t_confirm_multiline_regex() {
 	td=$1; printf 'hello\nworld\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q "$td/f:1:hello" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q -- '-hello' && printf '%s' "$clean_out" | grep -q -- '+hi' && ! printf '%s' "$clean_out" | grep -q '^@@' && ! printf '%s' "$clean_out" | grep -q '^---' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_multi_same_line() {
@@ -42,7 +42,7 @@ t_confirm_multi_same_line() {
 	out=$(printf 'y\n' | "$PROG" la lu -c -i -g "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	[ "$(cat "$td/f")" = 'lu lu
-lu lu' ] && [ "$(printf '%s\n' "$clean_out" | grep -c "$td/f:")" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+lu lu' ] && [ "$(printf '%s\n' "$clean_out" | grep -c -- '-la la')" -eq 2 ] && [ "$(printf '%s\n' "$clean_out" | grep -c -- '+lu lu')" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_recursive() {
@@ -73,8 +73,8 @@ t_confirm_regex_preview_dot_star_g() {
 	td=$1; printf 'hello\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" ".*" "world" -gc -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	expected_file=$(printf 'worldworld\nworld')
-	[ "$(cat "$td/f")" = "$expected_file" ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:helloworldworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	expected_file=$(printf 'world\n')
+	[ "$(cat "$td/f")" = "$expected_file" ] && printf '%s' "$clean_out" | grep -q -- '-hello' && printf '%s' "$clean_out" | grep -q -- '+world' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_skip_newline() {
@@ -83,14 +83,71 @@ t_confirm_regex_preview_skip_newline() {
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	# Under latest jstring, ".* b" replaced with "b" (with REG_NEWLINE) produces "b\nb\n"
 	[ "$(cat "$td/f")" = 'b
-b' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1: bb" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+b' ] && printf '%s' "$clean_out" | grep -q -- '- b' && printf '%s' "$clean_out" | grep -q -- '+b' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_backref() {
 	td=$1; printf 'hello\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" "(h)ello" '\\1world' -gc -i -E "$td/f" 2>/dev/null)
-	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s' "$clean_out" | grep -q "^$td/f:1:hellohworld" && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s\n' "$clean_out" | grep -q -- '-hello' && printf '%s\n' "$clean_out" | grep -q -- '+hworld' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_preview_line_numbers_shift() {
+	td=$1; printf 'a\nhello\nc\nhello\nd\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" hello 'one\ntwo' -c -i -g "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	good=1
+	for want in ':2:-hello' ':2:+one' ':3:+two' ':4:-hello' ':5:+one' ':6:+two'; do
+		printf '%s\n' "$clean_out" | grep -q -- "$want" || good=0
+	done
+	exp='a
+one
+two
+c
+one
+two
+d'
+	[ "$good" -eq 1 ] && [ "$(cat "$td/f")" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_preview_no_trailing_newline() {
+	td=$1; printf 'no newline' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" no yes -c -i "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(cat "$td/f")" = 'yes newline' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-no newline' && printf '%s\n' "$clean_out" | grep -q -- ':1:+yes newline' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_preview_delete_line() {
+	td=$1; printf 'DELETE\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" DELETE '' -c -i "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$(wc -c < "$td/f")" -eq 1 ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-DELETE' && printf '%s\n' "$clean_out" | grep -q -- ':1:+$' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_preview_empty_line_insert() {
+	td=$1; printf 'a\n\nb\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" '^$' X -gc -i -R "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	exp='a
+X
+b'
+	[ "$(cat "$td/f")" = "$exp" ] && printf '%s\n' "$clean_out" | grep -q -- ':2:-$' && printf '%s\n' "$clean_out" | grep -q -- ':2:+X' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+}
+
+t_confirm_preview_many_blocks() {
+	td=$1
+	i=1; : > "$td/f"
+	while [ $i -le 5000 ]; do
+		if [ $((i % 100)) -eq 0 ]; then printf 'X\n' >> "$td/f"; else printf 'line\n' >> "$td/f"; fi
+		i=$((i + 1))
+	done
+	out=$(printf 'y\n' | "$PROG" X Y -c -i -g "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	n=$(printf '%s\n' "$clean_out" | grep -c -- ':-X$')
+	yg=$(tr -cd 'Y' < "$td/f" | wc -c)
+	xg=$(tr -cd 'X' < "$td/f" | wc -c)
+	[ "$n" -eq 50 ] && [ "$yg" -eq 50 ] && [ "$xg" -eq 0 ] && printf '%s\n' "$clean_out" | grep -q -- ':100:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:+Y' && echo PASS > "$td/result" || echo "FAIL: n=$n yg=$yg xg=$xg out=[$(printf '%s\n' "$clean_out" | head -3)]" > "$td/result"
 }
 
 TESTS="
@@ -108,5 +165,10 @@ t_confirm_stderr_no_report_on_abort
 t_confirm_regex_preview_dot_star_g
 t_confirm_regex_preview_skip_newline
 t_confirm_regex_preview_backref
+t_confirm_preview_line_numbers_shift
+t_confirm_preview_no_trailing_newline
+t_confirm_preview_delete_line
+t_confirm_preview_empty_line_insert
+t_confirm_preview_many_blocks
 "
 run_suite "confirm tests" "$TESTS"

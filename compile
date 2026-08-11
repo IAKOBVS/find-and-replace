@@ -3,6 +3,7 @@
 PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
+SRCS='main.c files.c process.c confirm.c'
 CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings'
 # CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings -fanalyzer'
 LFLAGS=""
@@ -11,6 +12,24 @@ if [ "$COVERAGE" = "1" ]; then
 	CFLAGS="-O0 --coverage"
 	LFLAGS="--coverage"
 fi
+# Compile each translation unit in parallel, then link.
+# Headers and library come from the pinned lib/jstring checkout.
+JSTR_INC="-I $DIR/lib/jstring/build/include"
+JSTR_LIB="-L $DIR/lib/jstring/build/lib"
+OBJS=""
+PIDS=""
+for src in $SRCS; do
+	obj="$OUTDIR/${src%.c}.o"
+	OBJS="$OBJS $obj"
+	#shellcheck disable=SC2086
+	cc -c "$DIR/$src" -o "$obj" $JSTR_INC $CFLAGS &
+	PIDS="$PIDS $!"
+done
+rc=0
+for pid in $PIDS; do
+	wait "$pid" || rc=1
+done
+[ "$rc" -eq 0 ] || exit 1
 #shellcheck disable=SC2086
-cc "$DIR/$PROG.c" -o "$OUTDIR/$PROG" $CFLAGS -ljstr $LFLAGS || exit
-echo "cc $DIR/$PROG.c -o $DIR/$PROG $CFLAGS -ljstr $LFLAGS"
+cc $OBJS -o "$OUTDIR/$PROG" $JSTR_LIB -ljstr $LFLAGS || exit
+echo "cc $DIR/$SRCS -o $OUTDIR/$PROG $JSTR_INC $JSTR_LIB $CFLAGS -ljstr $LFLAGS"

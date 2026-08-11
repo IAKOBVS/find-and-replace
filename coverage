@@ -7,6 +7,8 @@ PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+SRCS='main.c files.c process.c confirm.c'
+
 TMPDIR=$(mktemp -d) && trap 'rm -rf "$TMPDIR"; rm -f "$DIR/$PROG"' EXIT
 
 # Build with coverage flags — .gcno lands in TMPDIR
@@ -26,16 +28,24 @@ echo ""
 echo "=== gcov line coverage ==="
 (
     cd "$TMPDIR"
-    gcov -o "$TMPDIR" "$DIR/find-and-replace.c" 2>/dev/null
+    for src in $SRCS; do
+        gcov -o "$TMPDIR" "$DIR/$src" 2>/dev/null
+    done
 )
-GCOV="$TMPDIR/find-and-replace.c.gcov"
 
 echo ""
 echo "=== Coverage Summary ==="
-if [ -f "$GCOV" ]; then
-    total=$(wc -l < "$GCOV")
-    executed=$(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$GCOV")
-    not_executed=$(grep -c '^    #####:' "$GCOV")
+total=0
+executed=0
+not_executed=0
+for src in $SRCS; do
+    gc="$TMPDIR/${src%.c}.c.gcov"
+    [ -f "$gc" ] || continue
+    total=$((total + $(wc -l < "$gc")))
+    executed=$((executed + $(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$gc" || true)))
+    not_executed=$((not_executed + $(grep -c '^    #####:' "$gc" || true)))
+done
+if [ "$executed" -gt 0 ] || [ "$not_executed" -gt 0 ]; then
     pct=$(awk "BEGIN {printf \"%.1f\", 100 * $executed / ($executed + $not_executed)}")
     echo "  Total lines        : $total"
     echo "  Executed           : $executed"
@@ -43,7 +53,7 @@ if [ -f "$GCOV" ]; then
     echo "  Line coverage      : ${pct}%"
     echo ""
     echo "=== Lines NOT covered ==="
-    grep '^    #####' "$GCOV" | head -40
+    grep '^    #####' "$TMPDIR"/*.c.gcov | head -40 || true
 else
     echo "  No gcov output found."
 fi

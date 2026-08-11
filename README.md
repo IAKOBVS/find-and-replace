@@ -24,6 +24,11 @@ Options:
   -i[SUFFIX]
     Replace files in-place. The default is printing to stdout.
     If SUFFIX is provided, backup the original file suffixed with SUFFIX.
+  -c
+    Confirm mode. Dry-run scans the files and prints each removed line
+    prefixed with file:line:- in red and each replacement line prefixed
+    with file:line:+ in green. Prompts for confirmation ('y') before
+    modifying files in-place. Requires -i and at least one file.
   -r
     Recurse on the directories in FILES.
   --include GLOB

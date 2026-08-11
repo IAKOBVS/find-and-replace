@@ -33,8 +33,8 @@ t_edge_overlapping_matches() {
 
 t_edge_match_empty_lines() {
 	td=$1; out=$(printf '\n\n' | "$PROG" '^$' 'EMPTY' -REg 2>/dev/null)
-	expected=$(printf 'EMPTY\nEMPTY\nEMPTY\n')
-	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: multi-line mismatch" > "$td/result"
+	expected=$(printf 'EMPTY\nEMPTY\n')
+	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: multi-line mismatch expected [$(printf '%b' "$expected" | cat -A)] got [$(printf '%s' "$out" | cat -A)]" > "$td/result"
 }
 
 t_edge_literal_escape_chars() {

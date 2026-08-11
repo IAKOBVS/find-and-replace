@@ -1,0 +1,109 @@
+/* SPDX-License-Identifier: MIT */
+/* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
+
+#ifndef COMMON_H
+#define COMMON_H
+
+#define JSTR_PANIC                 0
+#define JSTR_USE_UNLOCKED_IO_READ  1
+#define JSTR_USE_UNLOCKED_IO_WRITE 1
+
+#include <jstr/jstr.h>
+#include <jstr/io.h>
+#include <jstr/regex.h>
+#include <jstr/stdstring.h>
+
+#define S_LEN(s)     (sizeof(s) - 1)
+#define S_LITERAL(s) (s), (sizeof(s) - 1)
+
+#include <fnmatch.h>
+
+/* Die-with-message helper used in every translation unit. */
+#define DIE_IF_PRINT(x, fmt, ...)                      \
+	do {                                           \
+		if (jstr_unlikely(x))                  \
+			jstr_errdie(fmt, __VA_ARGS__); \
+	} while (0)
+#define DIE_IF(x, fmt, ...) DIE_IF_PRINT(x, fmt, __VA_ARGS__)
+#define DIE()               DIE_IF(1)
+#define R                   JSTR_RESTRICT
+
+/* Mode bits tracked in G.mode: where output goes and what FIND means. */
+typedef enum {
+	MODE_PRINT_STDOUT = 1 << 0,
+	MODE_PRINT_FILE = 1 << 1,
+	MODE_PRINT_FILE_BACKUP = 1 << 2,
+	MODE_PRINT_CHANGES = 1 << 3,
+	MODE_USE_RECURSIVE = 1 << 4,
+	MODE_USE_REGEX = 1 << 5,
+	MODE_COMPILED = 1 << 6,
+	MODE_HAVE_FILES = 1 << 7,
+	MODE_CONFIRM = 1 << 8,
+} mode_ty;
+
+/* One byte range of a find occurrence, relative to the start of the file. */
+typedef struct match_ty {
+	size_t start;
+	size_t end;
+	regmatch_t rm[10];
+} match_ty;
+
+typedef struct matches_ty {
+	size_t cap;
+	size_t size;
+	match_ty *data;
+} matches_ty;
+
+/* One file collected during the -c scan pass: its name, stat, and full
+ * content. The content buffer is stolen from the shared buf so pass 2 edits
+ * it from memory instead of re-walking argv/ftw or re-reading the file. */
+typedef struct file_ty {
+	char *fname;
+	size_t fname_len;
+	size_t content_size;
+	unsigned int st_mode;
+	jstr_ty content;
+} file_ty;
+
+typedef struct files_ty {
+	size_t cap;
+	size_t size;
+	size_t total_content_size;
+	file_ty *data;
+} files_ty;
+
+/* Process-wide settings gathered from the command line. Fields are ordered
+ * for cache locality: hot scalars and the buffers touched together in the
+ * confirm scan loop come first, large and rarely-read state goes last. */
+typedef struct global_ty {
+	int mode;
+	int eflags;
+	int cflags;
+	/* Set by the scan pass when at least one match exists; decides whether the
+	 * confirmation prompt is shown. */
+	unsigned int matches_found;
+	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
+	 * instead of modifying files. Reset before the second (real) pass. */
+	int confirm_pass;
+	size_t n;
+	size_t bak_suffix_len;
+	/* Frequently-touched growable state, grouped so the match list and the
+	 * preview buffers' headers sit on the same cache lines while scanning. */
+	matches_ty matches;
+	jstr_ty rplc_buf;
+	/* Cached output of the previous -c preview hunk; emptied per block but
+	 * the allocation is reused across files so capacity persists. */
+	jstr_ty new_buf;
+	jstr_ty content_buf;
+	/* Cold configuration, read only during startup and traversal. */
+	const char *include_glob;
+	const char *bak_suffix;
+	/* Growable list of files to edit once the user confirms. */
+	files_ty files;
+	/* Compiled regex state; largest member, touched only in regex mode. */
+	jstr_re_ty regex;
+} global_ty;
+
+extern global_ty G;
+
+#endif /* COMMON_H */

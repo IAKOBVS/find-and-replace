@@ -12,6 +12,7 @@
 #include <jstr/io.h>
 #include <jstr/regex.h>
 #include <jstr/stdstring.h>
+#include <unistd.h>
 
 #define S_LEN(s)     (sizeof(s) - 1)
 #define S_LITERAL(s) (s), (sizeof(s) - 1)

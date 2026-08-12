@@ -3,6 +3,56 @@
 
 #include "confirm.h"
 #include "files.h"
+#include <termios.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+static struct termios orig_termios;
+static int term_initialized = 0;
+
+static void
+restore_terminal(void)
+{
+	if (term_initialized) {
+		tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+		/* Use async-signal-safe write for signal safety when leaving alt screen and showing cursor */
+		if (write(STDOUT_FILENO, "\x1b[?1049l\x1b[?25h", 14) < 0) {}
+		term_initialized = 0;
+	}
+}
+
+static void
+handle_signal(int sig)
+{
+	(void)sig;
+	restore_terminal();
+	_exit(EXIT_FAILURE);
+}
+
+static void
+setup_terminal(void)
+{
+	if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+		return;
+	if (tcgetattr(STDIN_FILENO, &orig_termios) < 0)
+		return;
+	struct termios raw = orig_termios;
+	raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
+	raw.c_iflag &= ~(IXON | ICRNL);
+	raw.c_cc[VMIN] = 1;
+	raw.c_cc[VTIME] = 0;
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0)
+		return;
+	term_initialized = 1;
+	/* Use 17 (or S_LEN) instead of 14 so the entire escape sequence is written, hiding the cursor properly */
+	jstr_io_fwrite("\x1b[?1049h\x1b[H\x1b[?25l", 1, 17, stdout); /* enter alt screen, clear/home, hide cursor */
+	jstr_io_fflush(stdout);
+	atexit(restore_terminal);
+	signal(SIGINT, handle_signal);
+	signal(SIGTERM, handle_signal);
+	signal(SIGQUIT, handle_signal);
+}
 
 /* Append one match range to the dynamically grown matches array. */
 static void
@@ -358,5 +408,110 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		}
 	}
 	*out_matches = G.matches.size;
+	return JSTR_RET_SUCC;
+}
+
+static jstr_ret_ty
+interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, char *err_buf, size_t err_size)
+{
+	if (G.mode & MODE_USE_REGEX) {
+		if (G.mode & MODE_COMPILED) {
+			jstr_re_free(&G.regex);
+			G.mode &= ~MODE_COMPILED;
+		}
+		const int ret = jstr_re_comp(&G.regex, find, G.cflags);
+		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+			regerror(ret, &G.regex.reg, err_buf, err_size);
+			return JSTR_RET_ERR;
+		}
+		G.mode |= MODE_COMPILED;
+	} else {
+		jstr_memmem_comp(t, find, find_len);
+	}
+	return JSTR_RET_SUCC;
+}
+
+jstr_ret_ty
+confirm_interactive_loop(jstr_twoway_ty *R t,
+                         jstr_ty *R find_buf,
+                         const char *R rplc,
+                         size_t rplc_len)
+{
+	setup_terminal();
+	char err_buf[256];
+	int needs_redraw = 1;
+	int is_valid = 1;
+
+	while (1) {
+		if (needs_redraw) {
+			/* Clear and home cursor */
+			jstr_io_fwrite("\x1b[H\x1b[2J", 1, 7, stdout);
+			/* Print prompt */
+			jstr_io_fwrite("Find: ", 1, 6, stdout);
+			if (find_buf->size > 0 && find_buf->data) {
+				jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
+			}
+			jstr_io_putchar('\n');
+
+			err_buf[0] = '\0';
+			jstr_ret_ty comp_ret = JSTR_RET_SUCC;
+			const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
+			comp_ret = interactive_compile(t, ptn, find_buf->size, err_buf, sizeof(err_buf));
+			is_valid = (comp_ret == JSTR_RET_SUCC);
+
+			if (comp_ret != JSTR_RET_SUCC) {
+				/* Print regex compilation error in red */
+				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+				jstr_io_fwrite("Regex error: ", 1, 13, stdout);
+				jstr_io_fwrite(err_buf, 1, strlen(err_buf), stdout);
+				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				jstr_io_putchar('\n');
+			} else {
+				/* If compile succeeded, run previews on all cached files */
+				G.matches_found = 0;
+				for (unsigned int k = 0; k < G.files.size; ++k) {
+					file_ty *file = &G.files.data[k];
+					size_t file_matches = 0;
+					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc, rplc_len, &file_matches);
+				}
+			}
+			jstr_io_fflush(stdout);
+			needs_redraw = 0;
+		}
+
+		char c;
+		ssize_t nread = read(STDIN_FILENO, &c, 1);
+		if (nread <= 0)
+			continue;
+
+		if (c == '\r' || c == '\n') {
+			/* Accept only if the current pattern compiles successfully */
+			if (is_valid) {
+				break;
+			}
+		} else if (c == 27 || c == 3 || c == 4) {
+			/* Escape, Ctrl-C, or Ctrl-D to abort */
+			restore_terminal();
+			jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
+			exit(EXIT_FAILURE);
+		} else if (c == 127 || c == 8) {
+			/* Backspace */
+			if (find_buf->size > 0) {
+				find_buf->size--;
+				find_buf->data[find_buf->size] = '\0';
+				needs_redraw = 1;
+			}
+		} else if (c == 21) {
+			/* Ctrl-U */
+			jstr_empty_j(find_buf);
+			needs_redraw = 1;
+		} else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
+			/* Printable character */
+			DIE_IF(jstr_pushback_j(find_buf, c), "%s", "Out of memory.\n");
+			needs_redraw = 1;
+		}
+	}
+
+	restore_terminal();
 	return JSTR_RET_SUCC;
 }

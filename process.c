@@ -162,8 +162,10 @@ process_file(const jstr_twoway_ty *R t,
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
 		size_t matches = 0;
 		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
-		/* Only files with matches need editing on pass 2; steal their buffer. */
-		if (matches > 0)
+		/* Only files with matches need editing on pass 2; steal their buffer.
+		 * In interactive mode, we must cache all scanned files so they can be
+		 * dynamically scanned as the user updates the find pattern. */
+		if (matches > 0 || (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)))
 			file_pushback(&G.files, fname, fname_len, st, buf);
 		return ret;
 	}

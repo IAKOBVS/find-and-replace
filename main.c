@@ -297,6 +297,22 @@ process:
 			jstr_errdie("%s: -c requires -i.\n", argv[0]);
 		if (!(G.mode & MODE_HAVE_FILES))
 			jstr_errdie("%s: -c does not work with stdin.\n", argv[0]);
+
+		jstr_ty interactive_find_buf = JSTR_INIT;
+		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
+			DIE_IF(jstr_append_len_j(&interactive_find_buf, a.find, a.find_len), "%s", "Out of memory.\n");
+			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &interactive_find_buf, a.rplc, a.rplc_len)), "%s", "Interactive loop failed.\n");
+			a.find = interactive_find_buf.data;
+			a.find_len = interactive_find_buf.size;
+			/* Re-print final accepted preview to normal stdout. */
+			G.matches_found = 0;
+			for (i = 0; i < G.files.size; ++i) {
+				file_ty *file = &G.files.data[i];
+				size_t file_matches = 0;
+				confirm_scan_file(&t, &file->content, file->fname, file->fname_len, a.find, a.find_len, a.rplc, a.rplc_len, &file_matches);
+			}
+		}
+
 		if (G.matches_found) {
 			jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout);
 			jstr_io_fflush(stdout);
@@ -304,6 +320,7 @@ process:
 			 * every file untouched. */
 			if (jstr_io_getchar() != 'y') {
 				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
+				jstr_free_j(&interactive_find_buf);
 				exit(EXIT_FAILURE);
 			}
 			/* Second pass: edit each cached file's content from memory; the
@@ -324,6 +341,9 @@ process:
 				if (jstr_chk(process_buffer(&t, &file->content, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
 					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find, a.rplc);
 			}
+			jstr_free_j(&interactive_find_buf);
+		} else {
+			jstr_free_j(&interactive_find_buf);
 		}
 	} else {
 		/* If no file was passed, read from stdin. */

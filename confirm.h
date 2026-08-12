@@ -21,4 +21,9 @@ jstr_ret_ty confirm_scan_file(const jstr_twoway_ty *R t,
                               size_t find_len, const char *R rplc,
                               size_t rplc_len, size_t *R out_matches);
 
+jstr_ret_ty confirm_interactive_loop(jstr_twoway_ty *R t,
+                                     jstr_ty *R find_buf,
+                                     const char *R rplc,
+                                     size_t rplc_len);
+
 #endif /* CONFIRM_H */

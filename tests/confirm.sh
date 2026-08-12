@@ -150,6 +150,27 @@ t_confirm_preview_many_blocks() {
 	[ "$n" -eq 50 ] && [ "$yg" -eq 50 ] && [ "$xg" -eq 0 ] && printf '%s\n' "$clean_out" | grep -q -- ':100:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:+Y' && echo PASS > "$td/result" || echo "FAIL: n=$n yg=$yg xg=$xg out=[$(printf '%s\n' "$clean_out" | head -3)]" > "$td/result"
 }
 
+t_confirm_interactive_live_preview() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	python3 -c '
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x7f\x7f\x7f\x7f\x7fworld\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    try:
+        while True:
+            if not os.read(fd, 1024): break
+    except OSError:
+        pass
+' "$td" 2>/dev/null
+	[ "$(cat "$td/f")" = 'hello replacement' ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")]" > "$td/result"
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -170,5 +191,6 @@ t_confirm_preview_no_trailing_newline
 t_confirm_preview_delete_line
 t_confirm_preview_empty_line_insert
 t_confirm_preview_many_blocks
+t_confirm_interactive_live_preview
 "
 run_suite "confirm tests" "$TESTS"

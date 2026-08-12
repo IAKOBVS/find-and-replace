@@ -23,7 +23,8 @@ jstr_ret_ty confirm_scan_file(const jstr_twoway_ty *R t,
 
 jstr_ret_ty confirm_interactive_loop(jstr_twoway_ty *R t,
                                      jstr_ty *R find_buf,
-                                     const char *R rplc,
-                                     size_t rplc_len);
+                                     jstr_ty *R rplc_buf,
+                                     jstr_ty *R flags_buf,
+                                     jstr_ty *R files_buf);
 
 #endif /* CONFIRM_H */

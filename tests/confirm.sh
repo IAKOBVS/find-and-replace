@@ -171,6 +171,27 @@ else:
 	[ "$(cat "$td/f")" = 'hello replacement' ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")]" > "$td/result"
 }
 
+t_confirm_interactive_multi_field() {
+	td=$1; printf 'hello world\n' > "$td/f1"; printf 'hello again\n' > "$td/f2"
+	python3 -c '
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f1"), os.path.join(sys.argv[1], "f2")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\t\x15newreplace\t\x15gR\tf2\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    try:
+        while True:
+            if not os.read(fd, 1024): break
+    except OSError:
+        pass
+' "$td" 2>/dev/null
+	[ "$(cat "$td/f1")" = 'hello world' ] && [ "$(cat "$td/f2")" = 'newreplace again' ] && echo PASS > "$td/result" || echo "FAIL: f1=[$(cat "$td/f1")] f2=[$(cat "$td/f2")]" > "$td/result"
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -192,5 +213,6 @@ t_confirm_preview_delete_line
 t_confirm_preview_empty_line_insert
 t_confirm_preview_many_blocks
 t_confirm_interactive_live_preview
+t_confirm_interactive_multi_field
 "
 run_suite "confirm tests" "$TESTS"

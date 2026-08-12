@@ -299,15 +299,40 @@ process:
 			jstr_errdie("%s: -c does not work with stdin.\n", argv[0]);
 
 		jstr_ty interactive_find_buf = JSTR_INIT;
+		jstr_ty interactive_rplc_buf = JSTR_INIT;
+		jstr_ty interactive_flags_buf = JSTR_INIT;
+		jstr_ty interactive_files_buf = JSTR_INIT;
+
 		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
 			DIE_IF(jstr_append_len_j(&interactive_find_buf, a.find, a.find_len), "%s", "Out of memory.\n");
-			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &interactive_find_buf, a.rplc, a.rplc_len)), "%s", "Interactive loop failed.\n");
+			DIE_IF(jstr_append_len_j(&interactive_rplc_buf, a.rplc, a.rplc_len), "%s", "Out of memory.\n");
+
+			char init_flags[16];
+			int fl_idx = 0;
+			if (G.n == (size_t)-1) init_flags[fl_idx++] = 'g'; else init_flags[fl_idx++] = 'G';
+			if (G.mode & MODE_USE_REGEX) init_flags[fl_idx++] = 'R'; else init_flags[fl_idx++] = 'F';
+			if (G.cflags & JSTR_RE_CF_EXTENDED) init_flags[fl_idx++] = 'E';
+			if (G.cflags & JSTR_RE_CF_ICASE) init_flags[fl_idx++] = 'I';
+			if (G.cflags & JSTR_RE_CF_NEWLINE) init_flags[fl_idx++] = 'Z'; else init_flags[fl_idx++] = 'z';
+			init_flags[fl_idx] = '\0';
+			DIE_IF(jstr_append_len_j(&interactive_flags_buf, init_flags, fl_idx), "%s", "Out of memory.\n");
+
+			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &interactive_find_buf, &interactive_rplc_buf, &interactive_flags_buf, &interactive_files_buf)), "%s", "Interactive loop failed.\n");
+
 			a.find = interactive_find_buf.data;
 			a.find_len = interactive_find_buf.size;
+			a.rplc = interactive_rplc_buf.data;
+			a.rplc_len = interactive_rplc_buf.size;
+
 			/* Re-print final accepted preview to normal stdout. */
 			G.matches_found = 0;
 			for (i = 0; i < G.files.size; ++i) {
 				file_ty *file = &G.files.data[i];
+				if (interactive_files_buf.size > 0 && interactive_files_buf.data) {
+					if (strstr(file->fname, interactive_files_buf.data) == NULL) {
+						continue;
+					}
+				}
 				size_t file_matches = 0;
 				confirm_scan_file(&t, &file->content, file->fname, file->fname_len, a.find, a.find_len, a.rplc, a.rplc_len, &file_matches);
 			}
@@ -321,6 +346,9 @@ process:
 			if (jstr_io_getchar() != 'y') {
 				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
 				jstr_free_j(&interactive_find_buf);
+				jstr_free_j(&interactive_rplc_buf);
+				jstr_free_j(&interactive_flags_buf);
+				jstr_free_j(&interactive_files_buf);
 				exit(EXIT_FAILURE);
 			}
 			/* Second pass: edit each cached file's content from memory; the
@@ -331,6 +359,11 @@ process:
 			struct stat st_file;
 			for (i = 0; i < G.files.size; ++i) {
 				file_ty *file = &G.files.data[i];
+				if (interactive_files_buf.size > 0 && interactive_files_buf.data) {
+					if (strstr(file->fname, interactive_files_buf.data) == NULL) {
+						continue;
+					}
+				}
 				/* Read the file if the content is not in memory. */
 				if (jstr_unlikely(file->content.data == NULL)) {
 					jstr_empty_j(&G.content_buf);
@@ -342,8 +375,14 @@ process:
 					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find, a.rplc);
 			}
 			jstr_free_j(&interactive_find_buf);
+			jstr_free_j(&interactive_rplc_buf);
+			jstr_free_j(&interactive_flags_buf);
+			jstr_free_j(&interactive_files_buf);
 		} else {
 			jstr_free_j(&interactive_find_buf);
+			jstr_free_j(&interactive_rplc_buf);
+			jstr_free_j(&interactive_flags_buf);
+			jstr_free_j(&interactive_files_buf);
 		}
 	} else {
 		/* If no file was passed, read from stdin. */

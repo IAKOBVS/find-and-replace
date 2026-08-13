@@ -498,30 +498,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 	while (1) {
 		if (needs_redraw) {
-			/* Clear and home cursor */
-			jstr_io_fwrite("\x1b[H\x1b[2J", 1, 7, stdout);
-			/* Render fields with highlight indicator */
-			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
-			if (find_buf->size > 0 && find_buf->data) jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
-			jstr_io_putchar('\n');
-
-			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
-			if (rplc_buf->size > 0 && rplc_buf->data) jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
-			jstr_io_putchar('\n');
-
-			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
-			if (flags_buf->size > 0 && flags_buf->data) jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
-			jstr_io_putchar('\n');
-
-			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
-			if (files_buf->size > 0 && files_buf->data) jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
-			jstr_io_putchar('\n');
-
-			jstr_io_putchar('\n');
+			/* Home cursor (move to top-left) */
+			jstr_io_fwrite("\x1b[H", 1, 3, stdout);
 
 			/* Parse interactive flags from flags_buf */
 			parse_interactive_flags(flags_buf->data ? flags_buf->data : "", flags_buf->size);
 
+			/* Render previews first (at the top) */
 			err_buf[0] = '\0';
 			jstr_ret_ty comp_ret = JSTR_RET_SUCC;
 			const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
@@ -550,6 +533,29 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);
 				}
 			}
+
+			/* Render control fields at the bottom */
+			jstr_io_fwrite("\n--- Controls ---\n", 1, 18, stdout);
+
+			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
+			if (find_buf->size > 0 && find_buf->data) jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
+			jstr_io_putchar('\n');
+
+			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
+			if (rplc_buf->size > 0 && rplc_buf->data) jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
+			jstr_io_putchar('\n');
+
+			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
+			if (flags_buf->size > 0 && flags_buf->data) jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
+			jstr_io_putchar('\n');
+
+			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
+			if (files_buf->size > 0 && files_buf->data) jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
+			jstr_io_putchar('\n');
+
+			/* Clear from the current cursor position to the bottom of the screen */
+			jstr_io_fwrite("\x1b[J", 1, 3, stdout);
+
 			jstr_io_fflush(stdout);
 			needs_redraw = 0;
 		}

@@ -192,6 +192,35 @@ else:
 	[ "$(cat "$td/f1")" = 'hello world' ] && [ "$(cat "$td/f2")" = 'newreplace again' ] && echo PASS > "$td/result" || echo "FAIL: f1=[$(cat "$td/f1")] f2=[$(cat "$td/f2")]" > "$td/result"
 }
 
+t_confirm_interactive_layout() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	out=$(python3 -c '
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"n\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+' "$td" 2>/dev/null)
+	if echo "$out" | grep -q -- '--- Controls ---' && echo "$out" | grep -q 'Find:    hello' && echo "$out" | grep -q 'Replace: replacement'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: layout check failed. out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -214,5 +243,6 @@ t_confirm_preview_empty_line_insert
 t_confirm_preview_many_blocks
 t_confirm_interactive_live_preview
 t_confirm_interactive_multi_field
+t_confirm_interactive_layout
 "
 run_suite "confirm tests" "$TESTS"

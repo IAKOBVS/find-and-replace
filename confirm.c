@@ -591,6 +591,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			size_t files_matched = 0;
 
 			if (!is_valid) {
+				/* Clear entire screen once on compile error to wipe out previous previews/ghost lines */
+				jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
 				/* Print regex compilation error in red */
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 				jstr_io_fwrite("Regex error: ", 1, 13, stdout);
@@ -615,10 +617,18 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 						files_matched++;
 					}
 				}
+				if (total_matches == 0) {
+					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */
+					jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
+				}
 			}
 
 			/* Render control fields at the bottom */
-			jstr_io_fwrite("\n--- Controls ---\x1b[K\n", 1, S_LEN("\n--- Controls ---\x1b[K\n"), stdout);
+			if (!is_valid || total_matches == 0) {
+				jstr_io_fwrite("--- Controls ---\x1b[K\n", 1, S_LEN("--- Controls ---\x1b[K\n"), stdout);
+			} else {
+				jstr_io_fwrite("\n--- Controls ---\x1b[K\n", 1, S_LEN("\n--- Controls ---\x1b[K\n"), stdout);
+			}
 
 			/* Statistics line */
 			jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);

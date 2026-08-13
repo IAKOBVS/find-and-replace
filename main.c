@@ -82,7 +82,7 @@ static const char *usage =
 /* Compile FIND once (regex or Two-Way fixed-string matcher) into the global
  * state; MODE_COMPILED prevents recompilation on the second -c pass. */
 static jstr_ret_ty
-compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
+compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len)
 {
 	if (!(G.mode & MODE_COMPILED)) {
 		if (G.mode & MODE_USE_REGEX) {
@@ -90,6 +90,20 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len)
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
 				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			}
+			/* Validate backreferences */
+			size_t max_backref = 0;
+			for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
+				if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
+					size_t num = rplc[idx+1] - '0';
+					if (num > max_backref)
+						max_backref = num;
+					++idx;
+				}
+			}
+			if (max_backref > G.regex.reg.re_nsub) {
+				fprintf(stderr, "find-and-replace error: Replace backreference \\%zu exceeds find capture groups (%zu)\n", max_backref, G.regex.reg.re_nsub);
+				exit(EXIT_FAILURE);
 			}
 		} else {
 			jstr_memmem_comp(t, find, find_len);
@@ -270,7 +284,7 @@ done_single:;
 		G.mode |= MODE_HAVE_FILES;
 		ret = xstat(ARG, &st);
 		DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
-		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
+		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
 		if (IS_REG(st.st_mode)) {
 			const size_t fname_len = strlen(ARG);
 			if (!m.exclude_glob) {
@@ -406,7 +420,7 @@ process:
 			if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
 				jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
 			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len)), "%s", "");
+			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
 			DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 		}
 	}

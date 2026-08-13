@@ -77,6 +77,43 @@ match_pushback(matches_ty *R matches,
 	++matches->size;
 }
 
+static size_t
+get_free_ram_size(void)
+{
+	FILE *fp = fopen("/proc/meminfo", "r");
+	if (fp == NULL)
+		return 16 * JSTR_IO_GIB;
+
+	char line[256];
+	size_t free_ram = 0;
+	while (fgets(line, sizeof(line), fp)) {
+		if (strncmp(line, "MemFree:", 8) == 0) {
+			char *p = line + 8;
+			while (*p == ' ' || *p == '\t')
+				p++;
+			free_ram = (size_t)strtoul(p, NULL, 10);
+			free_ram *= 1024;
+			break;
+		}
+	}
+	fclose(fp);
+
+	if (free_ram == 0)
+		return 16 * JSTR_IO_GIB;
+
+	return free_ram;
+}
+
+static size_t
+get_file_cache_max(void)
+{
+	if (G.file_cache_max == 0) {
+		size_t free_ram = get_free_ram_size();
+		G.file_cache_max = free_ram / 2;
+	}
+	return G.file_cache_max;
+}
+
 /* Append one file to the -c confirm cache. The name is strdup'd because
  * ftw->dirpath is a transient buffer reused across callbacks; the content
  * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
@@ -101,7 +138,7 @@ file_pushback(files_ty *files,
 	file->content_size = (size_t)st->st_size;
 	file->st_mode = st->st_mode;
 	/* Take ownership of the already-read content and reset the shared buffer. */
-	if (jstr_likely(files->total_content_size < FILE_CACHE_MAX)) {
+	if (jstr_likely(files->total_content_size < get_file_cache_max())) {
 		file->content = *buf;
 		*buf = (jstr_ty)JSTR_INIT;
 		files->total_content_size += file->content_size;
@@ -412,7 +449,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 }
 
 static jstr_ret_ty
-interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, char *err_buf, size_t err_size)
+interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const char *rplc, size_t rplc_len, char *err_buf, size_t err_size)
 {
 	if (G.mode & MODE_USE_REGEX) {
 		if (G.mode & MODE_COMPILED) {
@@ -425,6 +462,21 @@ interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, char *
 			return JSTR_RET_ERR;
 		}
 		G.mode |= MODE_COMPILED;
+
+		/* Validate backreferences */
+		size_t max_backref = 0;
+		for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
+			if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
+				size_t num = rplc[idx+1] - '0';
+				if (num > max_backref)
+					max_backref = num;
+				++idx;
+			}
+		}
+		if (max_backref > G.regex.reg.re_nsub) {
+			snprintf(err_buf, err_size, "Replace backreference \\%zu exceeds find capture groups (%zu)", max_backref, G.regex.reg.re_nsub);
+			return JSTR_RET_ERR;
+		}
 	} else {
 		jstr_memmem_comp(t, find, find_len);
 	}
@@ -497,6 +549,12 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	int needs_recompile = 1;
 	int is_valid = 1;
 	field_ty active_field = FIELD_FIND;
+	size_t cursors[FIELD_COUNT];
+
+	cursors[FIELD_FIND] = find_buf->size;
+	cursors[FIELD_RPLC] = rplc_buf->size;
+	cursors[FIELD_FLAGS] = flags_buf->size;
+	cursors[FIELD_FILES] = files_buf->size;
 
 	last_err_buf[0] = '\0';
 
@@ -512,7 +570,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				err_buf[0] = '\0';
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
 				const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-				comp_ret = interactive_compile(t, ptn, find_buf->size, err_buf, sizeof(err_buf));
+				comp_ret = interactive_compile(t, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, err_buf, sizeof(err_buf));
 				is_valid = (comp_ret == JSTR_RET_SUCC);
 
 				if (comp_ret != JSTR_RET_SUCC) {
@@ -550,27 +608,72 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			jstr_io_fwrite("\n--- Controls ---\n", 1, 18, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
-			if (find_buf->size > 0 && find_buf->data)
-				jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
+			if (active_field == FIELD_FIND) {
+				if (cursors[FIELD_FIND] > find_buf->size)
+					cursors[FIELD_FIND] = find_buf->size;
+				if (cursors[FIELD_FIND] > 0 && find_buf->data)
+					jstr_io_fwrite(find_buf->data, 1, cursors[FIELD_FIND], stdout);
+				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
+				if (find_buf->size > cursors[FIELD_FIND] && find_buf->data)
+					jstr_io_fwrite(find_buf->data + cursors[FIELD_FIND], 1, find_buf->size - cursors[FIELD_FIND], stdout);
+			} else {
+				if (find_buf->size > 0 && find_buf->data)
+					jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
+			}
 			jstr_io_putchar('\n');
 
 			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
-			if (rplc_buf->size > 0 && rplc_buf->data)
-				jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
+			if (active_field == FIELD_RPLC) {
+				if (cursors[FIELD_RPLC] > rplc_buf->size)
+					cursors[FIELD_RPLC] = rplc_buf->size;
+				if (cursors[FIELD_RPLC] > 0 && rplc_buf->data)
+					jstr_io_fwrite(rplc_buf->data, 1, cursors[FIELD_RPLC], stdout);
+				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
+				if (rplc_buf->size > cursors[FIELD_RPLC] && rplc_buf->data)
+					jstr_io_fwrite(rplc_buf->data + cursors[FIELD_RPLC], 1, rplc_buf->size - cursors[FIELD_RPLC], stdout);
+			} else {
+				if (rplc_buf->size > 0 && rplc_buf->data)
+					jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
+			}
 			jstr_io_putchar('\n');
 
 			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
-			if (flags_buf->size > 0 && flags_buf->data)
-				jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
+			if (active_field == FIELD_FLAGS) {
+				if (cursors[FIELD_FLAGS] > flags_buf->size)
+					cursors[FIELD_FLAGS] = flags_buf->size;
+				if (cursors[FIELD_FLAGS] > 0 && flags_buf->data)
+					jstr_io_fwrite(flags_buf->data, 1, cursors[FIELD_FLAGS], stdout);
+				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
+				if (flags_buf->size > cursors[FIELD_FLAGS] && flags_buf->data)
+					jstr_io_fwrite(flags_buf->data + cursors[FIELD_FLAGS], 1, flags_buf->size - cursors[FIELD_FLAGS], stdout);
+			} else {
+				if (flags_buf->size > 0 && flags_buf->data)
+					jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
+			}
 			jstr_io_putchar('\n');
 
 			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
-			if (files_buf->size > 0 && files_buf->data)
-				jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
+			if (active_field == FIELD_FILES) {
+				if (cursors[FIELD_FILES] > files_buf->size)
+					cursors[FIELD_FILES] = files_buf->size;
+				if (cursors[FIELD_FILES] > 0 && files_buf->data)
+					jstr_io_fwrite(files_buf->data, 1, cursors[FIELD_FILES], stdout);
+				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
+				if (files_buf->size > cursors[FIELD_FILES] && files_buf->data)
+					jstr_io_fwrite(files_buf->data + cursors[FIELD_FILES], 1, files_buf->size - cursors[FIELD_FILES], stdout);
+			} else {
+				if (files_buf->size > 0 && files_buf->data)
+					jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
+			}
 			jstr_io_putchar('\n');
 
 			/* Clear from the current cursor position to the bottom of the screen */
 			jstr_io_fwrite("\x1b[J", 1, 3, stdout);
+
+			/* Restore saved cursor position */
+			jstr_io_fwrite("\x1b[u", 1, 3, stdout);
+			/* Show cursor */
+			jstr_io_fwrite("\x1b[?25h", 1, 6, stdout);
 
 			jstr_io_fflush(stdout);
 			needs_redraw = 0;
@@ -635,6 +738,31 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					/* Arrow Down */
 					active_field = (active_field + 1) % FIELD_COUNT;
 					needs_redraw = 1;
+				} else if (seq[0] == '[' && seq[1] == 'D') {
+					/* Arrow Left: move active cursor left */
+					if (cursors[active_field] > 0) {
+						cursors[active_field]--;
+						needs_redraw = 1;
+					}
+				} else if (seq[0] == '[' && seq[1] == 'C') {
+					/* Arrow Right: move active cursor right */
+					if (active_buf && cursors[active_field] < active_buf->size) {
+						cursors[active_field]++;
+						needs_redraw = 1;
+					}
+				} else if (seq[0] == '[' && seq[1] == '3') {
+					char next_char;
+					if (read(STDIN_FILENO, &next_char, 1) > 0 && next_char == '~') {
+						/* Delete character at cursor */
+						if (active_buf && cursors[active_field] < active_buf->size) {
+							memmove(active_buf->data + cursors[active_field], active_buf->data + cursors[active_field] + 1, active_buf->size - cursors[active_field] - 1);
+							active_buf->size--;
+							active_buf->data[active_buf->size] = '\0';
+							needs_redraw = 1;
+							if (active_buf == find_buf || active_buf == flags_buf)
+								needs_recompile = 1;
+						}
+					}
 				}
 			} else if (n1 <= 0) {
 				/* Pure Escape: abort */
@@ -653,9 +781,12 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			needs_redraw = 1;
 		} else if (c == 127 || c == 8) {
 			/* Backspace */
-			if (active_buf && active_buf->size > 0) {
+			if (active_buf && cursors[active_field] > 0) {
+				/* Shift chars to the left of the cursor */
+				memmove(active_buf->data + cursors[active_field] - 1, active_buf->data + cursors[active_field], active_buf->size - cursors[active_field]);
 				active_buf->size--;
 				active_buf->data[active_buf->size] = '\0';
+				cursors[active_field]--;
 				needs_redraw = 1;
 				if (active_buf == find_buf || active_buf == flags_buf)
 					needs_recompile = 1;
@@ -664,6 +795,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			/* Ctrl-U */
 			if (active_buf) {
 				jstr_empty_j(active_buf);
+				cursors[active_field] = 0;
 				needs_redraw = 1;
 				if (active_buf == find_buf || active_buf == flags_buf)
 					needs_recompile = 1;
@@ -671,7 +803,15 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 		} else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
 			/* Printable character */
 			if (active_buf) {
-				DIE_IF(jstr_pushback_j(active_buf, c), "%s", "Out of memory.\n");
+				/* Reserve space for 1 more char + NUL */
+				DIE_IF(jstr_reserve_j(active_buf, active_buf->size + 2), "%s", "Out of memory.\n");
+				/* Shift chars to the right of the cursor */
+				memmove(active_buf->data + cursors[active_field] + 1, active_buf->data + cursors[active_field], active_buf->size - cursors[active_field]);
+				/* Insert char at cursor */
+				active_buf->data[cursors[active_field]] = c;
+				active_buf->size++;
+				active_buf->data[active_buf->size] = '\0';
+				cursors[active_field]++;
 				needs_redraw = 1;
 				if (active_buf == find_buf || active_buf == flags_buf)
 					needs_recompile = 1;

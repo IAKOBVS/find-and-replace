@@ -101,6 +101,8 @@ typedef struct global_ty {
 	jstr_ty interactive_rplc_buf;
 	jstr_ty interactive_flags_buf;
 	jstr_ty interactive_files_buf;
+	/* Dynamically calculated file cache limit */
+	size_t file_cache_max;
 	/* Cold configuration, read only during startup and traversal. */
 	const char *include_glob;
 	const char *bak_suffix;

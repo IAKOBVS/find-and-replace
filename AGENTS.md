@@ -548,3 +548,10 @@ linking the tool against it fails on undefined `__asan_*` refs. Re-run
 - `end_of_flags` leak, regex empty-buffer short-circuit, and binary-detection
   `#if 0` remain known limitations (unchanged).
 
+## Test-Driven Development (TDD) Guidelines
+
+For every new feature, bug fix, or behavioral change introduced to the codebase:
+- Always write a corresponding, robust failing integration test first under `tests/` before implementing the fix/change.
+- Verify that the test fails as expected.
+- Implement the code change, compile, and run the test suite to ensure the new test passes and no regressions are introduced.
+- Maintain comprehensive coverage of edge cases and input variations.

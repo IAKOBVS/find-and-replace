@@ -253,6 +253,49 @@ else:
 	fi
 }
 
+t_confirm_interactive_backref_mismatch() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	cat > "$td/test.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "\\\\\\\\1\\\\\\\\2", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    # 1. Tab to Flags (\t), clear (\x15), set to gR
+    os.write(fd, b"\t\t\x15gR")
+    time.sleep(1.5)
+    # 2. Abort with Ctrl-C (\x03)
+    os.write(fd, b"\x03")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test.py" "$td" 2>/dev/null)
+	if printf '%s\n' "$out" | grep -q 'Replace backreference \\2 exceeds find capture groups (0)'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: backref mismatch not found. out=[$out]" > "$td/result"
+	fi
+}
+
+t_confirm_non_interactive_backref_mismatch() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	rc=0
+	"$PROG" '(hello)' '\\1\\2' -R -i "$td/f" >/dev/null 2>"$td/err" || rc=$?
+	if [ "$rc" -ne 0 ] && grep -q 'Replace backreference \\2 exceeds find capture groups (0)' "$td/err"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc err=[$(cat "$td/err" 2>/dev/null)]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -277,5 +320,7 @@ t_confirm_interactive_live_preview
 t_confirm_interactive_multi_field
 t_confirm_interactive_layout
 t_confirm_interactive_error_preview
+t_confirm_interactive_backref_mismatch
+t_confirm_non_interactive_backref_mismatch
 "
 run_suite "confirm tests" "$TESTS"

@@ -618,14 +618,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 
 			/* Render control fields at the bottom */
-			jstr_io_fwrite("\n--- Controls ---\x1b[K\n", 1, 21, stdout);
+			jstr_io_fwrite("\n--- Controls ---\x1b[K\n", 1, S_LEN("\n--- Controls ---\x1b[K\n"), stdout);
 
 			/* Statistics line */
-			jstr_io_fwrite("  Stats:    ", 1, 12, stdout);
+			jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
 			print_size_t(total_matches);
-			jstr_io_fwrite(" matches, ", 1, 10, stdout);
+			jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
 			print_size_t(files_matched);
-			jstr_io_fwrite(" files\x1b[K\n", 1, 9, stdout);
+			jstr_io_fwrite(" files\x1b[K\n", 1, S_LEN(" files\x1b[K\n"), stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
 			if (active_field == FIELD_FIND) {

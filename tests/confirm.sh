@@ -296,6 +296,35 @@ t_confirm_non_interactive_backref_mismatch() {
 	fi
 }
 
+t_confirm_interactive_stats() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	out=$(python3 -c '
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"n\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+' "$td" 2>/dev/null)
+	if echo "$out" | grep -q '1 matches, 1 files'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: stats not found. out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -322,5 +351,6 @@ t_confirm_interactive_layout
 t_confirm_interactive_error_preview
 t_confirm_interactive_backref_mismatch
 t_confirm_non_interactive_backref_mismatch
+t_confirm_interactive_stats
 "
 run_suite "confirm tests" "$TESTS"

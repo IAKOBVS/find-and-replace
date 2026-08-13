@@ -258,6 +258,8 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
 		print_line_prefix(fname, fname_len, line++, prefix);
 		jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
+		if (term_initialized)
+			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
 		jstr_io_putchar('\n');
 		p = nl + 1;
 	}
@@ -265,11 +267,15 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		/* The final line is not newline-terminated: print it as-is. */
 		print_line_prefix(fname, fname_len, line, prefix);
 		jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
+		if (term_initialized)
+			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
 		jstr_io_putchar('\n');
 	} else if (trailing_nl) {
 		/* DATA ended in '\n' (or is empty): the empty line that follows the
 		 * block survives only when the block's terminating '\n' does. */
 		print_line_prefix(fname, fname_len, line, prefix);
+		if (term_initialized)
+			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
 		jstr_io_putchar('\n');
 	}
 	jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
@@ -581,13 +587,16 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				needs_recompile = 0;
 			}
 
+			size_t total_matches = 0;
+			size_t files_matched = 0;
+
 			if (!is_valid) {
 				/* Print regex compilation error in red */
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 				jstr_io_fwrite("Regex error: ", 1, 13, stdout);
 				jstr_io_fwrite(last_err_buf, 1, strlen(last_err_buf), stdout);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				jstr_io_putchar('\n');
+				jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 			} else {
 				/* If compile succeeded, run previews on all cached files */
 				G.matches_found = 0;
@@ -601,11 +610,22 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					size_t file_matches = 0;
 					const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);
+					if (file_matches > 0) {
+						total_matches += file_matches;
+						files_matched++;
+					}
 				}
 			}
 
 			/* Render control fields at the bottom */
-			jstr_io_fwrite("\n--- Controls ---\n", 1, 18, stdout);
+			jstr_io_fwrite("\n--- Controls ---\x1b[K\n", 1, 21, stdout);
+
+			/* Statistics line */
+			jstr_io_fwrite("  Stats:    ", 1, 12, stdout);
+			print_size_t(total_matches);
+			jstr_io_fwrite(" matches, ", 1, 10, stdout);
+			print_size_t(files_matched);
+			jstr_io_fwrite(" files\x1b[K\n", 1, 9, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
 			if (active_field == FIELD_FIND) {
@@ -620,7 +640,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				if (find_buf->size > 0 && find_buf->data)
 					jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
 			}
-			jstr_io_putchar('\n');
+			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
 			if (active_field == FIELD_RPLC) {
@@ -635,7 +655,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				if (rplc_buf->size > 0 && rplc_buf->data)
 					jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
 			}
-			jstr_io_putchar('\n');
+			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
 			if (active_field == FIELD_FLAGS) {
@@ -650,7 +670,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				if (flags_buf->size > 0 && flags_buf->data)
 					jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
 			}
-			jstr_io_putchar('\n');
+			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
 			if (active_field == FIELD_FILES) {
@@ -665,7 +685,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				if (files_buf->size > 0 && files_buf->data)
 					jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
 			}
-			jstr_io_putchar('\n');
+			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			/* Clear from the current cursor position to the bottom of the screen */
 			jstr_io_fwrite("\x1b[J", 1, 3, stdout);

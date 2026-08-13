@@ -492,10 +492,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 {
 	setup_terminal();
 	char err_buf[256];
+	char last_err_buf[256];
 	int needs_redraw = 1;
 	int needs_recompile = 1;
 	int is_valid = 1;
 	field_ty active_field = FIELD_FIND;
+
+	last_err_buf[0] = '\0';
 
 	while (1) {
 		if (needs_redraw) {
@@ -513,17 +516,21 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				is_valid = (comp_ret == JSTR_RET_SUCC);
 
 				if (comp_ret != JSTR_RET_SUCC) {
-					/* Print regex compilation error in red */
-					jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-					jstr_io_fwrite("Regex error: ", 1, 13, stdout);
-					jstr_io_fwrite(err_buf, 1, strlen(err_buf), stdout);
-					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-					jstr_io_putchar('\n');
+					jstr_strcpy_len(last_err_buf, err_buf, strlen(err_buf));
+				} else {
+					last_err_buf[0] = '\0';
 				}
 				needs_recompile = 0;
 			}
 
-			if (is_valid) {
+			if (!is_valid) {
+				/* Print regex compilation error in red */
+				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+				jstr_io_fwrite("Regex error: ", 1, 13, stdout);
+				jstr_io_fwrite(last_err_buf, 1, strlen(last_err_buf), stdout);
+				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				jstr_io_putchar('\n');
+			} else {
 				/* If compile succeeded, run previews on all cached files */
 				G.matches_found = 0;
 				for (unsigned int k = 0; k < G.files.size; ++k) {

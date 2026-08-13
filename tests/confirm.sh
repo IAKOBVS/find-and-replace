@@ -221,6 +221,38 @@ else:
 	fi
 }
 
+t_confirm_interactive_error_preview() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	out=$(python3 -c '
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    # 1. Tab to Flags (\t), clear (\x15), set to gR
+    # 2. Tab to Find (\t\t), clear (\x15), type invalid regex "["
+    # 3. Tab to Replace (\t), type "abc"
+    # 4. Abort with Ctrl-C (\x03) so we can inspect output
+    os.write(fd, b"\t\t\x15gR\t\t\x15[\tabc\x03")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+' "$td" 2>/dev/null)
+	# Check that the "Regex error:" string appears in the final frame where Replace contains "replacementabc"
+	if echo "$out" | grep -q 'Regex error:' && echo "$out" | grep -q 'Replace: replacementabc'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: error preview check failed. out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -244,5 +276,6 @@ t_confirm_preview_many_blocks
 t_confirm_interactive_live_preview
 t_confirm_interactive_multi_field
 t_confirm_interactive_layout
+t_confirm_interactive_error_preview
 "
 run_suite "confirm tests" "$TESTS"

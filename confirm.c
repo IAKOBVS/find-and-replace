@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 static struct termios orig_termios;
 static int term_initialized = 0;
@@ -256,27 +257,45 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	const char *nl;
 	jstr_io_fwrite(color, 1, color_len, stdout);
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
+		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
+			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			return;
+		}
 		print_line_prefix(fname, fname_len, line++, prefix);
 		jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
 		jstr_io_putchar('\n');
+		if (term_initialized)
+			G.preview_lines_printed++;
 		p = nl + 1;
 	}
 	if (p < end) {
+		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
+			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			return;
+		}
 		/* The final line is not newline-terminated: print it as-is. */
 		print_line_prefix(fname, fname_len, line, prefix);
 		jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
 		jstr_io_putchar('\n');
+		if (term_initialized)
+			G.preview_lines_printed++;
 	} else if (trailing_nl) {
+		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
+			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			return;
+		}
 		/* DATA ended in '\n' (or is empty): the empty line that follows the
 		 * block survives only when the block's terminating '\n' does. */
 		print_line_prefix(fname, fname_len, line, prefix);
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
 		jstr_io_putchar('\n');
+		if (term_initialized)
+			G.preview_lines_printed++;
 	}
 	jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 }
@@ -600,8 +619,21 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 			} else {
+				/* Calculate max_preview_lines dynamically based on terminal height */
+				unsigned short rows = 24;
+				struct winsize w;
+				if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+					rows = w.ws_row;
+				}
+				if (rows > 9) {
+					G.max_preview_lines = rows - 9;
+				} else {
+					G.max_preview_lines = 1;
+				}
+
 				/* If compile succeeded, run previews on all cached files */
 				G.matches_found = 0;
+				G.preview_lines_printed = 0;
 				for (unsigned int k = 0; k < G.files.size; ++k) {
 					file_ty *file = &G.files.data[k];
 					/* File filtering by files_buf using jstr_strstr_len */
@@ -616,6 +648,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 						total_matches += file_matches;
 						files_matched++;
 					}
+				}
+				if (G.preview_lines_printed >= G.max_preview_lines) {
+					jstr_io_fwrite("... (some previews omitted)\x1b[K\n", 1, S_LEN("... (some previews omitted)\x1b[K\n"), stdout);
 				}
 				if (total_matches == 0) {
 					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */

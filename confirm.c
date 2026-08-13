@@ -493,6 +493,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	setup_terminal();
 	char err_buf[256];
 	int needs_redraw = 1;
+	int needs_recompile = 1;
 	int is_valid = 1;
 	field_ty active_field = FIELD_FIND;
 
@@ -501,35 +502,39 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			/* Home cursor (move to top-left) */
 			jstr_io_fwrite("\x1b[H", 1, 3, stdout);
 
-			/* Parse interactive flags from flags_buf */
-			parse_interactive_flags(flags_buf->data ? flags_buf->data : "", flags_buf->size);
+			if (needs_recompile) {
+				/* Parse interactive flags from flags_buf */
+				parse_interactive_flags(flags_buf->data ? flags_buf->data : "", flags_buf->size);
 
-			/* Render previews first (at the top) */
-			err_buf[0] = '\0';
-			jstr_ret_ty comp_ret = JSTR_RET_SUCC;
-			const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-			comp_ret = interactive_compile(t, ptn, find_buf->size, err_buf, sizeof(err_buf));
-			is_valid = (comp_ret == JSTR_RET_SUCC);
+				err_buf[0] = '\0';
+				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
+				const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
+				comp_ret = interactive_compile(t, ptn, find_buf->size, err_buf, sizeof(err_buf));
+				is_valid = (comp_ret == JSTR_RET_SUCC);
 
-			if (comp_ret != JSTR_RET_SUCC) {
-				/* Print regex compilation error in red */
-				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				jstr_io_fwrite("Regex error: ", 1, 13, stdout);
-				jstr_io_fwrite(err_buf, 1, strlen(err_buf), stdout);
-				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				jstr_io_putchar('\n');
-			} else {
+				if (comp_ret != JSTR_RET_SUCC) {
+					/* Print regex compilation error in red */
+					jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+					jstr_io_fwrite("Regex error: ", 1, 13, stdout);
+					jstr_io_fwrite(err_buf, 1, strlen(err_buf), stdout);
+					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+					jstr_io_putchar('\n');
+				}
+				needs_recompile = 0;
+			}
+
+			if (is_valid) {
 				/* If compile succeeded, run previews on all cached files */
 				G.matches_found = 0;
 				for (unsigned int k = 0; k < G.files.size; ++k) {
 					file_ty *file = &G.files.data[k];
-					/* File filtering by files_buf */
+					/* File filtering by files_buf using jstr_strstr_len */
 					if (files_buf->size > 0 && files_buf->data) {
-						if (strstr(file->fname, files_buf->data) == NULL) {
+						if (jstr_strstr_len(file->fname, file->fname_len, files_buf->data, files_buf->size) == NULL)
 							continue;
-						}
 					}
 					size_t file_matches = 0;
+					const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);
 				}
 			}
@@ -538,19 +543,23 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			jstr_io_fwrite("\n--- Controls ---\n", 1, 18, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
-			if (find_buf->size > 0 && find_buf->data) jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
+			if (find_buf->size > 0 && find_buf->data)
+				jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
 			jstr_io_putchar('\n');
 
 			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
-			if (rplc_buf->size > 0 && rplc_buf->data) jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
+			if (rplc_buf->size > 0 && rplc_buf->data)
+				jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
 			jstr_io_putchar('\n');
 
 			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
-			if (flags_buf->size > 0 && flags_buf->data) jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
+			if (flags_buf->size > 0 && flags_buf->data)
+				jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
 			jstr_io_putchar('\n');
 
 			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
-			if (files_buf->size > 0 && files_buf->data) jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
+			if (files_buf->size > 0 && files_buf->data)
+				jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
 			jstr_io_putchar('\n');
 
 			/* Clear from the current cursor position to the bottom of the screen */
@@ -566,16 +575,27 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			continue;
 
 		jstr_ty *active_buf = NULL;
-		if (active_field == FIELD_FIND) active_buf = find_buf;
-		else if (active_field == FIELD_RPLC) active_buf = rplc_buf;
-		else if (active_field == FIELD_FLAGS) active_buf = flags_buf;
-		else if (active_field == FIELD_FILES) active_buf = files_buf;
+		if (active_field == FIELD_FIND)
+			active_buf = find_buf;
+		else if (active_field == FIELD_RPLC)
+			active_buf = rplc_buf;
+		else if (active_field == FIELD_FLAGS)
+			active_buf = flags_buf;
+		else if (active_field == FIELD_FILES)
+			active_buf = files_buf;
 
-		if (c == '\r' || c == '\n') {
+		if (c == '\r') {
 			/* Accept only if the current pattern compiles successfully */
-			if (is_valid) {
+			if (is_valid)
 				break;
-			}
+		} else if (c == 10) {
+			/* Ctrl-J or Arrow Down equivalent */
+			active_field = (active_field + 1) % FIELD_COUNT;
+			needs_redraw = 1;
+		} else if (c == 11) {
+			/* Ctrl-K or Arrow Up equivalent */
+			active_field = (active_field + FIELD_COUNT - 1) % FIELD_COUNT;
+			needs_redraw = 1;
 		} else if (c == 27) {
 			/* Check if this is Shift-Tab or Arrow keys escape sequence */
 			struct termios raw;
@@ -587,9 +607,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			char seq[2];
 			int n1 = read(STDIN_FILENO, &seq[0], 1);
 			int n2 = 0;
-			if (n1 > 0) {
+			if (n1 > 0)
 				n2 = read(STDIN_FILENO, &seq[1], 1);
-			}
 
 			/* Restore blocking read */
 			raw.c_cc[VMIN] = 1;
@@ -631,18 +650,24 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->size--;
 				active_buf->data[active_buf->size] = '\0';
 				needs_redraw = 1;
+				if (active_buf == find_buf || active_buf == flags_buf)
+					needs_recompile = 1;
 			}
 		} else if (c == 21) {
 			/* Ctrl-U */
 			if (active_buf) {
 				jstr_empty_j(active_buf);
 				needs_redraw = 1;
+				if (active_buf == find_buf || active_buf == flags_buf)
+					needs_recompile = 1;
 			}
 		} else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
 			/* Printable character */
 			if (active_buf) {
 				DIE_IF(jstr_pushback_j(active_buf, c), "%s", "Out of memory.\n");
 				needs_redraw = 1;
+				if (active_buf == find_buf || active_buf == flags_buf)
+					needs_recompile = 1;
 			}
 		}
 	}

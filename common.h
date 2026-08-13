@@ -96,6 +96,11 @@ typedef struct global_ty {
 	 * the allocation is reused across files so capacity persists. */
 	jstr_ty new_buf;
 	jstr_ty content_buf;
+	/* Cached interactive TUI buffers */
+	jstr_ty interactive_find_buf;
+	jstr_ty interactive_rplc_buf;
+	jstr_ty interactive_flags_buf;
+	jstr_ty interactive_files_buf;
 	/* Cold configuration, read only during startup and traversal. */
 	const char *include_glob;
 	const char *bak_suffix;

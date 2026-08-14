@@ -585,32 +585,6 @@ get_terminal_rows(void)
 	return 24; /* standard default fallback */
 }
 
-static int
-rplc_has_backref(const char *rplc, size_t rplc_len)
-{
-	size_t idx;
-	for (idx = 0; idx + 1 < rplc_len; ++idx) {
-		if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
-			return 1;
-		}
-	}
-	return 0;
-}
-
-static int
-active_buf_needs_recompile(const jstr_ty *active_buf, const jstr_ty *find_buf, const jstr_ty *flags_buf, const jstr_ty *rplc_buf, int is_valid, int rplc_had_backref)
-{
-	if (active_buf == find_buf || active_buf == flags_buf)
-		return 1;
-	if (active_buf == rplc_buf) {
-		if (G.mode & MODE_USE_REGEX) {
-			if (!is_valid || rplc_had_backref || rplc_has_backref(rplc_buf->data, rplc_buf->size))
-				return 1;
-		}
-	}
-	return 0;
-}
-
 jstr_ret_ty
 confirm_interactive_loop(jstr_twoway_ty *R t,
                          jstr_ty *R find_buf,
@@ -625,7 +599,6 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	int needs_recompile = 1;
 	int is_valid = 1;
 	int first_draw = 1;
-	int rplc_had_backref = 0;
 	field_ty active_field = FIELD_FIND;
 	size_t cursors[FIELD_COUNT];
 
@@ -661,7 +634,6 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				} else {
 					last_err_buf[0] = '\0';
 				}
-				rplc_had_backref = rplc_has_backref(rplc_buf->data, rplc_buf->size);
 				needs_recompile = 0;
 			}
 
@@ -856,9 +828,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 							active_buf->size--;
 							active_buf->data[active_buf->size] = '\0';
 							needs_redraw = 1;
-							if (active_buf_needs_recompile(active_buf, find_buf, flags_buf, rplc_buf, is_valid, rplc_had_backref)) {
-								if (active_buf == find_buf || active_buf == flags_buf)
-									G.mode &= ~MODE_COMPILED;
+							if (active_buf == find_buf || active_buf == flags_buf) {
+								G.mode &= ~MODE_COMPILED;
+								needs_recompile = 1;
+							} else if (active_buf == rplc_buf) {
 								needs_recompile = 1;
 							}
 						}
@@ -888,9 +861,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]--;
 				needs_redraw = 1;
-				if (active_buf_needs_recompile(active_buf, find_buf, flags_buf, rplc_buf, is_valid, rplc_had_backref)) {
-					if (active_buf == find_buf || active_buf == flags_buf)
-						G.mode &= ~MODE_COMPILED;
+				if (active_buf == find_buf || active_buf == flags_buf) {
+					G.mode &= ~MODE_COMPILED;
+					needs_recompile = 1;
+				} else if (active_buf == rplc_buf) {
 					needs_recompile = 1;
 				}
 			}
@@ -900,9 +874,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_empty_j(active_buf);
 				cursors[active_field] = 0;
 				needs_redraw = 1;
-				if (active_buf_needs_recompile(active_buf, find_buf, flags_buf, rplc_buf, is_valid, rplc_had_backref)) {
-					if (active_buf == find_buf || active_buf == flags_buf)
-						G.mode &= ~MODE_COMPILED;
+				if (active_buf == find_buf || active_buf == flags_buf) {
+					G.mode &= ~MODE_COMPILED;
+					needs_recompile = 1;
+				} else if (active_buf == rplc_buf) {
 					needs_recompile = 1;
 				}
 			}
@@ -919,9 +894,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]++;
 				needs_redraw = 1;
-				if (active_buf_needs_recompile(active_buf, find_buf, flags_buf, rplc_buf, is_valid, rplc_had_backref)) {
-					if (active_buf == find_buf || active_buf == flags_buf)
-						G.mode &= ~MODE_COMPILED;
+				if (active_buf == find_buf || active_buf == flags_buf) {
+					G.mode &= ~MODE_COMPILED;
+					needs_recompile = 1;
+				} else if (active_buf == rplc_buf) {
 					needs_recompile = 1;
 				}
 			}

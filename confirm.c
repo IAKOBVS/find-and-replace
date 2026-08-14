@@ -109,7 +109,7 @@ get_free_ram_size(void)
 
 	size_t free_ram = 0;
 	while (procfs_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
-		if (key_len == S_LEN("MemFree") && memcmp(key, "MemFree", S_LEN("MemFree")) == 0) {
+		if (key_len == S_LEN("MemAvailable") && memcmp(key, S_LITERAL("MemAvailable")) == 0) {
 			free_ram = (size_t)strtoul(val, NULL, 10) * JSTR_IO_KIB;
 			break;
 		}

@@ -10,7 +10,7 @@
 #include <sys/ioctl.h>
 
 static struct termios orig_termios;
-static int term_initialized = 0;
+static volatile sig_atomic_t term_initialized = 0;
 
 static void
 restore_terminal(void)
@@ -26,9 +26,8 @@ restore_terminal(void)
 static void
 handle_signal(int sig)
 {
-	(void)sig;
 	restore_terminal();
-	_exit(EXIT_FAILURE);
+	_exit(128 + sig);
 }
 
 static void
@@ -165,7 +164,10 @@ line_get_start(const char *R data, size_t size, size_t idx)
 static size_t
 line_get_end(const char *R data, size_t size, size_t idx)
 {
-	const char *nl = (const char *)memchr(data + idx, '\n', size - idx);
+	const char *nl;
+	if (idx > size)
+		idx = size;
+	nl = (const char *)memchr(data + idx, '\n', size - idx);
 	return nl ? (size_t)JSTR_PTR_DIFF(nl, data) : size;
 }
 

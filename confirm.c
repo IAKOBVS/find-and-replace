@@ -46,8 +46,8 @@ setup_terminal(void)
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0)
 		return;
 	term_initialized = 1;
-	/* Use 17 (or S_LEN) instead of 14 so the entire escape sequence is written, hiding the cursor properly */
-	jstr_io_fwrite("\x1b[?1049h\x1b[H\x1b[?25l", 1, 17, stdout); /* enter alt screen, clear/home, hide cursor */
+	/* Use 21 (or S_LEN) so the entire escape sequence is written, clearing screen and hiding the cursor properly */
+	jstr_io_fwrite("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l", 1, 21, stdout); /* enter alt screen, clear/home, hide cursor */
 	jstr_io_fflush(stdout);
 	atexit(restore_terminal);
 	signal(SIGINT, handle_signal);
@@ -560,6 +560,29 @@ parse_interactive_flags(const char *flags, size_t len)
 	}
 }
 
+static unsigned short
+get_terminal_rows(void)
+{
+	struct winsize w;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+		return w.ws_row;
+	}
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+		return w.ws_row;
+	}
+	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+		return w.ws_row;
+	}
+	const char *lines_env = getenv("LINES");
+	if (lines_env != NULL) {
+		int l = atoi(lines_env);
+		if (l > 0) {
+			return (unsigned short)l;
+		}
+	}
+	return 24; /* standard default fallback */
+}
+
 jstr_ret_ty
 confirm_interactive_loop(jstr_twoway_ty *R t,
                          jstr_ty *R find_buf,
@@ -573,6 +596,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	int needs_redraw = 1;
 	int needs_recompile = 1;
 	int is_valid = 1;
+	int first_draw = 1;
 	field_ty active_field = FIELD_FIND;
 	size_t cursors[FIELD_COUNT];
 
@@ -585,8 +609,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 	while (1) {
 		if (needs_redraw) {
-			/* Home cursor (move to top-left) */
-			jstr_io_fwrite("\x1b[H", 1, 3, stdout);
+			if (first_draw) {
+				jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
+				first_draw = 0;
+			} else {
+				/* Home cursor (move to top-left) */
+				jstr_io_fwrite("\x1b[H", 1, 3, stdout);
+			}
 
 			if (needs_recompile) {
 				/* Parse interactive flags from flags_buf */
@@ -608,6 +637,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 			size_t total_matches = 0;
 			size_t files_matched = 0;
+			size_t preview_lines = 0;
 
 			if (!is_valid) {
 				/* Clear entire screen once on compile error to wipe out previous previews/ghost lines */
@@ -618,13 +648,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_io_fwrite(last_err_buf, 1, strlen(last_err_buf), stdout);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
+				preview_lines = 1;
 			} else {
 				/* Calculate max_preview_lines dynamically based on terminal height */
-				unsigned short rows = 24;
-				struct winsize w;
-				if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
-					rows = w.ws_row;
-				}
+				unsigned short rows = get_terminal_rows();
 				if (rows > 9) {
 					G.max_preview_lines = rows - 9;
 				} else {
@@ -656,6 +683,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */
 					jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
 				}
+				preview_lines = G.preview_lines_printed;
 			}
 
 			/* Render control fields at the bottom */
@@ -673,70 +701,44 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			jstr_io_fwrite(" files\x1b[K\n", 1, S_LEN(" files\x1b[K\n"), stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
-			if (active_field == FIELD_FIND) {
-				if (cursors[FIELD_FIND] > find_buf->size)
-					cursors[FIELD_FIND] = find_buf->size;
-				if (cursors[FIELD_FIND] > 0 && find_buf->data)
-					jstr_io_fwrite(find_buf->data, 1, cursors[FIELD_FIND], stdout);
-				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
-				if (find_buf->size > cursors[FIELD_FIND] && find_buf->data)
-					jstr_io_fwrite(find_buf->data + cursors[FIELD_FIND], 1, find_buf->size - cursors[FIELD_FIND], stdout);
-			} else {
-				if (find_buf->size > 0 && find_buf->data)
-					jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
-			}
+			if (find_buf->size > 0 && find_buf->data)
+				jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
 			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
-			if (active_field == FIELD_RPLC) {
-				if (cursors[FIELD_RPLC] > rplc_buf->size)
-					cursors[FIELD_RPLC] = rplc_buf->size;
-				if (cursors[FIELD_RPLC] > 0 && rplc_buf->data)
-					jstr_io_fwrite(rplc_buf->data, 1, cursors[FIELD_RPLC], stdout);
-				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
-				if (rplc_buf->size > cursors[FIELD_RPLC] && rplc_buf->data)
-					jstr_io_fwrite(rplc_buf->data + cursors[FIELD_RPLC], 1, rplc_buf->size - cursors[FIELD_RPLC], stdout);
-			} else {
-				if (rplc_buf->size > 0 && rplc_buf->data)
-					jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
-			}
+			if (rplc_buf->size > 0 && rplc_buf->data)
+				jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
 			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
-			if (active_field == FIELD_FLAGS) {
-				if (cursors[FIELD_FLAGS] > flags_buf->size)
-					cursors[FIELD_FLAGS] = flags_buf->size;
-				if (cursors[FIELD_FLAGS] > 0 && flags_buf->data)
-					jstr_io_fwrite(flags_buf->data, 1, cursors[FIELD_FLAGS], stdout);
-				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
-				if (flags_buf->size > cursors[FIELD_FLAGS] && flags_buf->data)
-					jstr_io_fwrite(flags_buf->data + cursors[FIELD_FLAGS], 1, flags_buf->size - cursors[FIELD_FLAGS], stdout);
-			} else {
-				if (flags_buf->size > 0 && flags_buf->data)
-					jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
-			}
+			if (flags_buf->size > 0 && flags_buf->data)
+				jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
 			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
-			if (active_field == FIELD_FILES) {
-				if (cursors[FIELD_FILES] > files_buf->size)
-					cursors[FIELD_FILES] = files_buf->size;
-				if (cursors[FIELD_FILES] > 0 && files_buf->data)
-					jstr_io_fwrite(files_buf->data, 1, cursors[FIELD_FILES], stdout);
-				jstr_io_fwrite("\x1b[s", 1, 3, stdout); /* Save cursor position */
-				if (files_buf->size > cursors[FIELD_FILES] && files_buf->data)
-					jstr_io_fwrite(files_buf->data + cursors[FIELD_FILES], 1, files_buf->size - cursors[FIELD_FILES], stdout);
-			} else {
-				if (files_buf->size > 0 && files_buf->data)
-					jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
-			}
+			if (files_buf->size > 0 && files_buf->data)
+				jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
 			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
 
 			/* Clear from the current cursor position to the bottom of the screen */
 			jstr_io_fwrite("\x1b[J", 1, 3, stdout);
 
-			/* Restore saved cursor position */
-			jstr_io_fwrite("\x1b[u", 1, 3, stdout);
+			/* Compute absolute cursor position */
+			size_t start_control_line = preview_lines + 1; /* Controls header */
+			if (is_valid && total_matches > 0) {
+				if (preview_lines >= G.max_preview_lines) {
+					start_control_line += 1; /* omitted line */
+				}
+				start_control_line += 1; /* empty line before controls */
+			}
+			size_t find_line = start_control_line + 2;
+			size_t active_line = find_line + (size_t)active_field;
+			size_t active_col = 11 + cursors[active_field] + 1;
+
+			char cup_buf[32];
+			size_t cup_len = snprintf(cup_buf, sizeof(cup_buf), "\x1b[%zu;%zuH", active_line, active_col);
+			jstr_io_fwrite(cup_buf, 1, cup_len, stdout);
+
 			/* Show cursor */
 			jstr_io_fwrite("\x1b[?25h", 1, 6, stdout);
 

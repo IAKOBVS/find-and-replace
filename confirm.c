@@ -228,6 +228,42 @@ match_line_end(const char *R data, size_t size, size_t start, size_t end)
 	return line_get_end(data, size, end);
 }
 
+static unsigned short
+get_terminal_cols(void)
+{
+	struct winsize w;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+		return w.ws_col;
+	}
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+		return w.ws_col;
+	}
+	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+		return w.ws_col;
+	}
+	const char *cols_env = getenv("COLUMNS");
+	if (cols_env != NULL) {
+		int c = atoi(cols_env);
+		if (c > 0) {
+			return (unsigned short)c;
+		}
+	}
+	return 80; /* standard default fallback */
+}
+
+static unsigned short
+get_size_t_width(size_t val)
+{
+	if (val == 0)
+		return 1;
+	unsigned short width = 0;
+	while (val > 0) {
+		width++;
+		val /= 10;
+	}
+	return width;
+}
+
 /* Write VAL in decimal to stdout without using printf. */
 static void
 print_size_t(size_t val)
@@ -254,6 +290,34 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefi
 	jstr_io_putchar(prefix);
 }
 
+/* Print S of LEN bytes, expanding tab characters to 8-column stops and
+ * truncating/clipping to COLS - 1 columns. COL_PTR tracks the current column
+ * (0-indexed). */
+static void
+print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr)
+{
+	unsigned short col = *col_ptr;
+	unsigned short limit = (cols > 1) ? (cols - 1) : 0;
+	for (size_t i = 0; i < len; ++i) {
+		char c = s[i];
+		if (c == '\t') {
+			unsigned short next_tab = (unsigned short)((col + 8) & ~7);
+			while (col < next_tab) {
+				if (col < limit) {
+					jstr_io_putchar(' ');
+				}
+				col++;
+			}
+		} else {
+			if (col < limit) {
+				jstr_io_putchar(c);
+			}
+			col++;
+		}
+	}
+	*col_ptr = col;
+}
+
 /* Print one side of a -c preview change: each line of DATA is printed on its
  * own line as "FNAME:LINE:PREFIX<content>", colored with COLOR. DATA covers
  * the block from the start of the first changed line up to (but not
@@ -271,6 +335,10 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	const char *const end = data + len;
 	size_t line = start_line;
 	const char *nl;
+	unsigned short cols = 0;
+	if (term_initialized) {
+		cols = get_terminal_cols();
+	}
 	jstr_io_fwrite(color, 1, color_len, stdout);
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
 		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
@@ -278,7 +346,12 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			return;
 		}
 		print_line_prefix(fname, fname_len, line++, prefix);
-		jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
+		if (term_initialized) {
+			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
+			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
+		} else {
+			jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
+		}
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');
@@ -293,7 +366,12 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		}
 		/* The final line is not newline-terminated: print it as-is. */
 		print_line_prefix(fname, fname_len, line, prefix);
-		jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
+		if (term_initialized) {
+			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
+			print_diff_line_chars(p, (size_t)(end - p), cols, &col);
+		} else {
+			jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
+		}
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');

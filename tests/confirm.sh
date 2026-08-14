@@ -360,6 +360,73 @@ else:
 	fi
 }
 
+t_confirm_interactive_tab_expansion() {
+	td=$1; printf '\thello world\n' > "$td/f"
+	out=$(python3 -c '
+import os, pty, sys, time, fcntl, termios, struct
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    s = struct.pack("HHHH", 24, 80, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, s)
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"n\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+' "$td" 2>/dev/null)
+	tui_out=$(printf '%s\n' "$out" | grep '\[K')
+	clean_tui=$(printf '%s\n' "$tui_out" | sed 's/\x1b\[[0-9;]*m//g; s/\x1b\[K//g; s/\[K//g')
+	if printf '%s\n' "$clean_tui" | grep -q ':-   hello world' && ! printf '%s\n' "$clean_tui" | grep -q ':\t'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: tab expansion failed. tui=[$clean_tui]" > "$td/result"
+	fi
+}
+
+t_confirm_interactive_width_clipping() {
+	td=$1
+	python3 -c 'import sys; print("a" * 150)' > "$td/f"
+	out=$(python3 -c '
+import os, pty, sys, time, fcntl, termios, struct
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "a", "b", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    s = struct.pack("HHHH", 24, 80, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, s)
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"n\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+' "$td" 2>/dev/null)
+	tui_out=$(printf '%s\n' "$out" | grep '_interactive_width_clipping/f:1:-' | grep '\[K' | head -1)
+	clean_line=$(printf '%s\n' "$tui_out" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\r//g')
+	if [ -n "$clean_line" ] && [ "${#clean_line}" -le 79 ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: width clipping failed. line_len=${#clean_line} line=[$clean_line]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -388,5 +455,7 @@ t_confirm_interactive_backref_mismatch
 t_confirm_non_interactive_backref_mismatch
 t_confirm_interactive_stats
 t_confirm_interactive_height_capping
+t_confirm_interactive_tab_expansion
+t_confirm_interactive_width_clipping
 "
 run_suite "confirm tests" "$TESTS"

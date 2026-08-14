@@ -279,15 +279,42 @@ print_size_t(size_t val)
 	jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
 }
 
-/* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
+/* Print the "FNAME(red):LINE(green):{+/-}{DELTA}(green/red):" prefix of one -c preview line. */
 static void
-print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix)
+print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix, size_t delta, const char *color, unsigned int color_len)
 {
+	/* file (red) */
+	jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	jstr_io_fwrite(fname, 1, fname_len, stdout);
+
+	/* : (uncolored) */
+	jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 	jstr_io_putchar(':');
+
+	/* line_number (green) */
+	jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 	print_size_t(line);
+
+	/* : (uncolored) */
+	jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 	jstr_io_putchar(':');
-	jstr_io_putchar(prefix);
+
+	/* {+/-}{delta} (green if plus, red if minus) */
+	if (prefix == '+') {
+		jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+		jstr_io_putchar('+');
+	} else {
+		jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+		jstr_io_putchar('-');
+	}
+	print_size_t(delta);
+
+	/* : (uncolored) */
+	jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	jstr_io_putchar(':');
+
+	/* line content color */
+	jstr_io_fwrite(color, 1, color_len, stdout);
 }
 
 /* Print S of LEN bytes, expanding tab characters to 8-column stops and
@@ -328,7 +355,7 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
  * is empty) still renders the empty line that follows it, matching how diff
  * counts lines. */
 static void
-print_diff_lines(const char *R data, size_t len, char prefix, const char *color, unsigned int color_len,
+print_diff_lines(const char *R data, size_t len, char prefix, size_t delta, const char *color, unsigned int color_len,
                     const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
 {
 	const char *p = data;
@@ -339,15 +366,15 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	if (term_initialized) {
 		cols = get_terminal_cols();
 	}
-	jstr_io_fwrite(color, 1, color_len, stdout);
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
 		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
 			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			return;
 		}
-		print_line_prefix(fname, fname_len, line++, prefix);
+		size_t cur_line = line++;
+		print_line_prefix(fname, fname_len, cur_line, prefix, delta, color, color_len);
 		if (term_initialized) {
-			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
+			unsigned short col = (unsigned short)(fname_len + get_size_t_width(cur_line) + get_size_t_width(delta) + 4);
 			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
 		} else {
 			jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
@@ -365,9 +392,9 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			return;
 		}
 		/* The final line is not newline-terminated: print it as-is. */
-		print_line_prefix(fname, fname_len, line, prefix);
+		print_line_prefix(fname, fname_len, line, prefix, delta, color, color_len);
 		if (term_initialized) {
-			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
+			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + get_size_t_width(delta) + 4);
 			print_diff_line_chars(p, (size_t)(end - p), cols, &col);
 		} else {
 			jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
@@ -384,7 +411,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		}
 		/* DATA ended in '\n' (or is empty): the empty line that follows the
 		 * block survives only when the block's terminating '\n' does. */
-		print_line_prefix(fname, fname_len, line, prefix);
+		print_line_prefix(fname, fname_len, line, prefix, delta, color, color_len);
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');
@@ -557,8 +584,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, '-', S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
+			print_diff_lines(buf->data + block_start, old_len, '-', old_count, S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
+			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', new_count, S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
 			i = j + 1;
 		}

@@ -34,7 +34,7 @@ t_confirm_multiline_regex() {
 	td=$1; printf 'hello\nworld\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q -- ':-1:hello' && printf '%s' "$clean_out" | grep -q -- ':+1:hi' && ! printf '%s' "$clean_out" | grep -q '^@@' && ! printf '%s' "$clean_out" | grep -q '^---' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q -- ':-9:hello' && printf '%s' "$clean_out" | grep -q -- ':+9:hi' && ! printf '%s' "$clean_out" | grep -q '^@@' && ! printf '%s' "$clean_out" | grep -q '^---' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_multi_same_line() {
@@ -83,14 +83,14 @@ t_confirm_regex_preview_skip_newline() {
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	# Under latest jstring, ".* b" replaced with "b" (with REG_NEWLINE) produces "b\nb\n"
 	[ "$(cat "$td/f")" = 'b
-b' ] && printf '%s' "$clean_out" | grep -q -- ':-0: b' && printf '%s' "$clean_out" | grep -q -- ':+0:b' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+b' ] && printf '%s' "$clean_out" | grep -q -- ':-1: b' && printf '%s' "$clean_out" | grep -q -- ':+1:b' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_backref() {
 	td=$1; printf 'hello\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" "(h)ello" '\\1world' -gc -i -E "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s\n' "$clean_out" | grep -q -- ':-0:hello' && printf '%s\n' "$clean_out" | grep -q -- ':+0:hworld' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s\n' "$clean_out" | grep -q -- ':-1:hello' && printf '%s\n' "$clean_out" | grep -q -- ':+1:hworld' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_line_numbers_shift() {
@@ -98,7 +98,7 @@ t_confirm_preview_line_numbers_shift() {
 	out=$(printf 'y\n' | "$PROG" hello 'one\ntwo' -c -i -g "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	good=1
-	for want in ':2:-1:hello' ':2:+1:one' ':3:+1:two' ':4:-1:hello' ':5:+1:one' ':6:+1:two'; do
+	for want in ':2:-2:hello' ':2:+2:one' ':3:+2:two' ':4:-2:hello' ':5:+2:one' ':6:+2:two'; do
 		printf '%s\n' "$clean_out" | grep -q -- "$want" || good=0
 	done
 	exp='a
@@ -115,14 +115,14 @@ t_confirm_preview_no_trailing_newline() {
 	td=$1; printf 'no newline' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" no yes -c -i "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'yes newline' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-0:no newline' && printf '%s\n' "$clean_out" | grep -q -- ':1:+0:yes newline' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'yes newline' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-1:no newline' && printf '%s\n' "$clean_out" | grep -q -- ':1:+1:yes newline' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_delete_line() {
 	td=$1; printf 'DELETE\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" DELETE '' -c -i "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(wc -c < "$td/f")" -eq 1 ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-0:DELETE' && printf '%s\n' "$clean_out" | grep -q -- ':1:+0:$' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(wc -c < "$td/f")" -eq 1 ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-6:DELETE' && printf '%s\n' "$clean_out" | grep -q -- ':1:+6:$' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_empty_line_insert() {
@@ -132,7 +132,7 @@ t_confirm_preview_empty_line_insert() {
 	exp='a
 X
 b'
-	[ "$(cat "$td/f")" = "$exp" ] && printf '%s\n' "$clean_out" | grep -q -- ':2:-0:$' && printf '%s\n' "$clean_out" | grep -q -- ':2:+0:X' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = "$exp" ] && printf '%s\n' "$clean_out" | grep -q -- ':2:-1:$' && printf '%s\n' "$clean_out" | grep -q -- ':2:+1:X' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_many_blocks() {
@@ -386,7 +386,7 @@ else:
 ' "$td" 2>/dev/null)
 	tui_out=$(printf '%s\n' "$out" | grep '\[K')
 	clean_tui=$(printf '%s\n' "$tui_out" | sed 's/\x1b\[[0-9;]*m//g; s/\x1b\[K//g; s/\[K//g')
-	if printf '%s\n' "$clean_tui" | grep -q ':-0: hello world' && ! printf '%s\n' "$clean_tui" | grep -q ':\t'; then
+	if printf '%s\n' "$clean_tui" | grep -q ':-6: hello world' && ! printf '%s\n' "$clean_tui" | grep -q ':\t'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: tab expansion failed. tui=[$clean_tui]" > "$td/result"
@@ -428,10 +428,10 @@ else:
 }
 
 t_confirm_preview_new_format() {
-	td=$1; printf 'hello\n' > "$td/f"
-	out=$(printf 'y\n' | "$PROG" hello world -c -i "$td/f" 2>/dev/null)
-	expected_old=$(printf '\033[31m%s\033[0m:\033[32m1\033[0m:\033[31m-0\033[0m:\033[31mhello' "$td/f")
-	expected_new=$(printf '\033[31m%s\033[0m:\033[32m1\033[0m:\033[32m+0\033[0m:\033[32mworld' "$td/f")
+	td=$1; printf '* permit persons to whom the Software is furnished to do so, subject to\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" 'to whom' exp -c -i "$td/f" 2>/dev/null)
+	expected_old=$(printf '\033[31m%s\033[0m:\033[32m1\033[0m:\033[31m-4\033[0m:\033[31m* permit persons to whom' "$td/f")
+	expected_new=$(printf '\033[31m%s\033[0m:\033[32m1\033[0m:\033[32m+4\033[0m:\033[32m* permit persons exp' "$td/f")
 	if printf '%s\n' "$out" | grep -F -q "$expected_old" && printf '%s\n' "$out" | grep -F -q "$expected_new"; then
 		echo PASS > "$td/result"
 	else

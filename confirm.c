@@ -584,7 +584,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			const size_t delta = (old_count > new_count) ? (old_count - new_count) : (new_count - old_count);
+			const size_t delta = (old_len > G.new_buf.size) ? (old_len - G.new_buf.size) : (G.new_buf.size - old_len);
 			print_diff_lines(buf->data + block_start, old_len, '-', delta, S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
 			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', delta, S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;

@@ -325,6 +325,41 @@ else:
 	fi
 }
 
+t_confirm_interactive_height_capping() {
+	td=$1; printf 'line 1\nline 2\nline 3\nline 4\nline 5\n' > "$td/f"
+	out=$(python3 -c '
+import os, pty, sys, time, fcntl, termios, struct
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "line", "replacement", "-c", "-i", "-g", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    # Set size to 12 rows, 80 cols
+    s = struct.pack("HHHH", 12, 80, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, s)
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"n\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+' "$td" 2>/dev/null)
+	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	# Count only the printed preview lines in raw interactive mode (marked by \x1b[K / [K)
+	lines_count=$(printf '%s\n' "$out" | grep '_interactive_height_capping/f' | grep -c '\[K')
+	if printf '%s\n' "$clean_out" | grep -q 'some previews omitted' && [ "$lines_count" -le 3 ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: height capping failed. lines=$lines_count out=[$clean_out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -352,5 +387,6 @@ t_confirm_interactive_error_preview
 t_confirm_interactive_backref_mismatch
 t_confirm_non_interactive_backref_mismatch
 t_confirm_interactive_stats
+t_confirm_interactive_height_capping
 "
 run_suite "confirm tests" "$TESTS"

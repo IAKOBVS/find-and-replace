@@ -73,7 +73,7 @@ restore_terminal(void)
 	if (term_initialized) {
 		tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
 		/* Use async-signal-safe write for signal safety when leaving alt screen and showing cursor */
-		if (write(STDOUT_FILENO, "\x1b[?1049l\x1b[?25h", 14) < 0) {}
+		if (jstr_unlikely(write(STDOUT_FILENO, "\x1b[?1049l\x1b[?25h", 14) < 0)) {}
 		term_initialized = 0;
 	}
 }
@@ -89,16 +89,16 @@ handle_signal(int sig)
 static void
 setup_terminal(void)
 {
-	if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+	if (jstr_unlikely(!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)))
 		return;
-	if (tcgetattr(STDIN_FILENO, &orig_termios) < 0)
+	if (jstr_unlikely(tcgetattr(STDIN_FILENO, &orig_termios) < 0))
 		return;
 	struct termios raw = orig_termios;
 	raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
 	raw.c_iflag &= ~(IXON | ICRNL);
 	raw.c_cc[VMIN] = 1;
 	raw.c_cc[VTIME] = 0;
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0)
+	if (jstr_unlikely(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0))
 		return;
 	term_initialized = 1;
 	/* Use 21 (or S_LEN) so the entire escape sequence is written, clearing screen and hiding the cursor properly */
@@ -138,13 +138,13 @@ get_free_ram_size(void)
 {
 #ifdef __linux__
 	const int fd = open("/proc/meminfo", O_RDONLY);
-	if (fd == -1)
+	if (jstr_unlikely(fd == -1))
 		return 1 * JSTR_IO_GIB;
 
 	char buf[4096];
 	const ssize_t read_sz = read(fd, buf, sizeof(buf) - 1);
 	close(fd);
-	if (read_sz <= 0)
+	if (jstr_unlikely(read_sz <= 0))
 		return 1 * JSTR_IO_GIB;
 
 	buf[read_sz] = '\0';
@@ -159,13 +159,13 @@ get_free_ram_size(void)
 
 	size_t free_ram = 0;
 	while (b_proc_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
-		if (key_len == 7 && strncmp(key, "MemFree", 7) == 0) {
+		if (key_len == 7 && memcmp(key, "MemFree", 7) == 0) {
 			free_ram = (size_t)strtoul(val, NULL, 10) * 1024;
 			break;
 		}
 	}
 
-	if (free_ram == 0)
+	if (jstr_unlikely(free_ram == 0))
 		return 1 * JSTR_IO_GIB;
 
 	return free_ram;

@@ -48,6 +48,7 @@ TUs are non-static; their prototypes live in the module headers
 - `.gitignore` ignores `find-and-replace` binary, `*.o`, and `jstring/` (symlink/lib dir)
 - **No linter/formatter** beyond compiler flags (`-Wall -Wextra -Wpedantic`)
 - **No CI** workflows
+- **Coding style / Performance**: Use `jstr_unlikely` for all error or unlikely execution paths to aid compiler branch prediction. Use `memcmp` instead of `strncmp` when key length is known and bounded to avoid unnecessary null-termination checks.
 - **jstring .so gotcha**: `lib/jstring/scripts/test` rebuilds `libjstr.so` with
   `-fsanitize=address`. Re-run `lib/jstring/./compile` (non-ASan) after any
   jstring `./test` run, before linking the tool.

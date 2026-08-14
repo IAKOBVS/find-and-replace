@@ -101,7 +101,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 					++idx;
 				}
 			}
-			if (max_backref > G.regex.reg.re_nsub) {
+			if (jstr_unlikely(max_backref > G.regex.reg.re_nsub)) {
 				fprintf(stderr, "find-and-replace error: Replace backreference \\%zu exceeds find capture groups (%zu)\n", max_backref, G.regex.reg.re_nsub);
 				exit(EXIT_FAILURE);
 			}
@@ -311,9 +311,9 @@ process:
 	}
 	/* End of the -c dry-run pass: no file has been touched yet. */
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
-		if (!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))
+		if (jstr_unlikely(!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))))
 			jstr_errdie("%s: -c requires -i.\n", argv[0]);
-		if (!(G.mode & MODE_HAVE_FILES))
+		if (jstr_unlikely(!(G.mode & MODE_HAVE_FILES)))
 			jstr_errdie("%s: -c does not work with stdin.\n", argv[0]);
 
 		jstr_empty_j(&G.interactive_find_buf);

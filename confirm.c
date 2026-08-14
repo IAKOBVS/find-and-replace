@@ -23,7 +23,7 @@ restore_terminal(void)
 	if (term_initialized) {
 		tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
 		/* Use async-signal-safe write for signal safety when leaving alt screen and showing cursor */
-		if (jstr_unlikely(write(STDOUT_FILENO, "\x1b[?1049l\x1b[?25h", 14) < 0)) {}
+		if (jstr_unlikely(write(STDOUT_FILENO, "\x1b[?1049l\x1b[?25h", S_LEN("\x1b[?1049l\x1b[?25h")) < 0)) {}
 		term_initialized = 0;
 	}
 }
@@ -51,8 +51,8 @@ setup_terminal(void)
 	if (jstr_unlikely(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0))
 		return;
 	term_initialized = 1;
-	/* Use 21 (or S_LEN) so the entire escape sequence is written, clearing screen and hiding the cursor properly */
-	jstr_io_fwrite("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l", 1, 21, stdout); /* enter alt screen, clear/home, hide cursor */
+	/* Use compile-time S_LEN so the entire escape sequence is written, clearing screen and hiding the cursor properly */
+	jstr_io_fwrite("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l", 1, S_LEN("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l"), stdout); /* enter alt screen, clear/home, hide cursor */
 	jstr_io_fflush(stdout);
 	atexit(restore_terminal);
 	signal(SIGINT, handle_signal);
@@ -109,7 +109,7 @@ get_free_ram_size(void)
 
 	size_t free_ram = 0;
 	while (procfs_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
-		if (key_len == 7 && memcmp(key, "MemFree", 7) == 0) {
+		if (key_len == S_LEN("MemFree") && memcmp(key, "MemFree", S_LEN("MemFree")) == 0) {
 			free_ram = (size_t)strtoul(val, NULL, 10) * JSTR_IO_KIB;
 			break;
 		}
@@ -280,7 +280,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		print_line_prefix(fname, fname_len, line++, prefix);
 		jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
 		if (term_initialized)
-			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
+			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
@@ -295,7 +295,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		print_line_prefix(fname, fname_len, line, prefix);
 		jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
 		if (term_initialized)
-			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
+			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
@@ -308,7 +308,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		 * block survives only when the block's terminating '\n' does. */
 		print_line_prefix(fname, fname_len, line, prefix);
 		if (term_initialized)
-			jstr_io_fwrite("\x1b[K", 1, 3, stdout);
+			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
@@ -626,11 +626,11 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	while (1) {
 		if (needs_redraw) {
 			if (first_draw) {
-				jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
+				jstr_io_fwrite("\x1b[2J\x1b[H", 1, S_LEN("\x1b[2J\x1b[H"), stdout);
 				first_draw = 0;
 			} else {
 				/* Home cursor (move to top-left) */
-				jstr_io_fwrite("\x1b[H", 1, 3, stdout);
+				jstr_io_fwrite("\x1b[H", 1, S_LEN("\x1b[H"), stdout);
 			}
 
 			if (needs_recompile) {
@@ -657,13 +657,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 			if (!is_valid) {
 				/* Clear entire screen once on compile error to wipe out previous previews/ghost lines */
-				jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
+				jstr_io_fwrite("\x1b[2J\x1b[H", 1, S_LEN("\x1b[2J\x1b[H"), stdout);
 				/* Print regex compilation error in red */
 				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				jstr_io_fwrite("Regex error: ", 1, 13, stdout);
+				jstr_io_fwrite("Regex error: ", 1, S_LEN("Regex error: "), stdout);
 				jstr_io_fwrite(last_err_buf, 1, strlen(last_err_buf), stdout);
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
+				jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 				preview_lines = 1;
 			} else {
 				/* Calculate max_preview_lines dynamically based on terminal height */
@@ -697,7 +697,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				}
 				if (total_matches == 0) {
 					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */
-					jstr_io_fwrite("\x1b[2J\x1b[H", 1, 7, stdout);
+					jstr_io_fwrite("\x1b[2J\x1b[H", 1, S_LEN("\x1b[2J\x1b[H"), stdout);
 				}
 				preview_lines = G.preview_lines_printed;
 			}
@@ -716,28 +716,28 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			print_size_t(files_matched);
 			jstr_io_fwrite(" files\x1b[K\n", 1, S_LEN(" files\x1b[K\n"), stdout);
 
-			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, 11, stdout);
+			jstr_io_fwrite(active_field == FIELD_FIND ? "* Find:    " : "  Find:    ", 1, S_LEN("* Find:    "), stdout);
 			if (find_buf->size > 0 && find_buf->data)
 				jstr_io_fwrite(find_buf->data, 1, find_buf->size, stdout);
-			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 
-			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, 11, stdout);
+			jstr_io_fwrite(active_field == FIELD_RPLC ? "* Replace: " : "  Replace: ", 1, S_LEN("* Replace: "), stdout);
 			if (rplc_buf->size > 0 && rplc_buf->data)
 				jstr_io_fwrite(rplc_buf->data, 1, rplc_buf->size, stdout);
-			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 
-			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, 11, stdout);
+			jstr_io_fwrite(active_field == FIELD_FLAGS ? "* Flags:   " : "  Flags:   ", 1, S_LEN("* Flags:   "), stdout);
 			if (flags_buf->size > 0 && flags_buf->data)
 				jstr_io_fwrite(flags_buf->data, 1, flags_buf->size, stdout);
-			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 
-			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, 11, stdout);
+			jstr_io_fwrite(active_field == FIELD_FILES ? "* Files:   " : "  Files:   ", 1, S_LEN("* Files:   "), stdout);
 			if (files_buf->size > 0 && files_buf->data)
 				jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
-			jstr_io_fwrite("\x1b[K\n", 1, 4, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 
 			/* Clear from the current cursor position to the bottom of the screen */
-			jstr_io_fwrite("\x1b[J", 1, 3, stdout);
+			jstr_io_fwrite("\x1b[J", 1, S_LEN("\x1b[J"), stdout);
 
 			/* Compute absolute cursor position */
 			size_t start_control_line = preview_lines + 1; /* Controls header */
@@ -749,14 +749,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 			size_t find_line = start_control_line + 2;
 			size_t active_line = find_line + (size_t)active_field;
-			size_t active_col = 11 + cursors[active_field] + 1;
+			size_t active_col = S_LEN("  Find:    ") + cursors[active_field] + 1;
 
 			char cup_buf[32];
 			size_t cup_len = snprintf(cup_buf, sizeof(cup_buf), "\x1b[%zu;%zuH", active_line, active_col);
 			jstr_io_fwrite(cup_buf, 1, cup_len, stdout);
 
 			/* Show cursor */
-			jstr_io_fwrite("\x1b[?25h", 1, 6, stdout);
+			jstr_io_fwrite("\x1b[?25h", 1, S_LEN("\x1b[?25h"), stdout);
 
 			jstr_io_fflush(stdout);
 			needs_redraw = 0;

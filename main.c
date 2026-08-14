@@ -193,7 +193,7 @@ main(int argc, char **argv)
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
 				} else {
 					/* -iSUFFIX: keep the original as FILE + SUFFIX backup. */
-					G.bak_suffix = ARG + sizeof("-i") - 1;
+					G.bak_suffix = ARG + S_LEN("-i");
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE_BACKUP;
 				}

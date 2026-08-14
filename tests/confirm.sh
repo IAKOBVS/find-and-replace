@@ -427,7 +427,20 @@ else:
 	fi
 }
 
+t_confirm_zero_length_regex_preview() {
+	td=$1; printf '#include <sys/stat.h>\n' > "$td/f"
+	# Note: '\w*' as CLI arg in shell contains unescaped '\w*' which find-and-replace unescapes to 'w*'.
+	# To match word characters, pass '\\w*'.
+	out=$(printf 'y\n' | "$PROG" '\\w*' 'exp' -gc -i -RZ "$td/f" 2>/dev/null)
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	actual_file=$(cat "$td/f")
+	# Assert that the preview line (+...) matches the actual updated file content.
+	preview_plus=$(printf '%s\n' "$clean_out" | grep '^/tmp.*:1:+' | cut -d'+' -f2-)
+	[ "$actual_file" = "$preview_plus" ] && echo PASS > "$td/result" || echo "FAIL: file=[$actual_file] preview_plus=[$preview_plus]" > "$td/result"
+}
+
 TESTS="
+t_confirm_zero_length_regex_preview
 t_confirm_yes
 t_confirm_abort
 t_confirm_no_inplace_err

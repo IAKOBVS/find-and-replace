@@ -3,7 +3,7 @@
 PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
-SRCS='main.c files.c process.c confirm.c'
+SRCS='main.c files.c process.c confirm.c procfs.c'
 CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings'
 # CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings -fanalyzer'
 LFLAGS=""

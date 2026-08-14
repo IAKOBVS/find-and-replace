@@ -160,13 +160,10 @@ get_free_ram_size(void)
 	size_t free_ram = 0;
 	while (b_proc_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
 		if (key_len == 7 && memcmp(key, "MemFree", 7) == 0) {
-			free_ram = (size_t)strtoul(val, NULL, 10) * 1024;
+			free_ram = (size_t)strtoul(val, NULL, 10) * JSTR_IO_KIB;
 			break;
 		}
 	}
-
-	if (jstr_unlikely(free_ram == 0))
-		return 1 * JSTR_IO_GIB;
 
 	return free_ram;
 #else

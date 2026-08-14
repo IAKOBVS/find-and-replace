@@ -3,6 +3,7 @@
 
 #include "confirm.h"
 #include "files.h"
+#include "vim.h"
 #include <termios.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -685,13 +686,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
                          jstr_ty *R files_buf)
 {
 	setup_terminal();
+	vim_set_insert_mode(1);
 	char err_buf[256];
 	char last_err_buf[256];
 	int needs_redraw = 1;
 	int needs_recompile = 1;
 	int is_valid = 1;
 	int first_draw = 1;
-	field_ty active_field = FIELD_FIND;
+	size_t active_field = FIELD_FIND;
 	size_t cursors[FIELD_COUNT];
 
 	cursors[FIELD_FIND] = find_buf->size;
@@ -782,9 +784,17 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 			/* Render control fields at the bottom */
 			if (!is_valid || total_matches == 0) {
-				jstr_io_fwrite("--- Controls ---\x1b[K\n", 1, S_LEN("--- Controls ---\x1b[K\n"), stdout);
+				if (vim_is_insert_mode()) {
+					jstr_io_fwrite("--- Controls [INSERT] ---\x1b[K\n", 1, S_LEN("--- Controls [INSERT] ---\x1b[K\n"), stdout);
+				} else {
+					jstr_io_fwrite("--- Controls [NORMAL] ---\x1b[K\n", 1, S_LEN("--- Controls [NORMAL] ---\x1b[K\n"), stdout);
+				}
 			} else {
-				jstr_io_fwrite("\n--- Controls ---\x1b[K\n", 1, S_LEN("\n--- Controls ---\x1b[K\n"), stdout);
+				if (vim_is_insert_mode()) {
+					jstr_io_fwrite("\n--- Controls [INSERT] ---\x1b[K\n", 1, S_LEN("\n--- Controls [INSERT] ---\x1b[K\n"), stdout);
+				} else {
+					jstr_io_fwrite("\n--- Controls [NORMAL] ---\x1b[K\n", 1, S_LEN("\n--- Controls [NORMAL] ---\x1b[K\n"), stdout);
+				}
 			}
 
 			/* Statistics line */
@@ -928,10 +938,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					}
 				}
 			} else if (n1 <= 0) {
-				/* Pure Escape: abort */
-				restore_terminal();
-				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
-				exit(EXIT_FAILURE);
+				/* Pure Escape: switch to NORMAL mode */
+				vim_set_insert_mode(0);
+				needs_redraw = 1;
 			}
 		} else if (c == 3 || c == 4) {
 			/* Ctrl-C or Ctrl-D to abort */
@@ -965,19 +974,23 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 		} else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
 			/* Printable character */
-			if (active_buf) {
-				/* Reserve space for 1 more char + NUL */
-				DIE_IF(jstr_reserve_j(active_buf, active_buf->size + 2), "%s", "Out of memory.\n");
-				/* Shift chars to the right of the cursor */
-				memmove(active_buf->data + cursors[active_field] + 1, active_buf->data + cursors[active_field], active_buf->size - cursors[active_field]);
-				/* Insert char at cursor */
-				active_buf->data[cursors[active_field]] = c;
-				active_buf->size++;
-				active_buf->data[active_buf->size] = '\0';
-				cursors[active_field]++;
-				needs_redraw = 1;
-				if (active_buf == find_buf || active_buf == flags_buf)
-					needs_recompile = 1;
+			if (vim_is_insert_mode()) {
+				if (active_buf) {
+					/* Reserve space for 1 more char + NUL */
+					DIE_IF(jstr_reserve_j(active_buf, active_buf->size + 2), "%s", "Out of memory.\n");
+					/* Shift chars to the right of the cursor */
+					memmove(active_buf->data + cursors[active_field] + 1, active_buf->data + cursors[active_field], active_buf->size - cursors[active_field]);
+					/* Insert char at cursor */
+					active_buf->data[cursors[active_field]] = c;
+					active_buf->size++;
+					active_buf->data[active_buf->size] = '\0';
+					cursors[active_field]++;
+					needs_redraw = 1;
+					if (active_buf == find_buf || active_buf == flags_buf)
+						needs_recompile = 1;
+				}
+			} else {
+				vim_handle_key(c, active_buf, cursors, &active_field, &needs_redraw, &needs_recompile);
 			}
 		}
 	}

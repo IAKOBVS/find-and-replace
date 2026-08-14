@@ -214,7 +214,7 @@ else:
         pass
     print(output.decode("utf-8", errors="ignore"))
 ' "$td" 2>/dev/null)
-	if echo "$out" | grep -q -- '--- Controls ---' && echo "$out" | grep -q 'Find:    hello' && echo "$out" | grep -q 'Replace: replacement'; then
+	if echo "$out" | grep -q -- '--- Controls' && echo "$out" | grep -q 'Find:    hello' && echo "$out" | grep -q 'Replace: replacement'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: layout check failed. out=[$out]" > "$td/result"
@@ -427,6 +427,98 @@ else:
 	fi
 }
 
+t_confirm_vim_motions() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	cat > "$td/test_vim.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    os.write(fd, b"0")
+    time.sleep(0.1)
+    os.write(fd, b"x")
+    time.sleep(0.1)
+    os.write(fd, b"$")
+    time.sleep(0.1)
+    os.write(fd, b"i")
+    time.sleep(0.1)
+    os.write(fd, b"X")
+    time.sleep(0.1)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    os.write(fd, b"j")
+    time.sleep(0.1)
+    os.write(fd, b"0")
+    time.sleep(0.1)
+    os.write(fd, b"x")
+    time.sleep(0.1)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_vim.py" "$td" 2>/dev/null)
+	if [ "$(cat "$td/f")" = 'hello world' ] && echo "$out" | grep -q -- '--- Controls \[NORMAL\] ---'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: vim motions check failed. f=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	fi
+}
+
+t_confirm_vim_word_motions() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	cat > "$td/test_vim_word.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "foo-bar baz", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    os.write(fd, b"0")
+    time.sleep(0.1)
+    os.write(fd, b"w")
+    time.sleep(0.1)
+    os.write(fd, b"x")
+    time.sleep(0.1)
+    os.write(fd, b"b")
+    time.sleep(0.1)
+    os.write(fd, b"x")
+    time.sleep(0.1)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_vim_word.py" "$td" 2>/dev/null)
+	if echo "$out" | grep -q 'Find:    oobar baz'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: vim word motions check failed. out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -457,5 +549,7 @@ t_confirm_interactive_stats
 t_confirm_interactive_height_capping
 t_confirm_interactive_tab_expansion
 t_confirm_interactive_width_clipping
+t_confirm_vim_motions
+t_confirm_vim_word_motions
 "
 run_suite "confirm tests" "$TESTS"

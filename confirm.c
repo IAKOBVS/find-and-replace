@@ -751,9 +751,11 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			size_t active_line = find_line + (size_t)active_field;
 			size_t active_col = S_LEN("  Find:    ") + cursors[active_field] + 1;
 
-			char cup_buf[32];
-			size_t cup_len = snprintf(cup_buf, sizeof(cup_buf), "\x1b[%zu;%zuH", active_line, active_col);
-			jstr_io_fwrite(cup_buf, 1, cup_len, stdout);
+			jstr_io_fwrite("\x1b[", 1, S_LEN("\x1b["), stdout);
+			print_size_t(active_line);
+			jstr_io_putchar(';');
+			print_size_t(active_col);
+			jstr_io_putchar('H');
 
 			/* Show cursor */
 			jstr_io_fwrite("\x1b[?25h", 1, S_LEN("\x1b[?25h"), stdout);

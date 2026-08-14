@@ -826,7 +826,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 							active_buf->size--;
 							active_buf->data[active_buf->size] = '\0';
 							needs_redraw = 1;
-							if (active_buf == find_buf || active_buf == flags_buf)
+							if (active_buf == find_buf || active_buf == flags_buf || active_buf == rplc_buf)
 								needs_recompile = 1;
 						}
 					}
@@ -855,7 +855,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]--;
 				needs_redraw = 1;
-				if (active_buf == find_buf || active_buf == flags_buf)
+				if (active_buf == find_buf || active_buf == flags_buf || active_buf == rplc_buf)
 					needs_recompile = 1;
 			}
 		} else if (c == 21) {
@@ -864,7 +864,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_empty_j(active_buf);
 				cursors[active_field] = 0;
 				needs_redraw = 1;
-				if (active_buf == find_buf || active_buf == flags_buf)
+				if (active_buf == find_buf || active_buf == flags_buf || active_buf == rplc_buf)
 					needs_recompile = 1;
 			}
 		} else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
@@ -880,7 +880,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]++;
 				needs_redraw = 1;
-				if (active_buf == find_buf || active_buf == flags_buf)
+				if (active_buf == find_buf || active_buf == flags_buf || active_buf == rplc_buf)
 					needs_recompile = 1;
 			}
 		}

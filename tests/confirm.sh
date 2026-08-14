@@ -360,6 +360,62 @@ else:
 	fi
 }
 
+t_confirm_interactive_replace_edit_validation() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	cat > "$td/test_edit.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "goodbye", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    # 1. Tab to Flags (\t\t), clear (\x15), set to gR
+    os.write(fd, b"\t\t\x15gR")
+    time.sleep(0.5)
+    # 2. From Flags (index 2) Tab to Replace (index 1): 2 -> 3 -> 0 -> 1 (\t\t\t), clear (\x15), type \\2 (invalid as 0 capture groups)
+    os.write(fd, b"\t\t\t\x15\\\\2")
+    time.sleep(0.5)
+    # 3. Try to press Enter (\r) to accept - should be blocked due to regex compile error
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    # 4. Correct the backreference: clear (\x15), type valid replacement "world"
+    os.write(fd, b"\x15world")
+    time.sleep(0.5)
+    # 5. Press Enter (\r) to accept - should succeed now
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    # 6. Type "y\n" to confirm the changes
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_edit.py" "$td" 2>/dev/null)
+	if [ "$(cat "$td/f")" = 'world world' ] && printf '%s\n' "$out" | grep -q 'Replace backreference \\2 exceeds find capture groups (0)'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: expected file edit and temporary error output. file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	fi
+}
+
+t_confirm_scan_empty_file() {
+	td=$1; touch "$td/f"
+	out=$(printf 'y\n' | "$PROG" 'pattern' 'replace' -c -i "$td/f" 2>/dev/null)
+	[ -z "$out" ] && [ -f "$td/f" ] && [ ! -s "$td/f" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out] size=$(wc -c < "$td/f")" > "$td/result"
+}
+
+t_confirm_scan_null_bytes() {
+	td=$1; printf 'hello\0world\n' > "$td/f"
+	out=$(printf 'y\n' | "$PROG" hello bye -c -i "$td/f" 2>/dev/null)
+	[ "$(cat "$td/f" | tr '\0' 'X')" = 'helloXworld' ] && [ -z "$out" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out] file=[$(cat "$td/f" | tr '\0' 'X')]" > "$td/result"
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -388,5 +444,8 @@ t_confirm_interactive_backref_mismatch
 t_confirm_non_interactive_backref_mismatch
 t_confirm_interactive_stats
 t_confirm_interactive_height_capping
+t_confirm_interactive_replace_edit_validation
+t_confirm_scan_empty_file
+t_confirm_scan_null_bytes
 "
 run_suite "confirm tests" "$TESTS"

@@ -8,6 +8,61 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
+
+#ifdef __linux__
+struct b_proc_iter {
+	const char *pos;
+	const char *end;
+};
+
+static void
+b_proc_iter_init(struct b_proc_iter *iter, const char *buf, unsigned int len)
+{
+	iter->pos = buf;
+	iter->end = buf + len;
+}
+
+static int
+b_proc_iter_next(struct b_proc_iter *iter, const char **key, unsigned int *key_len, const char **val, unsigned int *val_len, int delimiter)
+{
+	while (iter->pos < iter->end) {
+		const char *line_start = iter->pos;
+		const char *line_end = (const char *)memchr(line_start, '\n', (size_t)(iter->end - line_start));
+		if (line_end == NULL) {
+			line_end = iter->end;
+			iter->pos = iter->end;
+		} else {
+			iter->pos = line_end + 1;
+		}
+
+		const char *delim_pos = (const char *)memchr(line_start, delimiter, (size_t)(line_end - line_start));
+		if (delim_pos == NULL)
+			continue;
+
+		const char *k_start = line_start;
+		const char *k_end = delim_pos;
+		while (k_start < k_end && *k_start == ' ')
+			k_start++;
+		while (k_end > k_start && *(k_end - 1) == ' ')
+			k_end--;
+
+		const char *v_start = delim_pos + 1;
+		const char *v_end = line_end;
+		while (v_start < v_end && *v_start == ' ')
+			v_start++;
+		while (v_end > v_start && *(v_end - 1) == ' ')
+			v_end--;
+
+		*key = k_start;
+		*key_len = (unsigned int)(k_end - k_start);
+		*val = v_start;
+		*val_len = (unsigned int)(v_end - v_start);
+		return 1;
+	}
+	return 0;
+}
+#endif
 
 static struct termios orig_termios;
 static int term_initialized = 0;
@@ -81,28 +136,42 @@ match_pushback(matches_ty *R matches,
 static size_t
 get_free_ram_size(void)
 {
-	FILE *fp = fopen("/proc/meminfo", "r");
-	if (fp == NULL)
-		return 16 * JSTR_IO_GIB;
+#ifdef __linux__
+	const int fd = open("/proc/meminfo", O_RDONLY);
+	if (fd == -1)
+		return 1 * JSTR_IO_GIB;
 
-	char line[256];
+	char buf[4096];
+	const ssize_t read_sz = read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (read_sz <= 0)
+		return 1 * JSTR_IO_GIB;
+
+	buf[read_sz] = '\0';
+
+	struct b_proc_iter iter;
+	b_proc_iter_init(&iter, buf, (unsigned int)read_sz);
+
+	const char *key;
+	const char *val;
+	unsigned int key_len;
+	unsigned int val_len;
+
 	size_t free_ram = 0;
-	while (fgets(line, sizeof(line), fp)) {
-		if (strncmp(line, "MemFree:", 8) == 0) {
-			char *p = line + 8;
-			while (*p == ' ' || *p == '\t')
-				p++;
-			free_ram = (size_t)strtoul(p, NULL, 10);
-			free_ram *= 1024;
+	while (b_proc_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
+		if (key_len == 7 && strncmp(key, "MemFree", 7) == 0) {
+			free_ram = (size_t)strtoul(val, NULL, 10) * 1024;
 			break;
 		}
 	}
-	fclose(fp);
 
 	if (free_ram == 0)
-		return 16 * JSTR_IO_GIB;
+		return 1 * JSTR_IO_GIB;
 
 	return free_ram;
+#else
+	return 1 * JSTR_IO_GIB;
+#endif
 }
 
 static size_t

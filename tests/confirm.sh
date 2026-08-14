@@ -519,6 +519,112 @@ EOF
 	fi
 }
 
+t_confirm_vim_delete_eol() {
+	td=$1; printf 'hell world\n' > "$td/f"
+	cat > "$td/test_vim_del_eol.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    os.write(fd, b"x")
+    time.sleep(0.2)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_vim_del_eol.py" "$td" 2>/dev/null)
+	if echo "$out" | grep -q 'Find:    hell'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: vim delete eol check failed. out=[$out]" > "$td/result"
+	fi
+}
+
+t_confirm_vim_delete_dd() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	cat > "$td/test_vim_dd.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    os.write(fd, b"dd")
+    time.sleep(0.2)
+    os.write(fd, b"ihello")
+    time.sleep(0.2)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_vim_dd.py" "$td" 2>/dev/null)
+	if echo "$out" | grep -q 'Find:    hello' && [ "$(cat "$td/f")" = 'replacement world' ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: vim dd check failed. out=[$out]" > "$td/result"
+	fi
+}
+
+t_confirm_vim_change_cw() {
+	td=$1; printf 'qux-bar world\n' > "$td/f"
+	cat > "$td/test_vim_cw.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "foo-bar", "replacement", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    os.write(fd, b"\x1b")
+    time.sleep(0.2)
+    os.write(fd, b"0")
+    time.sleep(0.1)
+    os.write(fd, b"cwqux")
+    time.sleep(0.2)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_vim_cw.py" "$td" 2>/dev/null)
+	if echo "$out" | grep -q 'Find:    qux-bar' && [ "$(cat "$td/f")" = 'replacement world' ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: vim cw check failed. out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -551,5 +657,8 @@ t_confirm_interactive_tab_expansion
 t_confirm_interactive_width_clipping
 t_confirm_vim_motions
 t_confirm_vim_word_motions
+t_confirm_vim_delete_eol
+t_confirm_vim_delete_dd
+t_confirm_vim_change_cw
 "
 run_suite "confirm tests" "$TESTS"

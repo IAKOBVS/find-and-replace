@@ -5,6 +5,7 @@
 #include <ctype.h>
 
 static int insert_mode = 1;
+static char pending_op = 0;
 
 int
 vim_is_insert_mode(void)
@@ -16,6 +17,64 @@ void
 vim_set_insert_mode(int mode)
 {
 	insert_mode = mode;
+	pending_op = 0;
+}
+
+static size_t
+get_word_forward(const jstr_ty *buf, size_t pos)
+{
+	if (!buf || pos >= buf->size) {
+		return buf ? buf->size : 0;
+	}
+	if (isalnum((unsigned char)buf->data[pos])) {
+		while (pos < buf->size && isalnum((unsigned char)buf->data[pos])) {
+			pos++;
+		}
+	} else {
+		while (pos < buf->size && !isalnum((unsigned char)buf->data[pos]) && !isspace((unsigned char)buf->data[pos])) {
+			pos++;
+		}
+	}
+	while (pos < buf->size && isspace((unsigned char)buf->data[pos])) {
+		pos++;
+	}
+	return pos;
+}
+
+static size_t
+get_word_backward(const jstr_ty *buf, size_t pos)
+{
+	if (!buf || pos == 0) {
+		return 0;
+	}
+	pos--;
+	while (pos > 0 && isspace((unsigned char)buf->data[pos])) {
+		pos--;
+	}
+	if (isalnum((unsigned char)buf->data[pos])) {
+		while (pos > 0 && isalnum((unsigned char)buf->data[pos - 1])) {
+			pos--;
+		}
+	} else {
+		while (pos > 0 && !isalnum((unsigned char)buf->data[pos - 1]) && !isspace((unsigned char)buf->data[pos - 1])) {
+			pos--;
+		}
+	}
+	return pos;
+}
+
+static void
+delete_range(jstr_ty *buf, size_t start, size_t end)
+{
+	if (!buf || start >= end || start >= buf->size) {
+		return;
+	}
+	if (end > buf->size) {
+		end = buf->size;
+	}
+	memmove(buf->data + start, buf->data + end, buf->size - end);
+	buf->size -= (end - start);
+	buf->data[buf->size] = '\0';
 }
 
 int
@@ -23,6 +82,108 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 {
 	if (insert_mode) {
 		return 0;
+	}
+
+	if (pending_op) {
+		char op = pending_op;
+		pending_op = 0;
+
+		if (op == 'd') {
+			if (c == 'd') {
+				if (active_buf) {
+					jstr_empty_j(active_buf);
+					cursors[*active_field] = 0;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == 'w') {
+				if (active_buf) {
+					size_t end_pos = get_word_forward(active_buf, cursors[*active_field]);
+					delete_range(active_buf, cursors[*active_field], end_pos);
+					if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+						cursors[*active_field] = active_buf->size - 1;
+					}
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == 'b') {
+				if (active_buf) {
+					size_t start_pos = get_word_backward(active_buf, cursors[*active_field]);
+					delete_range(active_buf, start_pos, cursors[*active_field]);
+					cursors[*active_field] = start_pos;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == '0') {
+				if (active_buf) {
+					delete_range(active_buf, 0, cursors[*active_field]);
+					cursors[*active_field] = 0;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == '$') {
+				if (active_buf) {
+					delete_range(active_buf, cursors[*active_field], active_buf->size);
+					if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+						cursors[*active_field] = active_buf->size - 1;
+					}
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			}
+		} else if (op == 'c') {
+			if (c == 'c') {
+				if (active_buf) {
+					jstr_empty_j(active_buf);
+					cursors[*active_field] = 0;
+					insert_mode = 1;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == 'w') {
+				if (active_buf) {
+					size_t end_pos = get_word_forward(active_buf, cursors[*active_field]);
+					delete_range(active_buf, cursors[*active_field], end_pos);
+					insert_mode = 1;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == 'b') {
+				if (active_buf) {
+					size_t start_pos = get_word_backward(active_buf, cursors[*active_field]);
+					delete_range(active_buf, start_pos, cursors[*active_field]);
+					cursors[*active_field] = start_pos;
+					insert_mode = 1;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == '0') {
+				if (active_buf) {
+					delete_range(active_buf, 0, cursors[*active_field]);
+					cursors[*active_field] = 0;
+					insert_mode = 1;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			} else if (c == '$') {
+				if (active_buf) {
+					delete_range(active_buf, cursors[*active_field], active_buf->size);
+					insert_mode = 1;
+					*needs_redraw = 1;
+					*needs_recompile = 1;
+				}
+				return 1;
+			}
+		}
 	}
 
 	switch (c) {
@@ -49,6 +210,30 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		}
 		*needs_redraw = 1;
 		break;
+	case 'd':
+		pending_op = 'd';
+		break;
+	case 'D':
+		if (active_buf) {
+			delete_range(active_buf, cursors[*active_field], active_buf->size);
+			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+				cursors[*active_field] = active_buf->size - 1;
+			}
+			*needs_redraw = 1;
+			*needs_recompile = 1;
+		}
+		break;
+	case 'c':
+		pending_op = 'c';
+		break;
+	case 'C':
+		if (active_buf) {
+			delete_range(active_buf, cursors[*active_field], active_buf->size);
+			insert_mode = 1;
+			*needs_redraw = 1;
+			*needs_recompile = 1;
+		}
+		break;
 	case 'h':
 		if (cursors[*active_field] > 0) {
 			cursors[*active_field]--;
@@ -56,9 +241,11 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		}
 		break;
 	case 'l':
-		if (active_buf && cursors[*active_field] < active_buf->size) {
-			cursors[*active_field]++;
-			*needs_redraw = 1;
+		if (active_buf && active_buf->size > 0) {
+			if (cursors[*active_field] < active_buf->size - 1) {
+				cursors[*active_field]++;
+				*needs_redraw = 1;
+			}
 		}
 		break;
 	case 'j':
@@ -75,59 +262,43 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		break;
 	case '$':
 		if (active_buf) {
-			cursors[*active_field] = active_buf->size;
+			cursors[*active_field] = (active_buf->size > 0) ? active_buf->size - 1 : 0;
 		}
 		*needs_redraw = 1;
 		break;
 	case 'x':
-		if (active_buf && cursors[*active_field] < active_buf->size) {
-			memmove(active_buf->data + cursors[*active_field],
-			        active_buf->data + cursors[*active_field] + 1,
-			        active_buf->size - cursors[*active_field] - 1);
-			active_buf->size--;
-			active_buf->data[active_buf->size] = '\0';
+		if (active_buf && active_buf->size > 0) {
+			if (cursors[*active_field] >= active_buf->size) {
+				cursors[*active_field] = active_buf->size - 1;
+			}
+			delete_range(active_buf, cursors[*active_field], cursors[*active_field] + 1);
+			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+				cursors[*active_field] = active_buf->size - 1;
+			}
+			*needs_redraw = 1;
+			*needs_recompile = 1;
+		}
+		break;
+	case 'X':
+		if (active_buf && cursors[*active_field] > 0) {
+			delete_range(active_buf, cursors[*active_field] - 1, cursors[*active_field]);
+			cursors[*active_field]--;
 			*needs_redraw = 1;
 			*needs_recompile = 1;
 		}
 		break;
 	case 'w':
-		if (active_buf && cursors[*active_field] < active_buf->size) {
-			size_t pos = cursors[*active_field];
-			if (isalnum((unsigned char)active_buf->data[pos])) {
-				while (pos < active_buf->size && isalnum((unsigned char)active_buf->data[pos])) {
-					pos++;
-				}
-			} else {
-				while (pos < active_buf->size && !isalnum((unsigned char)active_buf->data[pos]) && !isspace((unsigned char)active_buf->data[pos])) {
-					pos++;
-				}
+		if (active_buf) {
+			cursors[*active_field] = get_word_forward(active_buf, cursors[*active_field]);
+			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+				cursors[*active_field] = active_buf->size - 1;
 			}
-			while (pos < active_buf->size && isspace((unsigned char)active_buf->data[pos])) {
-				pos++;
-			}
-			cursors[*active_field] = pos;
 			*needs_redraw = 1;
 		}
 		break;
 	case 'b':
-		if (active_buf && cursors[*active_field] > 0) {
-			size_t pos = cursors[*active_field];
-			if (pos > 0) {
-				pos--;
-			}
-			while (pos > 0 && isspace((unsigned char)active_buf->data[pos])) {
-				pos--;
-			}
-			if (isalnum((unsigned char)active_buf->data[pos])) {
-				while (pos > 0 && isalnum((unsigned char)active_buf->data[pos - 1])) {
-					pos--;
-				}
-			} else {
-				while (pos > 0 && !isalnum((unsigned char)active_buf->data[pos - 1]) && !isspace((unsigned char)active_buf->data[pos - 1])) {
-					pos--;
-				}
-			}
-			cursors[*active_field] = pos;
+		if (active_buf) {
+			cursors[*active_field] = get_word_backward(active_buf, cursors[*active_field]);
 			*needs_redraw = 1;
 		}
 		break;

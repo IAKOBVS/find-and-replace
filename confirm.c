@@ -940,6 +940,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			} else if (n1 <= 0) {
 				/* Pure Escape: switch to NORMAL mode */
 				vim_set_insert_mode(0);
+				if (active_buf && cursors[active_field] >= active_buf->size && active_buf->size > 0) {
+					cursors[active_field] = active_buf->size - 1;
+				}
 				needs_redraw = 1;
 			}
 		} else if (c == 3 || c == 4) {
@@ -991,6 +994,19 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				}
 			} else {
 				vim_handle_key(c, active_buf, cursors, &active_field, &needs_redraw, &needs_recompile);
+				jstr_ty *new_active_buf = NULL;
+				if (active_field == FIELD_FIND)
+					new_active_buf = find_buf;
+				else if (active_field == FIELD_RPLC)
+					new_active_buf = rplc_buf;
+				else if (active_field == FIELD_FLAGS)
+					new_active_buf = flags_buf;
+				else if (active_field == FIELD_FILES)
+					new_active_buf = files_buf;
+
+				if (!vim_is_insert_mode() && new_active_buf && new_active_buf->size > 0 && cursors[active_field] >= new_active_buf->size) {
+					cursors[active_field] = new_active_buf->size - 1;
+				}
 			}
 		}
 	}

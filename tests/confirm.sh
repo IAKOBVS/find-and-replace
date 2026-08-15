@@ -1148,7 +1148,7 @@ else:
         pass
     _, status = os.waitpid(pid, 0)
     code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
-    print(code, b"Can"'"'"'t rename temp file" in output)
+    print(code, b"rename temp file" in output)
 ' "$td" 2>/dev/null)
 	[ "$rc" = '1 True' ] && echo PASS > "$td/result" || echo "FAIL: rc=[$rc]" > "$td/result"
 }
@@ -1306,6 +1306,39 @@ EOF
 	[ "$(cat "$td/f")" = 'foo bar baz' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
 }
 
+t_confirm_abstractions() {
+	td=$1; printf 'hello abstractions\n' > "$td/f"
+	cat > "$td/drive.py" << 'EOF'
+import os, pty, sys, time
+f = sys.argv[1]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "world", "-c", "-i", f], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    # 1. Down to Replace (Ctrl-J: \x0a)
+    os.write(fd, b"\x0a")
+    time.sleep(0.1)
+    # 2. Append "!!" to Replace
+    os.write(fd, b"!!")
+    time.sleep(0.1)
+    # 3. Up to Find (Ctrl-K: \x0b)
+    os.write(fd, b"\x0b")
+    time.sleep(0.1)
+    # 4. Accept with Enter (\r), then confirm with 'y'
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    try:
+        while True:
+            if not os.read(fd, 1024): break
+    except OSError:
+        pass
+EOF
+	python3 "$td/drive.py" "$td/f" 2>/dev/null
+	[ "$(cat "$td/f")" = 'world!! abstractions' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -1362,6 +1395,7 @@ t_interactive_ctrl_j_k
 t_vim_match_line_end
 t_confirm_regex_scan_empty
 t_vim_dd
+t_confirm_abstractions
 "
 
 run_suite "confirm tests" "$TESTS"

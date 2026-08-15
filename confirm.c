@@ -194,10 +194,9 @@ get_file_cache_max(void)
  * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
 void
 file_pushback(files_ty *files,
-                 const char *R fname,
-                 size_t fname_len,
-                 const struct stat *st,
-                 jstr_ty *R buf)
+              const jstr_literal_ty *fname,
+              const struct stat *st,
+              jstr_ty *R buf)
 {
 	if (files->size >= files->cap) {
 		files->cap = (files->cap == 0 ? FILES_CAP_MIN : files->cap * 2);
@@ -206,10 +205,10 @@ file_pushback(files_ty *files,
 		files->data = tmp;
 	}
 	file_ty *file = &files->data[files->size];
-	file->fname = (char *)malloc(fname_len + 1);
+	file->fname = (char *)malloc(fname->size + 1);
 	DIE_IF(!file->fname, "%s", "Out of memory copying cached filename.\n");
-	jstr_strcpy_len(file->fname, fname, fname_len);
-	file->fname_len = fname_len;
+	jstr_strcpy_len(file->fname, fname->data, fname->size);
+	file->fname_len = fname->size;
 	file->content_size = (size_t)st->st_size;
 	file->st_mode = st->st_mode;
 	/* Take ownership of the already-read content and reset the shared buffer. */
@@ -225,22 +224,22 @@ file_pushback(files_ty *files,
 
 /* Return the offset of the first byte of the line containing IDX. */
 static size_t
-line_get_start(const char *R data, size_t size, size_t idx)
+line_get_start(const jstr_literal_ty *data, size_t idx)
 {
 	const char *nl;
-	if (idx > size)
-		idx = size;
-	nl = (const char *)jstr_memrchr(data, '\n', idx);
-	return nl ? (size_t)JSTR_PTR_DIFF(nl, data) + 1 : 0;
+	if (idx > data->size)
+		idx = data->size;
+	nl = (const char *)jstr_memrchr(data->data, '\n', idx);
+	return nl ? (size_t)JSTR_PTR_DIFF(nl, data->data) + 1 : 0;
 }
 
 /* Return one past the last byte of the line containing IDX (the index of the
  * terminating '\n', or SIZE if the line is not newline-terminated). */
 static size_t
-line_get_end(const char *R data, size_t size, size_t idx)
+line_get_end(const jstr_literal_ty *data, size_t idx)
 {
-	const char *nl = (const char *)memchr(data + idx, '\n', size - idx);
-	return nl ? (size_t)JSTR_PTR_DIFF(nl, data) : size;
+	const char *nl = (const char *)memchr(data->data + idx, '\n', data->size - idx);
+	return nl ? (size_t)JSTR_PTR_DIFF(nl, data->data) : data->size;
 }
 
 /* Incremental 1-based line-number counter for one buffer. Requests must be
@@ -279,11 +278,11 @@ line_counter_get(line_counter_ty *st, size_t idx)
  * newline is the last byte of the block rather than a surviving terminator, so
  * END-1 is returned. */
 static size_t
-match_line_end(const char *R data, size_t size, size_t start, size_t end)
+match_line_end(const jstr_literal_ty *data, size_t start, size_t end)
 {
-	if (end > start && data[end - 1] == '\n')
+	if (end > start && data->data[end - 1] == '\n')
 		return end - 1;
-	return line_get_end(data, size, end);
+	return line_get_end(data, end);
 }
 
 static unsigned short
@@ -339,9 +338,9 @@ print_size_t(size_t val)
 
 /* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
 static void
-print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix)
+print_line_prefix(const jstr_literal_ty *fname, size_t line, char prefix)
 {
-	jstr_io_fwrite(fname, 1, fname_len, stdout);
+	jstr_io_fwrite(fname->data, 1, fname->size, stdout);
 	jstr_io_putchar(':');
 	print_size_t(line);
 	jstr_io_putchar(':');
@@ -352,12 +351,12 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefi
  * truncating/clipping to COLS - 1 columns. COL_PTR tracks the current column
  * (0-indexed). */
 static void
-print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr)
+print_diff_line_chars(const jstr_literal_ty *s, unsigned short cols, unsigned short *col_ptr)
 {
 	unsigned short col = *col_ptr;
 	unsigned short limit = (cols > 1) ? (cols - 1) : 0;
-	for (size_t i = 0; i < len; ++i) {
-		char c = s[i];
+	for (size_t i = 0; i < s->size; ++i) {
+		char c = s->data[i];
 		if (c == '\t') {
 			unsigned short next_tab = (unsigned short)((col + 8) & ~7);
 			while (col < next_tab) {
@@ -386,27 +385,28 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
  * is empty) still renders the empty line that follows it, matching how diff
  * counts lines. */
 static void
-print_diff_lines(const char *R data, size_t len, char prefix, const char *color, unsigned int color_len,
-                    const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
+print_diff_lines(const jstr_literal_ty *data, char prefix, const jstr_literal_ty *color,
+                 const jstr_literal_ty *fname, size_t start_line, int trailing_nl)
 {
-	const char *p = data;
-	const char *const end = data + len;
+	const char *p = data->data;
+	const char *const end = data->data + data->size;
 	size_t line = start_line;
 	const char *nl;
 	unsigned short cols = 0;
 	if (term_initialized) {
 		cols = get_terminal_cols();
 	}
-	jstr_io_fwrite(color, 1, color_len, stdout);
+	jstr_io_fwrite(color->data, 1, color->size, stdout);
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
 		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
 			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			return;
 		}
-		print_line_prefix(fname, fname_len, line++, prefix);
+		print_line_prefix(fname, line++, prefix);
 		if (term_initialized) {
-			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
-			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
+			unsigned short col = (unsigned short)(fname->size + get_size_t_width(line - 1) + 3);
+			const jstr_literal_ty sub = { p, (unsigned int)(nl - p) };
+			print_diff_line_chars(&sub, cols, &col);
 		} else {
 			jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
 		}
@@ -423,10 +423,11 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			return;
 		}
 		/* The final line is not newline-terminated: print it as-is. */
-		print_line_prefix(fname, fname_len, line, prefix);
+		print_line_prefix(fname, line, prefix);
 		if (term_initialized) {
-			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
-			print_diff_line_chars(p, (size_t)(end - p), cols, &col);
+			unsigned short col = (unsigned short)(fname->size + get_size_t_width(line) + 3);
+			const jstr_literal_ty sub = { p, (unsigned int)(end - p) };
+			print_diff_line_chars(&sub, cols, &col);
 		} else {
 			jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
 		}
@@ -442,7 +443,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		}
 		/* DATA ended in '\n' (or is empty): the empty line that follows the
 		 * block survives only when the block's terminating '\n' does. */
-		print_line_prefix(fname, fname_len, line, prefix);
+		print_line_prefix(fname, line, prefix);
 		if (term_initialized)
 			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		jstr_io_putchar('\n');
@@ -454,23 +455,20 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 
 jstr_ret_ty
 confirm_scan_file(const jstr_twoway_ty *R t,
-                     const jstr_ty *R buf,
-                     const char *R fname,
-                     size_t fname_len,
-                     const char *R find,
-                     size_t find_len,
-                     const char *R rplc,
-                     size_t rplc_len,
-                     size_t *R out_matches)
+                  const jstr_ty *R buf,
+                  const jstr_literal_ty *fname,
+                  const jstr_literal_ty *find,
+                  const jstr_literal_ty *rplc,
+                  size_t *R out_matches)
 {
 	int backref = 0;
 	const unsigned char *rplc_backref1 = NULL;
 	const unsigned char *rplc_backref1_e = NULL;
 	if (G.mode & MODE_USE_REGEX) {
-		rplc_backref1 = (const unsigned char *)jstr_internal_re_rplcbackreffirst(rplc, rplc_len);
+		rplc_backref1 = (const unsigned char *)jstr_internal_re_rplcbackreffirst(rplc->data, rplc->size);
 		if (rplc_backref1 != NULL) {
 			backref = 1;
-			rplc_backref1_e = (const unsigned char *)jstr_internal_re_rplcbackreflast(rplc_backref1, rplc_len - JSTR_DIFF(rplc_backref1, rplc));
+			rplc_backref1_e = (const unsigned char *)jstr_internal_re_rplcbackreflast(rplc_backref1, rplc->size - JSTR_DIFF(rplc_backref1, rplc->data));
 			if (rplc_backref1_e == NULL)
 				rplc_backref1_e = rplc_backref1 + 2;
 		}
@@ -478,7 +476,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	/* Collect every match range so they can be grouped by line for display. */
 	G.matches.size = 0;
 	if (G.mode & MODE_USE_REGEX) {
-		if (find_len > 0) {
+		if (find->size > 0) {
 			/*
 			 * Scan for regex matches on the file buffer.
 			 * Mirror the state machine in jstr_internal_re_rplcn_backref_len_from_exec
@@ -539,14 +537,14 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			}
 		}
 	} else {
-		if (find_len > 0) {
+		if (find->size > 0) {
 			/* Fixed-string pass uses the precompiled Two-Way matcher. */
 			for (size_t off = 0; off < buf->size; ) {
-				const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
+				const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find->data, find->size);
 				if (p == NULL)
 					break;
 				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
-				const size_t m_end = m_start + find_len;
+				const size_t m_end = m_start + find->size;
 				match_pushback(&G.matches, m_start, m_end, NULL);
 				if (G.n == 1)
 					break;
@@ -562,13 +560,14 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 		line_counter_init(&lc, buf->data);
 		ptrdiff_t new_shift = 0;
 		size_t i = 0;
+		const jstr_literal_ty buf_lit = { buf->data, (unsigned int)buf->size };
 		while (i < G.matches.size) {
 			/* Group consecutive matches that lie on the same line into one block. */
 			size_t j = i;
-			while (j + 1 < G.matches.size && line_get_start(buf->data, buf->size, G.matches.data[j + 1].start) <= match_line_end(buf->data, buf->size, G.matches.data[j].start, G.matches.data[j].end))
+			while (j + 1 < G.matches.size && line_get_start(&buf_lit, G.matches.data[j + 1].start) <= match_line_end(&buf_lit, G.matches.data[j].start, G.matches.data[j].end))
 				++j;
-			const size_t block_start = line_get_start(buf->data, buf->size, G.matches.data[i].start);
-			const size_t block_end = match_line_end(buf->data, buf->size, G.matches.data[j].start, G.matches.data[j].end);
+			const size_t block_start = line_get_start(&buf_lit, G.matches.data[i].start);
+			const size_t block_end = match_line_end(&buf_lit, G.matches.data[j].start, G.matches.data[j].end);
 			const size_t line = line_counter_get(&lc, G.matches.data[i].start);
 			/* Build the replacement content for this block into NEW_BUF. */
 			jstr_empty_j(&G.new_buf);
@@ -577,15 +576,15 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				if (G.matches.data[k].start > p)
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, buf->data + p, G.matches.data[k].start - p)), "%s", "Out of memory.\n");
 				if (G.mode & MODE_USE_REGEX && backref) {
-					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
+					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc->size);
 					jstr_empty_j(&G.rplc_buf);
 					DIE_IF(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1), "%s", "Out of memory.\n");
 					DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
 					const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
-					jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
+					jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc->data, (const unsigned char *)rplc->data + rplc->size);
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, G.rplc_buf.data, rplcwbackref_len)), "%s", "Out of memory.\n");
 				} else {
-					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, rplc, rplc_len)), "%s", "Out of memory.\n");
+					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, rplc->data, rplc->size)), "%s", "Out of memory.\n");
 				}
 				p = G.matches.data[k].end;
 			}
@@ -615,8 +614,12 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, '-', S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
+			const jstr_literal_ty old_lit = { buf->data + block_start, (unsigned int)old_len };
+			const jstr_literal_ty red_lit = { S_LITERAL(COLOR_RED) };
+			const jstr_literal_ty green_lit = { S_LITERAL(COLOR_GREEN) };
+			const jstr_literal_ty new_lit = { G.new_buf.data, (unsigned int)G.new_buf.size };
+			print_diff_lines(&old_lit, '-', &red_lit, fname, line, old_len == 0);
+			print_diff_lines(&new_lit, '+', &green_lit, fname, (size_t)new_line, trailing_nl);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
 			i = j + 1;
 		}
@@ -626,14 +629,14 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 }
 
 static jstr_ret_ty
-interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const char *rplc, size_t rplc_len, char *err_buf, size_t err_size)
+interactive_compile(jstr_twoway_ty *t, const jstr_literal_ty *find, const jstr_literal_ty *rplc, char *err_buf, size_t err_size)
 {
 	if (G.mode & MODE_USE_REGEX) {
 		if (G.mode & MODE_COMPILED) {
 			jstr_re_free(&G.regex);
 			G.mode &= ~MODE_COMPILED;
 		}
-		const int ret = jstr_re_comp(&G.regex, find, G.cflags);
+		const int ret = jstr_re_comp(&G.regex, find->data, G.cflags);
 		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
 			regerror(ret, &G.regex.reg, err_buf, err_size);
 			return JSTR_RET_ERR;
@@ -644,9 +647,9 @@ interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const 
 
 		/* Validate backreferences */
 		size_t max_backref = 0;
-		for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
-			if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
-				size_t num = rplc[idx+1] - '0';
+		for (size_t idx = 0; idx + 1 < rplc->size; ++idx) {
+			if (rplc->data[idx] == '\\' && rplc->data[idx+1] >= '1' && rplc->data[idx+1] <= '9') {
+				size_t num = rplc->data[idx+1] - '0';
 				if (num > max_backref)
 					max_backref = num;
 				++idx;
@@ -657,7 +660,7 @@ interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const 
 			return JSTR_RET_ERR;
 		}
 	} else {
-		jstr_memmem_comp(t, find, find_len);
+		jstr_memmem_comp(t, find->data, find->size);
 	}
 	return JSTR_RET_SUCC;
 }
@@ -666,18 +669,18 @@ interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const 
  * An empty pattern clears the filter. On invalid regex, report it and return
  * JSTR_RET_ERR so the caller treats the whole session as invalid. */
 static jstr_ret_ty
-interactive_compile_include_exclude(const char *include, size_t include_len,
-                                    const char *exclude, size_t exclude_len,
+interactive_compile_include_exclude(const jstr_literal_ty *include,
+                                    const jstr_literal_ty *exclude,
                                     char *err_buf, size_t err_size)
 {
-	if (include_len == 0) {
+	if (include->size == 0) {
 		if (G.have_include) {
 			jstr_re_free(&G.include_re);
 			G.have_include = 0;
 		}
 	} else {
 		char tmp[128];
-		const int ret = jstr_re_comp(&G.include_re, include, G.cflags);
+		const int ret = jstr_re_comp(&G.include_re, include->data, G.cflags);
 		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
 			regerror(ret, &G.include_re.reg, tmp, sizeof(tmp));
 			snprintf(err_buf, err_size, "Invalid Include regex: %s", tmp);
@@ -685,14 +688,14 @@ interactive_compile_include_exclude(const char *include, size_t include_len,
 		}
 		G.have_include = 1;
 	}
-	if (exclude_len == 0) {
+	if (exclude->size == 0) {
 		if (G.have_exclude) {
 			jstr_re_free(&G.exclude_re);
 			G.have_exclude = 0;
 		}
 	} else {
 		char tmp[128];
-		const int ret = jstr_re_comp(&G.exclude_re, exclude, G.cflags);
+		const int ret = jstr_re_comp(&G.exclude_re, exclude->data, G.cflags);
 		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
 			regerror(ret, &G.exclude_re.reg, tmp, sizeof(tmp));
 			snprintf(err_buf, err_size, "Invalid Exclude regex: %s", tmp);
@@ -726,7 +729,7 @@ interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
 }
 
 static void
-parse_interactive_flags(const char *flags, size_t len)
+parse_interactive_flags(const jstr_literal_ty *flags)
 {
 	/* Reset to initial configuration default states */
 	G.n = 1;
@@ -734,8 +737,8 @@ parse_interactive_flags(const char *flags, size_t len)
 	G.cflags &= ~(JSTR_RE_CF_EXTENDED | JSTR_RE_CF_ICASE);
 	G.cflags |= JSTR_RE_CF_NEWLINE;
 
-	for (size_t idx = 0; idx < len; ++idx) {
-		char f = flags[idx];
+	for (size_t idx = 0; idx < flags->size; ++idx) {
+		char f = flags->data[idx];
 		switch (f) {
 		case 'g':
 			G.n = (size_t)-1;
@@ -972,14 +975,18 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 			if (needs_recompile) {
 				/* Parse interactive flags from flags_buf */
-				parse_interactive_flags(flags_buf->data ? flags_buf->data : "", flags_buf->size);
+				const jstr_literal_ty flags_lit = { flags_buf->data ? flags_buf->data : "", (unsigned int)flags_buf->size };
+				parse_interactive_flags(&flags_lit);
 
 				err_buf[0] = '\0';
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
-				const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-				comp_ret = interactive_compile(t, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, err_buf, sizeof(err_buf));
+				const jstr_literal_ty find_lit = { (find_buf->size > 0 && find_buf->data) ? find_buf->data : "", (unsigned int)find_buf->size };
+				const jstr_literal_ty rplc_lit = { rplc_buf->data ? rplc_buf->data : "", (unsigned int)rplc_buf->size };
+				comp_ret = interactive_compile(t, &find_lit, &rplc_lit, err_buf, sizeof(err_buf));
 				if (comp_ret == JSTR_RET_SUCC) {
-					comp_ret = interactive_compile_include_exclude(include_buf->data ? include_buf->data : "", include_buf->size, exclude_buf->data ? exclude_buf->data : "", exclude_buf->size, err_buf, sizeof(err_buf));
+					const jstr_literal_ty inc_lit = { include_buf->data ? include_buf->data : "", (unsigned int)include_buf->size };
+					const jstr_literal_ty exc_lit = { exclude_buf->data ? exclude_buf->data : "", (unsigned int)exclude_buf->size };
+					comp_ret = interactive_compile_include_exclude(&inc_lit, &exc_lit, err_buf, sizeof(err_buf));
 				}
 				is_valid = (comp_ret == JSTR_RET_SUCC);
 
@@ -1028,8 +1035,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					if (!interactive_file_pass(file, files_buf))
 						continue;
 					size_t file_matches = 0;
-					const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);
+					const jstr_literal_ty fn_lit = { file->fname, (unsigned int)file->fname_len };
+					const jstr_literal_ty find_lit = { (find_buf->size > 0 && find_buf->data) ? find_buf->data : "", (unsigned int)find_buf->size };
+					const jstr_literal_ty rplc_lit = { rplc_buf->data ? rplc_buf->data : "", (unsigned int)rplc_buf->size };
+					confirm_scan_file(t, &file->content, &fn_lit, &find_lit, &rplc_lit, &file_matches);
 					if (file_matches > 0) {
 						total_matches += file_matches;
 						files_matched++;

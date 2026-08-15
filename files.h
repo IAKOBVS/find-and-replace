@@ -13,10 +13,8 @@
 /* Per-directory-traversal context passed through ftw to callback_file. */
 typedef struct args_ty {
 	jstr_ty *buf;
-	const char *find;
-	size_t find_len;
-	const char *rplc;
-	size_t rplc_len;
+	jstr_literal_ty find;
+	jstr_literal_ty rplc;
 	const jstr_twoway_ty *t;
 } args_ty;
 
@@ -30,7 +28,7 @@ JSTR_IO_FTW_FUNC(callback_file, ftw, args);
 JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args);
 
 /* Append one file to the -c confirm cache. */
-void file_pushback(files_ty *files, const char *R fname, size_t fname_len,
+void file_pushback(files_ty *files, const jstr_literal_ty *fname,
                    const struct stat *st, jstr_ty *R buf);
 
 #endif /* FILES_H */

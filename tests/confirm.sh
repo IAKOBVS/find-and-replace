@@ -1306,6 +1306,47 @@ EOF
 	[ "$(cat "$td/f")" = 'foo bar baz' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
 }
 
+t_confirm_interactive_no_scroll() {
+	td=$1
+	i=1; : > "$td/f"
+	while [ $i -le 20 ]; do printf 'line %d hello\n' "$i" >> "$td/f"; i=$((i + 1)); done
+	res=$(python3 -c '
+import os, pty, sys, time, fcntl, termios, struct, re
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "world", "-c", "-i", "-g", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    s = struct.pack("HHHH", 24, 80, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, s)
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"n\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    out_str = output.decode("utf-8", errors="ignore")
+    idx = out_str.rfind("\x1b[2J\x1b[H")
+    frame = out_str[idx:] if idx != -1 else out_str
+    m = re.search(r"\x1b\[(\d+);(\d+)H", frame)
+    if not m:
+        print("no_match")
+        sys.exit(0)
+    before_cursor = frame[:m.start()]
+    print(before_cursor.count("\n"))
+' "$td" 2>/dev/null)
+	if [ "$res" = "23" ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: terminal scrolled during interactive render (newlines=$res)" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -1362,6 +1403,7 @@ t_interactive_ctrl_j_k
 t_vim_match_line_end
 t_confirm_regex_scan_empty
 t_vim_dd
+t_confirm_interactive_no_scroll
 "
 
 run_suite "confirm tests" "$TESTS"

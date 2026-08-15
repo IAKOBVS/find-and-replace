@@ -934,7 +934,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			jstr_io_fwrite(active_field == FIELD_BACKUP ? "* Backup:  " : "  Backup:  ", 1, S_LEN("* Backup:  "), stdout);
 			if (backup_buf->size > 0 && backup_buf->data)
 				jstr_io_fwrite(backup_buf->data, 1, backup_buf->size, stdout);
-			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
+			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 
 			/* Clear from the current cursor position to the bottom of the screen */
 			jstr_io_fwrite("\x1b[J", 1, S_LEN("\x1b[J"), stdout);

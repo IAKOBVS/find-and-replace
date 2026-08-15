@@ -10,8 +10,7 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 td_root=$(mktemp -d)
 trap 'rm -rf "$td_root"' EXIT
 
-MAX_JOBS=$(nproc 2>/dev/null || echo 2)
-[ "$MAX_JOBS" -gt 32 ] && MAX_JOBS=32
+NP=$(nproc 2>/dev/null || echo 2)
 
 if [ ! -x "$PROG_DIR/tests/pty_driver" ] || [ ! -x "$PROG_DIR/tests/err_helper" ]; then
 	(
@@ -29,7 +28,7 @@ run_tests() {
 	rm -f "$fifo"
 
 	i=0
-	while [ "$i" -lt "$MAX_JOBS" ]; do
+	while [ "$i" -lt "$NP" ]; do
 		echo >&3
 		i=$((i + 1))
 	done

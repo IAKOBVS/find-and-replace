@@ -1,6 +1,6 @@
 #!/bin/sh
 # Unified runner for all deterministic test suites.
-# Launches suites in parallel capped at nproc using a FIFO job server.
+# Launches suites in parallel capped at nproc using xargs -P.
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 NP=$(nproc 2>/dev/null || echo 2)
@@ -10,27 +10,11 @@ fail=0
 
 SUITES="basic flags regex files errors io escape empty misc edge-cases complex confirm"
 
-fifo="$tmp/fifo_run"
-mkfifo "$fifo"
-exec 3<>"$fifo"
-rm -f "$fifo"
-
-i=0
-while [ "$i" -lt "$NP" ]; do
-	echo >&3
-	i=$((i + 1))
-done
-
-for suite in $SUITES; do
-	read -r _ <&3
-	(
-		"$DIR/${suite}.sh" > /dev/null 2>&1
-		echo $? > "$tmp/$suite.rc"
-		echo >&3
-	) &
-done
-wait
-exec 3>&-
+printf '%s\n' $SUITES | xargs -P "$NP" -I {} sh -c '
+	suite="$2"
+	"$1/${suite}.sh" > /dev/null 2>&1
+	echo $? > "$3/$suite.rc"
+' _ "$DIR" {} "$tmp"
 
 for suite in $SUITES; do
 	read rc < "$tmp/$suite.rc" 2>/dev/null || rc=1

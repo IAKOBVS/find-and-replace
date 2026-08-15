@@ -1,6 +1,6 @@
 #!/bin/sh
 # Unified runner for all deterministic test suites.
-# Launches suites in parallel capped at nproc, collects per-suite exit codes.
+# Launches suites in parallel capped at nproc using xargs -P.
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 NP=$(nproc 2>/dev/null || echo 2)
@@ -8,19 +8,16 @@ tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 fail=0
 
-count=0
-for suite in basic flags regex files errors io escape empty misc edge-cases complex confirm; do
-	("$DIR/${suite}.sh" > /dev/null 2>&1; echo $? > "$tmp/$suite.rc") &
-	count=$((count + 1))
-	if [ "$count" -ge "$NP" ]; then
-		wait
-		count=0
-	fi
-done
-[ "$count" -gt 0 ] && wait
+SUITES="basic flags regex files errors io escape empty misc edge-cases complex confirm"
 
-for suite in basic flags regex files errors io escape empty misc edge-cases complex confirm; do
-	read rc < "$tmp/$suite.rc"
+printf '%s\n' $SUITES | xargs -P "$NP" -I {} sh -c '
+	suite="$2"
+	"$1/${suite}.sh" > /dev/null 2>&1
+	echo $? > "$3/$suite.rc"
+' _ "$DIR" {} "$tmp"
+
+for suite in $SUITES; do
+	read rc < "$tmp/$suite.rc" 2>/dev/null || rc=1
 	if [ "$rc" -ne 0 ]; then
 		printf '\033[31mFAIL\033[0m %s\n' "$suite"
 		fail=$((fail + 1))

@@ -154,7 +154,7 @@ process_file(const jstr_twoway_ty *R t,
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	/* Skip files with NUL bytes in the first 1 KiB. */
-	if (jstr_io_isbinary_atleast(buf->data, file_size, JSTR_IO_KIB))
+	if (jstr_io_isbinary_atleast(buf->data, file_size, JSTR_IO_KIB * 4))
 		return JSTR_RET_SUCC;
 	/* During the -c dry-run pass, only scan and preview; the real edit
 	 * happens on the second pass after the user confirms. The file's content

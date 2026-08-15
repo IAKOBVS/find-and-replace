@@ -343,8 +343,23 @@ process:
 				init_flags[fl_idx++] = 'Z';
 			else
 				init_flags[fl_idx++] = 'z';
+			if (G.mode & MODE_USE_RECURSIVE)
+				init_flags[fl_idx++] = 'r';
+			if (G.mode & MODE_PRINT_CHANGES)
+				init_flags[fl_idx++] = 'l';
 			init_flags[fl_idx] = '\0';
 			DIE_IF(jstr_append_len_j(&G.interactive_flags_buf, init_flags, fl_idx), "%s", "Out of memory.\n");
+
+			if (m.include_glob) {
+				DIE_IF(jstr_append_j(&G.interactive_files_buf, "--include "), "%s", "Out of memory.\n");
+				DIE_IF(jstr_append_j(&G.interactive_files_buf, m.include_glob), "%s", "Out of memory.\n");
+			}
+			if (m.exclude_glob) {
+				if (G.interactive_files_buf.size > 0)
+					DIE_IF(jstr_append_j(&G.interactive_files_buf, " "), "%s", "Out of memory.\n");
+				DIE_IF(jstr_append_j(&G.interactive_files_buf, "--exclude "), "%s", "Out of memory.\n");
+				DIE_IF(jstr_append_j(&G.interactive_files_buf, m.exclude_glob), "%s", "Out of memory.\n");
+			}
 
 			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_rplc_buf, &G.interactive_flags_buf, &G.interactive_files_buf)), "%s", "Interactive loop failed.\n");
 
@@ -357,10 +372,8 @@ process:
 			G.matches_found = 0;
 			for (i = 0; i < G.files.size; ++i) {
 				file_ty *file = &G.files.data[i];
-				if (G.interactive_files_buf.size > 0 && G.interactive_files_buf.data) {
-					if (jstr_strstr_len(file->fname, file->fname_len, G.interactive_files_buf.data, G.interactive_files_buf.size) == NULL)
-						continue;
-				}
+				if (!file_matches_filter(file->fname, file->fname_len, G.interactive_files_buf.data, G.interactive_files_buf.size))
+					continue;
 				size_t file_matches = 0;
 				confirm_scan_file(&t, &file->content, file->fname, file->fname_len, a.find, a.find_len, a.rplc, a.rplc_len, &file_matches);
 			}
@@ -387,10 +400,8 @@ process:
 			struct stat st_file;
 			for (i = 0; i < G.files.size; ++i) {
 				file_ty *file = &G.files.data[i];
-				if (G.interactive_files_buf.size > 0 && G.interactive_files_buf.data) {
-					if (jstr_strstr_len(file->fname, file->fname_len, G.interactive_files_buf.data, G.interactive_files_buf.size) == NULL)
-						continue;
-				}
+				if (!file_matches_filter(file->fname, file->fname_len, G.interactive_files_buf.data, G.interactive_files_buf.size))
+					continue;
 				/* Read the file if the content is not in memory. */
 				if (jstr_unlikely(file->content.data == NULL)) {
 					jstr_empty_j(&G.content_buf);

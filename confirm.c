@@ -616,7 +616,7 @@ parse_interactive_flags(const char *flags, size_t len)
 {
 	/* Reset to initial configuration default states */
 	G.n = 1;
-	G.mode &= ~MODE_USE_REGEX;
+	G.mode &= ~(MODE_USE_REGEX | MODE_USE_RECURSIVE | MODE_PRINT_CHANGES);
 	G.cflags &= ~(JSTR_RE_CF_EXTENDED | JSTR_RE_CF_ICASE);
 	G.cflags |= JSTR_RE_CF_NEWLINE;
 
@@ -648,6 +648,12 @@ parse_interactive_flags(const char *flags, size_t len)
 			break;
 		case 'z':
 			G.cflags &= ~JSTR_RE_CF_NEWLINE;
+			break;
+		case 'r':
+			G.mode |= MODE_USE_RECURSIVE;
+			break;
+		case 'l':
+			G.mode |= MODE_PRINT_CHANGES;
 			break;
 		default:
 			break;
@@ -759,11 +765,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				G.preview_lines_printed = 0;
 				for (unsigned int k = 0; k < G.files.size; ++k) {
 					file_ty *file = &G.files.data[k];
-					/* File filtering by files_buf using jstr_strstr_len */
-					if (files_buf->size > 0 && files_buf->data) {
-						if (jstr_strstr_len(file->fname, file->fname_len, files_buf->data, files_buf->size) == NULL)
-							continue;
-					}
+					if (!file_matches_filter(file->fname, file->fname_len, files_buf->data, files_buf->size))
+						continue;
 					size_t file_matches = 0;
 					const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);

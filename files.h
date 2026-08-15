@@ -38,4 +38,8 @@ JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args);
 void file_pushback(files_ty *files, const char *R fname, size_t fname_len,
                    const struct stat *st, jstr_ty *R buf);
 
+/* File filter check supporting glob, include, exclude, negation, and substring. */
+int file_matches_filter(const char *R fname, size_t fname_len,
+                        const char *R filter, size_t filter_len);
+
 #endif /* FILES_H */

@@ -625,6 +625,72 @@ EOF
 	fi
 }
 
+t_confirm_interactive_flag_r_l() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	cat > "$td/test_flags.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "bye", "-c", "-i", os.path.join(sys.argv[1], "f")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    # Tab twice to Flags (\t\t), clear (\x15), type "grl"
+    os.write(fd, b"\t\t\x15grl")
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_flags.py" "$td" 2>/dev/null)
+	if echo "$out" | grep -q 'Flags:   grl' && [ "$(cat "$td/f")" = 'bye world' ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: interactive flag r l check failed. out=[$out]" > "$td/result"
+	fi
+}
+
+t_confirm_interactive_files_filter() {
+	td=$1; printf 'hello f1\n' > "$td/f1.txt"; printf 'hello f2\n' > "$td/f2.c"
+	cat > "$td/test_files.py" << 'EOF'
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./find-and-replace", ["./find-and-replace", "hello", "bye", "-c", "-i", os.path.join(sys.argv[1], "f1.txt"), os.path.join(sys.argv[1], "f2.c")], {"LD_LIBRARY_PATH": "lib/jstring/build/lib"})
+else:
+    time.sleep(0.5)
+    # Tab 3 times to Files (\t\t\t), clear (\x15), type "--include *.txt"
+    os.write(fd, b"\t\t\t\x15--include *.txt")
+    time.sleep(0.5)
+    os.write(fd, b"\r")
+    time.sleep(0.5)
+    os.write(fd, b"y\n")
+    output = b""
+    try:
+        while True:
+            data = os.read(fd, 1024)
+            if not data: break
+            output += data
+    except OSError:
+        pass
+    print(output.decode("utf-8", errors="ignore"))
+EOF
+	out=$(python3 "$td/test_files.py" "$td" 2>/dev/null)
+	if [ "$(cat "$td/f1.txt")" = 'bye f1' ] && [ "$(cat "$td/f2.c")" = 'hello f2' ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: interactive files filter check failed. f1=[$(cat "$td/f1.txt")] f2=[$(cat "$td/f2.c")] out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_abort
@@ -660,5 +726,7 @@ t_confirm_vim_word_motions
 t_confirm_vim_delete_eol
 t_confirm_vim_delete_dd
 t_confirm_vim_change_cw
+t_confirm_interactive_flag_r_l
+t_confirm_interactive_files_filter
 "
 run_suite "confirm tests" "$TESTS"

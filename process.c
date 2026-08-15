@@ -23,12 +23,6 @@ process_buffer(const jstr_twoway_ty *R t,
 	int fd_tmp = -1;
 	char *bakp = NULL;
 	char bak[JSTR_IO_PATH_MAX];
-	const char *fname_str = fname ? fname->data : NULL;
-	const size_t fname_len = fname ? fname->size : 0;
-	const char *find_str = find ? find->data : NULL;
-	const size_t find_len = find ? find->size : 0;
-	const char *rplc_str = rplc ? rplc->data : NULL;
-	const size_t rplc_len = rplc ? rplc->size : 0;
 
 	if (G.mode & MODE_USE_REGEX) {
 		/* Temporarily remove trailing newline. */
@@ -37,10 +31,10 @@ process_buffer(const jstr_twoway_ty *R t,
 			--buf->size;
 		}
 		/* The regex engine rejects empty patterns, so short-circuit them. */
-		if (jstr_unlikely(find_len == 0)) {
+		if (jstr_unlikely(find->size == 0)) {
 			changed.zu = 0;
 		} else {
-			changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc_str, rplc_len, G.eflags, 10, G.n);
+			changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc->data, rplc->size, G.eflags, 10, G.n);
 			if (jstr_re_chk(changed.d)) {
 				jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -49,7 +43,7 @@ process_buffer(const jstr_twoway_ty *R t,
 		}
 	} else {
 		/* Fixed-string path uses the precompiled Two-Way matcher. */
-		changed.zu = jstr_rplcn_len_exec_j(t, buf, find_str, find_len, rplc_str, rplc_len, G.n);
+		changed.zu = jstr_rplcn_len_exec_j(t, buf, find->data, find->size, rplc->data, rplc->size, G.n);
 		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
@@ -67,29 +61,29 @@ process_buffer(const jstr_twoway_ty *R t,
 			return JSTR_RET_SUCC;
 		if (G.mode & MODE_PRINT_FILE_BACKUP) {
 			/* -iSUFFIX: rename the original aside, then write the new file. */
-			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
-				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
+			if (jstr_unlikely(fname->size + G.bak_suffix_len >= sizeof(bak))) {
+				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", (size_t)fname->size + G.bak_suffix_len, sizeof(bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
-			char *p = jstr_mempcpy(bak, fname_str, fname_len);
+			char *p = jstr_mempcpy(bak, fname->data, fname->size);
 			jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
 			if (jstr_unlikely(file_exists(bak))) {
 				jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", bak);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
-			if (jstr_unlikely(rename(fname_str, bak)))
+			if (jstr_unlikely(rename(fname->data, bak)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			if (jstr_chk(jstr_io_writefile_len_j(buf, fname_str, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
+			if (jstr_chk(jstr_io_writefile_len_j(buf, fname->data, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		} else {
 			/* Plain -i: write to a temp file next to the original, then
 			 * rename it over the original for an atomic replace. */
 			bakp = bak;
-			if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak))) {
-				jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname_str, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
+			if (jstr_unlikely(fname->size + S_LEN(".XXXXXX") >= sizeof(bak))) {
+				jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname->data, (size_t)fname->size + S_LEN(".XXXXXX"), sizeof(bak));
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
-			char *p = jstr_mempcpy(bak, fname_str, fname_len);
+			char *p = jstr_mempcpy(bak, fname->data, fname->size);
 			p = jstr_stpcpy_len(p, S_LITERAL(".XXXXXX"));
 			fd_tmp = mkstemp(bak);
 			if (jstr_unlikely(fd_tmp == -1)) {
@@ -107,20 +101,20 @@ process_buffer(const jstr_twoway_ty *R t,
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			fd_tmp = -1;
-			if (jstr_unlikely(rename(bak, fname_str))) {
-				jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname_str);
+			if (jstr_unlikely(rename(bak, fname->data))) {
+				jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname->data);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			bakp = NULL;
 		}
 		/* The file was successfully rewritten in place: report its name on
 		 * stderr (never stdout) so the caller can see what changed. */
-		if (jstr_unlikely(jstr_io_fwrite(fname_str, 1, fname_len, stderr) != fname_len))
+		if (jstr_unlikely(jstr_io_fwrite(fname->data, 1, fname->size, stderr) != fname->size))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		if (G.mode & MODE_PRINT_CHANGES) {
-			if (jstr_unlikely(jstr_io_fwrite(fname_str, 1, fname_len, stdout) != fname_len))
+			if (jstr_unlikely(jstr_io_fwrite(fname->data, 1, fname->size, stdout) != fname->size))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			if (jstr_chk(jstr_io_putchar('\n')))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -144,19 +138,16 @@ process_file(const jstr_twoway_ty *R t,
              const jstr_literal_ty *rplc)
 {
 	const size_t file_size = (size_t)st->st_size;
-	const char *fname_str = fname ? fname->data : NULL;
-	const size_t find_len = find ? find->size : 0;
-	const size_t rplc_len = rplc ? rplc->size : 0;
 
 	/* A fixed-string find longer than the whole file cannot match. */
-	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len)
+	if (!(G.mode & MODE_USE_REGEX) && file_size < find->size)
 		return JSTR_RET_SUCC;
 	/* Preallocate the length of the replace string. */
 	/* Worst-case output size = input + (longer replace) + trailing newline. */
-	if (rplc_len > find_len && !(G.mode & MODE_USE_REGEX))
-		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
+	if (rplc->size > find->size && !(G.mode & MODE_USE_REGEX))
+		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc->size - find->size + S_LEN("\n") + 1)))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_chk(jstr_io_readfile_len_j(buf, fname_str, 0, file_size)))
+	if (jstr_chk(jstr_io_readfile_len_j(buf, fname ? fname->data : NULL, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	/* Skip files with NUL bytes in the first 1 KiB. */
 	if (jstr_io_isbinary_atleast(buf->data, file_size, JSTR_IO_KIB))

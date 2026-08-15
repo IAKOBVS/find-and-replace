@@ -796,12 +796,12 @@ get_terminal_rows(void)
 }
 
 typedef struct {
-	field_ty field;
+	const field_ty field;
 	const char *active_prefix;
-	size_t active_prefix_len;
+	const size_t active_prefix_len;
 	const char *inactive_prefix;
-	size_t inactive_prefix_len;
-	int affects_recompile;
+	const size_t inactive_prefix_len;
+	const int affects_recompile;
 } field_info_ty;
 
 static const field_info_ty field_info_table[FIELD_COUNT] = {

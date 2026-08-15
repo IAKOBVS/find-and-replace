@@ -1148,7 +1148,8 @@ else:
         pass
     _, status = os.waitpid(pid, 0)
     code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
-    print(code, b"Can"'"'"'t rename temp file" in output)
+    text = output.decode("utf-8", errors="ignore")
+    print(code, "Can\x27t rename temp file" in text)
 ' "$td" 2>/dev/null)
 	[ "$rc" = '1 True' ] && echo PASS > "$td/result" || echo "FAIL: rc=[$rc]" > "$td/result"
 }

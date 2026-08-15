@@ -118,38 +118,22 @@ t_readonly_dir_backup() {
 
 t_temp_write_failure_enospc() {
 	td=$1
-	python3 - "$PROG" "$td" <<'PYEOF'
-import os, signal, resource, sys
-prog, td = sys.argv[1], sys.argv[2]
-with open(td + "/f", "w") as f:
-    f.write("x" * 2000 + "\n")
-signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
-resource.setrlimit(resource.RLIMIT_FSIZE, (512, 512))
-errlog = os.open(td + "/errlog", os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-os.dup2(errlog, 2)
-os.execv(prog, [prog, "x", "y", "-i", td + "/f"])
-PYEOF
-	rc=$?
+	awk 'BEGIN{for(i=0;i<2000;i++) printf "x"; print ""}' > "$td/f"
+	rc=0
+	( trap '' XFSZ 2>/dev/null; ulimit -f 1 2>/dev/null; "$PROG" "x" "y" -i "$td/f" 2>"$td/errlog" ) || rc=$?
 	[ "$rc" -ne 0 ] && grep -q 'temp file' "$td/errlog" && echo PASS > "$td/result" || echo "FAIL: rc=$rc errlog=[$(cat "$td/errlog" 2>/dev/null)]" > "$td/result"
 }
 
 t_closed_stdout_pipe() {
 	td=$1
-	python3 - "$PROG" "$td" 2>/dev/null <<'PYEOF'
-import os, signal, sys
-prog, td = sys.argv[1], sys.argv[2]
-with open(td + "/in", "w") as f:
-    f.write("x" * 100000 + "\n")
-signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-fin = os.open(td + "/in", os.O_RDONLY)
-os.dup2(fin, 0)
-r, w = os.pipe()
-os.close(r)
-os.dup2(w, 1)
-os.close(w)
-os.execv(prog, [prog, "x", "y"])
-PYEOF
-	rc=$?
+	awk 'BEGIN{for(i=0;i<100000;i++) printf "x"; print ""}' > "$td/in"
+	mkfifo "$td/p"
+	: < "$td/p" &
+	fpid=$!
+	rc=0
+	( trap '' PIPE 2>/dev/null; "$PROG" "x" "y" < "$td/in" > "$td/p" 2>/dev/null ) || rc=$?
+	rm -f "$td/p"
+	wait "$fpid" 2>/dev/null
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: closed stdout pipe should error (rc=$rc)" > "$td/result"
 }
 

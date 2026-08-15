@@ -853,8 +853,6 @@ confirm_render_field(const field_info_ty *info, const jstr_ty *buf, int is_activ
 		jstr_io_fwrite(buf->data, 1, buf->size, stdout);
 	}
 	term_clear_line_end();
-	if (info->field != FIELD_BACKUP)
-		jstr_io_putchar('\n');
 }
 
 static confirm_key_ty
@@ -1050,19 +1048,12 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 
 			/* Render control fields at the bottom */
-			if (!is_valid || total_matches == 0) {
-				if (vim_is_insert_mode()) {
-					jstr_io_fwrite("--- Controls [INSERT] ---", 1, S_LEN("--- Controls [INSERT] ---"), stdout);
-				} else {
-					jstr_io_fwrite("--- Controls [NORMAL] ---", 1, S_LEN("--- Controls [NORMAL] ---"), stdout);
-				}
-			} else {
-				if (vim_is_insert_mode()) {
-					jstr_io_fwrite("\n--- Controls [INSERT] ---", 1, S_LEN("\n--- Controls [INSERT] ---"), stdout);
-				} else {
-					jstr_io_fwrite("\n--- Controls [NORMAL] ---", 1, S_LEN("\n--- Controls [NORMAL] ---"), stdout);
-				}
-			}
+			if (is_valid && total_matches)
+				jstr_io_putchar('\n');
+			if (vim_is_insert_mode())
+				jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
+			else
+				jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
 			term_clear_line_end();
 			jstr_io_putchar('\n');
 
@@ -1078,6 +1069,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			for (size_t f = 0; f < FIELD_COUNT; ++f) {
 				const jstr_ty *buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, f);
 				confirm_render_field(&field_info_table[f], buf, f == active_field);
+				if (f != FIELD_COUNT - 1)
+					jstr_io_putchar('\n');
 			}
 
 			/* Clear from the current cursor position to the bottom of the screen */

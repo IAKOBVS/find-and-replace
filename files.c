@@ -67,16 +67,17 @@ JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 }
 
 /* ftw matcher: return 1 to skip a file. --include only admits files whose
- * basename matches; --exclude skips files whose basename matches. */
+ * basename matches its (compiled) regex; --exclude skips files whose basename
+ * matches. The regexes live in the global state, compiled during flag parsing
+ * or the confirm TUI, so the args pointer is unused. */
 JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 {
-	matcher_args_ty *a = (matcher_args_ty *)args;
-	if (a->include_glob)
-		if (fnmatch(a->include_glob, fname, 0))
+	if (G.have_include)
+		if (jstr_re_match_len(&G.include_re, fname, fname_len, 0) != JSTR_RE_RET_NOERROR)
 			return 1;
-	if (a->exclude_glob)
-		if (!fnmatch(a->exclude_glob, fname, 0))
+	if (G.have_exclude)
+		if (jstr_re_match_len(&G.exclude_re, fname, fname_len, 0) == JSTR_RE_RET_NOERROR)
 			return 1;
 	return 0;
-	(void)fname_len;
+	(void)args;
 }

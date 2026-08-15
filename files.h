@@ -20,17 +20,12 @@ typedef struct args_ty {
 	const jstr_twoway_ty *t;
 } args_ty;
 
-/* Glob matcher state shared by --include/--exclude. */
-typedef struct matcher_args_ty {
-	const char *include_glob;
-	const char *exclude_glob;
-} matcher_args_ty;
-
 /* stat() wrapper and backup-name existence check. */
 JSTR_FUNC jstr_ret_ty xstat(const char *R file, struct stat *R buf);
 int file_exists(const char *R fname);
 
-/* ftw traversal callback and --include/--exclude matcher. */
+/* ftw traversal callback and --include/--exclude matcher (reads the compiled
+ * regexes in the global state; the args pointer is ignored). */
 JSTR_IO_FTW_FUNC(callback_file, ftw, args);
 JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args);
 

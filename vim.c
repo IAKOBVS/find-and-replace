@@ -78,7 +78,7 @@ delete_range(jstr_ty *buf, size_t start, size_t end)
 }
 
 int
-vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile)
+vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile, size_t field_count)
 {
 	if (insert_mode) {
 		return 0;
@@ -249,11 +249,11 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		}
 		break;
 	case 'j':
-		*active_field = (*active_field + 1) % 4;
+		*active_field = (*active_field + 1) % field_count;
 		*needs_redraw = 1;
 		break;
 	case 'k':
-		*active_field = (*active_field + 3) % 4;
+		*active_field = (*active_field + field_count - 1) % field_count;
 		*needs_redraw = 1;
 		break;
 	case '0':

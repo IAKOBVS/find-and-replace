@@ -8,6 +8,6 @@
 
 int vim_is_insert_mode(void);
 void vim_set_insert_mode(int mode);
-int vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile);
+int vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile, size_t field_count);
 
 #endif /* VIM_H */

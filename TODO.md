@@ -28,7 +28,7 @@
 - **Test for `-r` on empty directory** — Recursive mode on an empty directory should succeed (no files to process, exit 0).
 - **Test for `-r` on partially failing directories** — Recursive traversal where `process_file` fails on some files (e.g., permission denied) — verify error propagation vs continuation.
 - **Test for dash filename without `--`** — A file literally named `-foo` should be treated as a filename after `--`, and the error/warning behavior without `--` should be tested.
-- **Investigate: does `--include` pattern negation work?** — e.g., `--include '!*.txt'`. The glob matcher may or may not support `!` prefix for exclusion. Document or add support.
+- **Obsolete (regex design)**: `--include`/`--exclude` are now POSIX regexes matched against the basename (not globs), so a `!` negation prefix no longer applies. Negation is achievable with `--exclude` (BRE/ERE); POSIX lacks negative lookahead for a single-pattern "include everything except X".
 
 ## Error handling
 

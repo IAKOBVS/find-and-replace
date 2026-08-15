@@ -84,6 +84,28 @@ t_escape_in_regex() {
 	[ "$out" = 'aTABb' ] && echo PASS > "$td/result" || echo "FAIL: expected [aTABb] got [$out]" > "$td/result"
 }
 
+t_backref_exceeds_nsub_inplace() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	rc=0
+	"$PROG" '(hello)' '\\1\\2' -E -R -i "$td/f" >/dev/null 2>"$td/err" || rc=$?
+	if [ "$rc" -ne 0 ] && grep -q 'Replace backreference \\2 exceeds find capture groups (1)' "$td/err"; then
+		[ "$(cat "$td/f")" = 'hello world' ] && echo PASS > "$td/result" || echo "FAIL: file changed" > "$td/result"
+	else
+		echo "FAIL: rc=$rc err=[$(cat "$td/err" 2>/dev/null)]" > "$td/result"
+	fi
+}
+
+t_backref_within_nsub_inplace() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	rc=0
+	"$PROG" '(hello) (world)' '\\2 \\1' -E -R -i "$td/f" >/dev/null 2>"$td/err" || rc=$?
+	if [ "$rc" -eq 0 ] && [ "$(cat "$td/f")" = 'world hello' ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc f=[$(cat "$td/f" 2>/dev/null)] err=[$(cat "$td/err" 2>/dev/null)]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_regex
 t_extended_regex
@@ -99,5 +121,7 @@ t_Z_with_regex
 t_regex_G_then_g
 t_regex_g_then_G
 t_escape_in_regex
+t_backref_exceeds_nsub_inplace
+t_backref_within_nsub_inplace
 "
 run_suite "regex tests" "$TESTS"

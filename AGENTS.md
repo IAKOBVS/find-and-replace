@@ -2,8 +2,8 @@
 
 Multi-file C CLI tool (common header `common.h` + `main.c`, `files.c`,
 `process.c`, `confirm.c`, ~1100 lines) for fixed-string or regex
-find-and-replace on files, with optional recursion, glob filtering, and
-in-place editing with backups.
+find-and-replace on files, with optional recursion, regex filtering of
+basenames via `--include`/`--exclude`, and in-place editing with backups.
 
 ## Setup & build
 
@@ -58,7 +58,7 @@ TUs are non-static; their prototypes live in the module headers
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (12 suites, 174 tests)
+./compile && tests/run.sh   # all deterministic suites (12 suites, 205 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
@@ -70,9 +70,9 @@ TUs are non-static; their prototypes live in the module headers
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
 | Basic | `tests/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
-| Flags | `tests/flags.sh` | 14 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G) |
-| Regex | `tests/regex.sh` | 14 | BRE/ERE, backreferences, anchors with `-Z`/`-z`, regex in in-place, escape in regex |
-| Files | `tests/files.sh` | 22 | Multi-file, recursive, `--include`/`--exclude`, dash filenames, deep/many-file recursion |
+| Flags | `tests/flags.sh` | 17 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version` |
+| Regex | `tests/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
+| Files | `tests/files.sh` | 27 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion |
 | Errors | `tests/errors.sh` | 15 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive |
 | IO | `tests/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
 | Escape | `tests/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
@@ -80,7 +80,7 @@ TUs are non-static; their prototypes live in the module headers
 | Misc | `tests/misc.sh` | 6 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
 | Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
 | Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
-| Confirm | `tests/confirm.sh` | 19 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no |
+| Confirm | `tests/confirm.sh` | 40 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, interactive TUI (include/exclude/backup/l flag) |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
@@ -122,9 +122,9 @@ Each test runs as a background subshell. After `MAX_JOBS` (32) launches, `wait` 
 
 All 12 deterministic suites run concurrently at the file level via `tests/run.sh`, each with its own internal batch-wait jobserver for test-level parallelism.
 
-### Coverage: 88.8% of executable lines
+### Coverage: 87.3% of executable lines
 
-Coverage measured via `gcov` after running all 174 deterministic tests (17 basic + 14 flags + 14 regex + 22 files + 15 errors + 21 io + 9 escape + 5 empty + 6 misc + 18 edge + 14 complex + 19 confirm).
+Coverage measured via `gcov` after running all 205 deterministic tests (17 basic + 17 flags + 16 regex + 27 files + 15 errors + 21 io + 9 escape + 5 empty + 6 misc + 18 edge + 14 complex + 40 confirm).
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -132,7 +132,7 @@ Coverage measured via `gcov` after running all 174 deterministic tests (17 basic
 - Fixed-string and regex replacement (BRE and ERE)
 - In-place editing with and without backup suffix
 - Backup suffix collision detection
-- `--include` glob filtering during recursion
+- `--include` regex filtering during recursion
 - `--exclude` filtering on CLI files and during recursion
 - Combined `--include` + `--exclude` during recursion
 - Escape sequences: `\b`, `\f`, `\n`, `\r`, `\t`, `\v`, octal
@@ -150,8 +150,9 @@ Coverage measured via `gcov` after running all 174 deterministic tests (17 basic
 - Early return when no matches found (`changed.zu == 0`)
 - Empty files, empty input, empty replace string
 - Long lines and large replacement buffers
+- Interactive TUI (via pty): all 7 fields (FIND/RPLC/FLAGS/FILES/INCLUDE/EXCLUDE/BACKUP), `l` flag, include/exclude regex recompile (incl. clear-to-empty and invalid-regex errors), backup suffix, error preview
 
-**Remaining uncovered** (34 lines, all OS-level or dead-code error paths): disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors — these require fault injection and cannot be exercised in integration tests.
+**Remaining uncovered** (128 lines in the 4 gcov files, mostly OS-level or dead-code paths): signal handler + terminal restore, terminal-width fallbacks (`COLUMNS` env, ioctl failure), preview width-clipping branches, giant-size guards, disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors — these require fault injection or special terminal sizes and cannot be exercised in integration tests.
 
 ### Bugs found and fixed (17 total)
 
@@ -207,7 +208,10 @@ Coverage measured via `gcov` after running all 174 deterministic tests (17 basic
 - **`-G`** was historically broken (set n=0). Now fixed — sets n=1 (single replacement).
 - **`--include`/`--exclude`** during recursion was historically broken (matcher never activated). Now fixed.
 - **`--exclude`** on command-line files was historically inverted (matching files were processed, non-matching skipped). Now fixed.
-- **`--include` on CLI files** has no effect — `--include` only applies during directory recursion with `-r`. Use `--exclude` for CLI file filtering.
+- **`--include`/`--exclude` patterns are regexes, not globs**: matched against the
+  basename, BRE by default (`-E`/`-I` cflags in effect at parse time apply).
+  `--include` on CLI files has no effect — it only applies during directory
+  recursion with `-r`. Use `--exclude` for CLI file filtering.
 - **`tests/test.c`** is a stale stub with a broken include path; use `tests/run.sh` (unified runner) or individual category files like `tests/basic.sh` instead.
 - **`--` end-of-flags**: `find-and-replace foo bar -- file.txt` treats `file.txt` as a filename even if it starts with `-`. This is now fixed — both flag parsing and file parsing loops handle `--`.
 
@@ -368,9 +372,12 @@ lines are emitted, asserted by negative greps in multiline_regex.
 
 | Issue | Description | TODO.md ref |
 |---|---|---|
-| `end_of_flags` leaks into file loop | `--` sets `end_of_flags=1` in flag loop, then file loop (re-starting at `i=3`) treats all preceding flags as filenames | Item 35 |
-| Regex empty-buffer short-circuit | `jstr_re_rplcn_backref_len_from_exec` returns early when `start_idx >= *sz`, preventing `^$` on empty files | Item 59 |
 | Binary detection disabled | `#if 0` blocks in `process_file` skip extension/content heuristics | Item 16 |
+
+**Resolved since this table was written:** the `end_of_flags` leak (flag/file
+loops merged into one — `-i -- -filename` works) and the regex empty-buffer
+short-circuit (regex.h now allows `start_idx == 0` when `*sz == 0`, so `^$`
+matches empty files). See Session 8 note.
 
 ## Tests added this session (8 new, total 121)
 
@@ -408,41 +415,41 @@ New file at `lib/jstring/tests/test-replace-edge.c` testing:
 
 ### Priority order for TODO items
 
-**P0 (fixes needed before anything else):**
-1. `end_of_flags` leak (Item 35) — breaks `-i -- -filename`. Fix: the file loop at line 474 should not re-start at `i=3`. Track what the flag loop consumed and skip those indices. Or: merge the two loops. Or: save the consumed index count.
-2. Regex empty-buffer matching (Items 59-62) — `jstr_re_rplcn_backref_len_from_exec` returns early when `start_idx >= *sz`. Fix: either skip the early return for buffer-size 0 when pattern can match empty string, or add a padding newline in the tool's `process_buffer`.
+**P0 — both resolved (see Session 8 note):** the `end_of_flags` leak (loops
+merged; `-i -- -filename` works) and the regex empty-buffer short-circuit
+(`^$` matches empty files since jstring d48000f7/2aaa4c85).
 
 **P1 (correctness):**
-3. Integer overflow in `replace.h:1079` (Item 15)
-4. `compile()` called per-file (Item 21) — hoist outside loop
-5. `init_defaults()` not idempotent (Item 23)
-6. `G.eflags` always zero (Item 50) — add `-e` flag
-7. `-r` traversal stops on first error (Item 36)
+1. Integer overflow in `replace.h:1079` (Item 15)
+2. `init_defaults()` not idempotent (Item 23)
+3. `G.eflags` always zero (Item 50) — add `-e` flag
+4. `-r` traversal stops on first error (Item 36)
+5. `compile()` recompiles on state change (Item 21, fixed — but flags-after-files is now handled by the per-arg compile calls)
 
 **P2 (test coverage):**
-8. `-F` on regex metacharacters (Item 24)
-9. `-I` with `-g` (Item 25)
-10. Escape sequences in REPLACE (Item 26)
-11. `-r` on empty directory (Item 28)
-12. `-r` on partially failing dirs (Item 29)
-13. Dash filename without `--` (Item 30)
-14. `wait -n` jobserver (Item 27)
+6. `-F` on regex metacharacters `*`/`[` (Item 24 — `.` already covered)
+7. `-I` with `-g` (Item 25, done)
+8. Escape sequences in REPLACE (Item 26, done)
+9. `-r` on empty directory (Item 28, done)
+10. `-r` on partially failing dirs (Item 29, done)
+11. Dash filename without `--` (Item 30, done)
+12. `wait -n` jobserver (Item 27)
 
 **P3 (portability):**
-15. Missing `#include <string.h>` / `<unistd.h>` (Item 40)
-16. Static link jstring (Item 41)
-17. rpath in `./compile` (Item 42)
-18. `JSTR_USE_UNLOCKED_IO_READ` portability (Item 44)
-19. Sync `build/include/` with `include/` (Item 45)
+13. Missing `#include <string.h>` / `<unistd.h>` (Item 40)
+14. Static link jstring (Item 41)
+15. rpath in `./compile` (Item 42)
+16. `JSTR_USE_UNLOCKED_IO_READ` portability (Item 44)
+17. Sync `build/include/` with `include/` (Item 45)
 
 **P4 (features):**
-20. `--version` flag (Item 51)
-21. `-` as stdin placeholder (Item 52)
-22. `-q`/`--quiet` (Item 53)
-23. Colored diff output (Item 55)
+18. `--version` flag (Item 51, done — Session 8)
+19. `-` as stdin placeholder (Item 52)
+20. `-q`/`--quiet` (Item 53)
+21. Colored diff output (Item 55)
 
 **P5 (cleanup):**
-24. `#if 0` blocks (Item 16)
+22. `#if 0` blocks (Item 16)
 25. Spelling "occurence" → "occurrence" (Item 17)
 26. Remove stale `tests/test.c` (Item 18)
 27. Document `_j` wrapper convention (Item 20)
@@ -452,7 +459,7 @@ New file at `lib/jstring/tests/test-replace-edge.c` testing:
 
 | File | Location | Purpose |
 |---|---|---|
-| `main.c` | `main` argument loop | `end_of_flags` fix (known limitation, Item 35) |
+| `main.c` | `main` argument loop | `end_of_flags` (done — single merged loop; flags after `--` are filenames by POSIX design) |
 | `process.c` | `process_buffer` | Newline capacity check (`>=` already fixed) |
 | `main.c` | `compile` | `compile()` hoisting per-file (Item 21) |
 | `main.c` | `init_defaults` | `init_defaults()` idempotency (Item 23) |
@@ -533,7 +540,7 @@ linking the tool against it fails on undefined `__asan_*` refs. Re-run
 ### Tests
 
 - `tests/run.sh` now includes `confirm.sh` (was a 12th suite never wired in):
-  **12 suites, 174 deterministic tests**.
+  **12 suites, 205 deterministic tests**.
 - `./test` → 12 suites + 250 fuzz iterations: all green.
 - Coverage: **88.8%** of executable lines (up from 86% — confirm preview is now
   exercised in the default run). Remaining uncovered lines are the same
@@ -548,6 +555,125 @@ linking the tool against it fails on undefined `__asan_*` refs. Re-run
 - `#if 0` `exttype` block moved verbatim into `files.c`.
 - `end_of_flags` leak, regex empty-buffer short-circuit, and binary-detection
   `#if 0` remain known limitations (unchanged).
+
+## Session 7: `--include`/`--exclude` are regexes; confirm TUI gains Include/Exclude/Backup fields
+
+### What changed
+
+`--include`/`--exclude` switched from `fnmatch` globs to POSIX regexes matched
+against the file **basename** (BRE by default; `-E`/`-I` cflags in effect at
+parse time apply). Compiled objects live in `G.include_re`/`G.exclude_re`,
+guarded by `G.have_include`/`G.have_exclude`; raw patterns stay in
+`G.include_pat`/`G.exclude_pat`. `fnmatch.h` and `matcher_args_ty` were
+removed; the ftw `matcher()` reads `G` directly (args unused) and is selected
+as `(G.have_include || G.have_exclude) ? matcher : NULL`.
+
+The `-c` interactive TUI grew from 4 to **7 fields** (FIND, RPLC, FLAGS, FILES,
+INCLUDE, EXCLUDE, BACKUP), each an editable buffer:
+
+- INCLUDE/EXCLUDE recompile `G.include_re`/`G.exclude_re` live; empty field
+  clears the filter; invalid regex shows a red error like a bad FIND pattern.
+- BACKUP sets the in-place backup suffix (`fname + suffix`, same as `-ibak`);
+  empty disables backups (`MODE_PRINT_FILE`).
+- FLAGS gains `l` (prints each changed filename to stdout,
+  `MODE_PRINT_CHANGES`).
+- Preview + second pass use the same filter: Files substring + Include/Exclude
+  basename regexes (`file_filter_pass` in `main.c`,
+  `interactive_file_pass` in `confirm.c` — both compute the basename via
+  `jstr_memrchr`, matching the CLI exclude path).
+- `max_preview_lines` is `rows - (FIELD_COUNT + 4)` instead of `rows - 9`.
+- `vim_handle_key` now takes `field_count` (was hardcoded `% 4`/`% 3`).
+
+`field_ty` enum lives in `confirm.h` (`FIELD_COUNT` must track the buffer order
+passed to `confirm_interactive_loop`); helpers `field_buf`/`field_affects_recompile`
+keep the loop free of per-field branches.
+
+### Tests
+
+- 5 new regex include/exclude tests in `tests/files.sh`:
+  `t_include_regex_suffix` (`\.txt$`), `t_exclude_regex_prefix` (`^i`),
+  `t_include_regex_extended` (`-E --include '\.(txt|c)$'`), `t_exclude_regex_cli_files`,
+  `t_include_invalid_regex` (invalid pattern → non-zero exit).
+- Existing glob tests converted to regex equivalents (e.g. `'*.txt'` →
+  `'\.txt$'`, `'i*'` → `'^i'`). `t_include_cli_file_noop` switched to a valid
+  regex (`'*.txt'` is now an invalid regex, leading `*`).
+- 5 new interactive tests in `tests/confirm.sh`:
+  `t_confirm_interactive_include_exclude` (include `\.txt$` + exclude `^b`
+  narrow the edit), `t_confirm_interactive_backup` (backup suffix `bak` →
+  `fbak`), `t_confirm_interactive_l_flag` (`l` prints the changed path),
+  `t_confirm_interactive_clear_filters` (Ctrl-U clears a set Include/Exclude
+  filter back to empty), `t_confirm_interactive_invalid_exclude` (invalid
+  exclude regex shows `Invalid Exclude regex` error), and
+  `t_confirm_interactive_flags_ei` (`E`/`I` flag cases in `parse_interactive_flags`).
+- `t_confirm_interactive_error_preview` tab counts updated for 7 fields
+  (FLAGS→FIND is 5 tabs now, not 2).
+- Full suite: **12 suites, 205 deterministic tests** (files 22→27, confirm
+  19→40; flags 14→17, regex 14→16; run.sh shows all 12 green).
+- `./coverage` EXIT trap removed `$DIR/$PROG`, deleting the freshly rebuilt
+  production binary every run — trap now only removes the temp dir.
+
+### Known subtleties (design)
+
+`--include`/`--exclude` are compiled with the cflags in effect when the flag is
+parsed, so `-E --include X` gives an ERE include, while `--include X -E` gives
+a BRE include with an ERE find. Same last-wins rule as the other flags.
+
+TUI filter clearing is bounded by the scan-time cache: files excluded by CLI
+`--include`/`--exclude` during the `-c` dry-run never enter `G.files`, so
+clearing a filter in the interactive editor can only widen the edit set to
+files already cached (same as the Files-substring filter). Files excluded at
+scan time stay excluded.
+
+## Session 8: backref-over-nsub guardrail verified; flags-between-files segfault fixed; `--version`
+
+### Backreference guardrail
+
+`compile()` (main.c) and `interactive_compile()` (confirm.c) already validated
+that every `\1`-`\9` in the replace string is within `re_nsub` of the compiled
+find pattern — the CLI path prints an error and exits non-zero (backrefs in the
+replace must be double-escaped: `'\\2 \\1'`, because the unescaper turns `\1`
+into octal byte 0x01). Confirmed working and added standalone coverage in
+`tests/regex.sh` (`t_backref_exceeds_nsub_inplace`, `t_backref_within_nsub_inplace`);
+the interactive/non-interactive `-c` paths were already tested in
+`tests/confirm.sh`. The library's backref parser is single-digit only and `nmatch`
+is clipped to `rm[10]`, so the tool's `\1`-`\9` scan matches the library exactly.
+
+### Bug 23: segfault when flags flip between files
+
+`file1 -R file2` (regex flag after a file) segfaulted (rc=139): `compile()` was
+guarded only by `MODE_COMPILED`, so once the first file compiled the Two-Way
+matcher, the `-R` parsed later set `MODE_USE_REGEX` but `compile()` was a no-op —
+`process_file` then ran `jstr_re_rplcn_backref_len_exec_j` on a never-compiled
+`G.regex`. Similarly `-R file1 -F file2` used a stale compiled regex for file2.
+
+Fix: `compile()` now recompiles whenever the matcher-relevant state changes.
+Added `G.compiled_regex`/`G.compiled_cflags` to `global_ty` (common.h): the
+function stores the mode/cflags it compiled under and re-runs the compile step
+(freeing a stale `G.regex` first) if `MODE_USE_REGEX` or `cflags` differ.
+`interactive_compile()` (confirm.c) updates the same fields. `n` (`-g`/`-G`)
+does not affect compilation, so it is intentionally not part of the snapshot.
+
+Tests: `t_flag_between_files_regex` and `t_flag_between_files_fixed` in
+`tests/flags.sh` (TDD: both failed before the fix — the first with rc=139).
+
+### `--version`
+
+`-v`/`--version` prints `find-and-replace 0.1.0` and exits 0. Handled in the
+single-arg preamble (alongside `-h`, since `--version` as argv[1] is otherwise
+consumed as FIND) and in the flag loop for `prog foo bar --version`. Documented
+in the usage string; `t_version` in `tests/flags.sh`.
+
+### Cleanups
+
+- Usage string "occurence" → "occurrence" (TODO item 17).
+- `tests/test.c` no longer exists (TODO item 18 was already done).
+- Both historical **P0** items are already resolved in the current code:
+  the `end_of_flags` leak (flag/file loops were merged into one loop, so
+  `-i -- -filename` works) and the regex empty-buffer short-circuit
+  (`jstr_re_rplcn_backref_len_from_exec` at regex.h now allows `start_idx == 0`
+  when `*sz == 0`, so `^$` matches empty files — from jstring commits d48000f7/
+  2aaa4c85, synced to `build/include/jstr/regex.h`). Flags after `--` being
+  treated as filenames is correct POSIX behavior, not a bug.
 
 ## Test-Driven Development (TDD) Guidelines
 

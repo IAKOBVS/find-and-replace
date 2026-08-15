@@ -1,6 +1,6 @@
 ## find-and-replace
 
-It is a truth universally acknowledged, that substituting fixed strings with sed, which only offers regex substitution, is a massive pain. There are also some cases in which one would want to replace strings that spread across multiple lines, hence the creation of this tool, which, unlike sed, defaults to, not regular expressions, but fixed strings, though still supporting the former when a certain flag is enabled, and does substitution, not line by line as does sed, but on the whole file, each file being interpreted as a single string. The tool also supports recursing on the provided directories, with the ability to include and exclude certain files with glob matching.
+It is a truth universally acknowledged, that substituting fixed strings with sed, which only offers regex substitution, is a massive pain. There are also some cases in which one would want to replace strings that spread across multiple lines, hence the creation of this tool, which, unlike sed, defaults to, not regular expressions, but fixed strings, though still supporting the former when a certain flag is enabled, and does substitution, not line by line as does sed, but on the whole file, each file being interpreted as a single string. The tool also supports recursing on the provided directories, with the ability to include and exclude certain files by matching their basenames against regexes.
 
 ## Installation:
 
@@ -18,7 +18,7 @@ https://github.com/IAKOBVS/jstring: for the string replacement and filesystem fu
 find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...
 Options:
   -G (default)
-    Replace first occurence of FIND with REPLACE.
+    Replace first occurrence of FIND with REPLACE.
   -g
     Replace all occurrences of FIND with REPLACE, negates -G flag.
   -i[SUFFIX]
@@ -28,14 +28,18 @@ Options:
     Confirm mode. Dry-run scans the files and prints each removed line
     prefixed with file:line:- in red and each replacement line prefixed
     with file:line:+ in green. Prompts for confirmation ('y') before
-    modifying files in-place. Requires -i and at least one file.
+    modifying files in-place. Requires -i and at least one file. When
+    run on a terminal, an interactive editor lets you tweak FIND,
+    REPLACE, flags, the file filter, --include/--exclude regexes and the
+    backup suffix before confirming.
   -r
     Recurse on the directories in FILES.
-  --include GLOB
-    File glob to match when -r is used. Glob is a wildcard.
-  --exclude GLOB
-    The reverse of --include. Skip files that match glob.
-    This applies to the passed command line files.
+  --include REGEX
+    Only process files whose basename matches REGEX when -r is used.
+    The pattern is a POSIX regex (BRE by default; -E/-I apply).
+  --exclude REGEX
+    The reverse of --include. Skip files whose basename matches REGEX.
+    This applies to the passed command line files as well.
   -F (default)
     Treat FIND as a fixed-string.
   -R
@@ -53,6 +57,8 @@ Options:
     Anchors only match the start or end of the string not newlines, negates -Z flag.
     You can still use newlines in the FIND string, different from sed.
     REG_NEWLINE is not passed as the cflag to regexec.
+  -v, --version
+    Print version information and exit.
 
 FIND and REPLACE shall be placed in that exact order.
 

@@ -82,6 +82,93 @@ t_empty_stdin_inplace_msg() {
 	[ "$(echo "$msg" | grep -c 'backup')" -ge 1 ] && echo PASS > "$td/result" || echo "FAIL: expected error about backup, got [$msg]" > "$td/result"
 }
 
+t_readonly_file_direct() {
+	td=$1; printf 'alpha\n' > "$td/f"; orig=$(cat "$td/f")
+	chmod 000 "$td/f"
+	rc=0; msg=$("$PROG" alpha ALPHA -i "$td/f" 2>&1) || rc=$?
+	chmod 644 "$td/f"
+	now=$(cat "$td/f")
+	[ "$rc" -ne 0 ] && [ "$now" = "$orig" ] && printf '%s\n' "$msg" | grep -Fq "$td/f" && echo PASS > "$td/result" || echo "FAIL: rc=$rc now=[$now] msg=[$msg]" > "$td/result"
+}
+
+t_readonly_file_recursive() {
+	td=$1; mkdir -p "$td/d"; printf 'aa\n' > "$td/d/readable"; printf 'bb\n' > "$td/d/unreadable"; chmod 000 "$td/d/unreadable"
+	rc=0; "$PROG" a A -i -r "$td/d" > /dev/null 2>&1 || rc=$?
+	chmod 644 "$td/d/unreadable"
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: recursive traversal over unreadable file should error (rc=$rc)" > "$td/result"
+}
+
+t_readonly_dir_plain_i() {
+	td=$1; mkdir -p "$td/rd"; printf 'qq\n' > "$td/rd/f"
+	chmod 555 "$td/rd"
+	rc=0; msg=$("$PROG" q Q -i "$td/rd/f" 2>&1) || rc=$?
+	chmod 755 "$td/rd"
+	now=$(cat "$td/rd/f")
+	[ "$rc" -ne 0 ] && [ "$now" = 'qq' ] && printf '%s\n' "$msg" | grep -q 'temporarily write' && echo PASS > "$td/result" || echo "FAIL: rc=$rc now=[$now] msg=[$msg]" > "$td/result"
+}
+
+t_readonly_dir_backup() {
+	td=$1; mkdir -p "$td/rd"; printf 'qq\n' > "$td/rd/f"
+	chmod 555 "$td/rd"
+	rc=0; msg=$("$PROG" q Q -i.bak "$td/rd/f" 2>&1) || rc=$?
+	chmod 755 "$td/rd"
+	now=$(cat "$td/rd/f")
+	[ "$rc" -ne 0 ] && [ "$now" = 'qq' ] && printf '%s\n' "$msg" | grep -q 'error processing' && echo PASS > "$td/result" || echo "FAIL: rc=$rc now=[$now] msg=[$msg]" > "$td/result"
+}
+
+t_temp_write_failure_enospc() {
+	td=$1
+	python3 - "$PROG" "$td" <<'PYEOF'
+import os, signal, resource, sys
+prog, td = sys.argv[1], sys.argv[2]
+with open(td + "/f", "w") as f:
+    f.write("x" * 2000 + "\n")
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (512, 512))
+errlog = os.open(td + "/errlog", os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+os.dup2(errlog, 2)
+os.execv(prog, [prog, "x", "y", "-i", td + "/f"])
+PYEOF
+	rc=$?
+	[ "$rc" -ne 0 ] && grep -q 'temp file' "$td/errlog" && echo PASS > "$td/result" || echo "FAIL: rc=$rc errlog=[$(cat "$td/errlog" 2>/dev/null)]" > "$td/result"
+}
+
+t_closed_stdout_pipe() {
+	td=$1
+	python3 - "$PROG" "$td" 2>/dev/null <<'PYEOF'
+import os, signal, sys
+prog, td = sys.argv[1], sys.argv[2]
+with open(td + "/in", "w") as f:
+    f.write("x" * 100000 + "\n")
+signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+fin = os.open(td + "/in", os.O_RDONLY)
+os.dup2(fin, 0)
+r, w = os.pipe()
+os.close(r)
+os.dup2(w, 1)
+os.close(w)
+os.execv(prog, [prog, "x", "y"])
+PYEOF
+	rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: closed stdout pipe should error (rc=$rc)" > "$td/result"
+}
+
+t_long_relative_path_mkstemp() {
+	td=$1; mkdir -p "$td/a"; printf 'zzz\n' > "$td/f"
+	P="$td/a/../"
+	while [ ${#P} -lt 4088 ]; do P="$P""a/../"; done
+	P="$P""f"
+	rc=0; msg=$("$PROG" zzz ZZZ -i "$P" 2>&1) || rc=$?
+	[ "$rc" -ne 0 ] && printf '%s\n' "$msg" | grep -q 'too large' && echo PASS > "$td/result" || echo "FAIL: rc=$rc pathlen=${#P} msg=[$(printf '%s' "$msg" | head -c 120)]" > "$td/result"
+}
+
+t_closed_stderr() {
+	td=$1; printf 'foo\n' > "$td/f"
+	rc=0; "$PROG" foo bar -i "$td/f" 2>&- || rc=$?
+	now=$(cat "$td/f")
+	[ "$rc" -ne 0 ] && [ "$now" = 'bar' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc now=[$now]" > "$td/result"
+}
+
 TESTS="
 t_stdin_inplace_err
 t_stdin_recursive_err
@@ -98,5 +185,13 @@ t_invalid_regex
 t_long_backup_suffix
 t_long_backup_suffix_collision
 t_empty_stdin_inplace_msg
+t_readonly_file_direct
+t_readonly_file_recursive
+t_readonly_dir_plain_i
+t_readonly_dir_backup
+t_temp_write_failure_enospc
+t_closed_stdout_pipe
+t_long_relative_path_mkstemp
+t_closed_stderr
 "
 run_suite "error path tests" "$TESTS"

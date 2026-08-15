@@ -19,7 +19,7 @@ t_recursive() {
 t_include() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'aaa\n' > "$td/sub/c.c"
-	"$PROG" aaa a_replaced -i -r --include '*.txt' "$td/sub" 2>/dev/null
+	"$PROG" aaa a_replaced -i -r --include '\.txt$' "$td/sub" 2>/dev/null
 	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.txt"); tc=$(cat "$td/sub/c.c")
 	[ "$ta" = 'a_replaced' ] && [ "$tb" = 'bbb' ] && [ "$tc" = 'aaa' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
 }
@@ -27,7 +27,7 @@ t_include() {
 t_exclude() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'keep\n' > "$td/sub/k.txt"; printf 'ignore\n' > "$td/sub/i.txt"
-	"$PROG" keep kept -i --exclude 'i*' "$td/sub/k.txt" "$td/sub/i.txt" 2>/dev/null
+	"$PROG" keep kept -i --exclude '^i' "$td/sub/k.txt" "$td/sub/i.txt" 2>/dev/null
 	tk=$(cat "$td/sub/k.txt"); ti=$(cat "$td/sub/i.txt")
 	[ "$tk" = 'kept' ] && [ "$ti" = 'ignore' ] && echo PASS > "$td/result" || echo "FAIL: keep [$tk] ignore [$ti]" > "$td/result"
 }
@@ -35,7 +35,7 @@ t_exclude() {
 t_recursive_exclude() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'keep\n' > "$td/sub/k.txt"; printf 'skip\n' > "$td/sub/skip.me"
-	"$PROG" keep kept -i -r --exclude '*.me' "$td/sub" 2>/dev/null
+	"$PROG" keep kept -i -r --exclude '\.me$' "$td/sub" 2>/dev/null
 	tk=$(cat "$td/sub/k.txt"); ts=$(cat "$td/sub/skip.me")
 	[ "$tk" = 'kept' ] && [ "$ts" = 'skip' ] && echo PASS > "$td/result" || echo "FAIL: keep [$tk] skip [$ts]" > "$td/result"
 }
@@ -43,7 +43,7 @@ t_recursive_exclude() {
 t_include_exclude_combined() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'ccc\n' > "$td/sub/c.c"
-	"$PROG" aaa REPLACED -i -r --include '*.txt' --exclude 'b*' "$td/sub" 2>/dev/null
+	"$PROG" aaa REPLACED -i -r --include '\.txt$' --exclude '^b' "$td/sub" 2>/dev/null
 	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.txt"); tc=$(cat "$td/sub/c.c")
 	[ "$ta" = 'REPLACED' ] && [ "$tb" = 'bbb' ] && [ "$tc" = 'ccc' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
 }
@@ -51,7 +51,7 @@ t_include_exclude_combined() {
 t_include_and_exclude_same_glob() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'aaa\n' > "$td/sub/a.txt"; printf 'aaa\n' > "$td/sub/b.txt"
-	"$PROG" aaa REPLACED -i -r --include '*.txt' --exclude '*.txt' "$td/sub" 2>/dev/null
+	"$PROG" aaa REPLACED -i -r --include '\.txt$' --exclude '\.txt$' "$td/sub" 2>/dev/null
 	ca=$(cat "$td/sub/a.txt"); cb=$(cat "$td/sub/b.txt")
 	[ "$ca" = 'aaa' ] && [ "$cb" = 'aaa' ] && echo PASS > "$td/result" || echo "FAIL: a [$ca] b [$cb]" > "$td/result"
 }
@@ -59,14 +59,14 @@ t_include_and_exclude_same_glob() {
 t_include_glob_no_match() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.c"
-	"$PROG" aaa replaced -i -r --include '*.xyz' "$td/sub" 2>/dev/null
+	"$PROG" aaa replaced -i -r --include '\.xyz$' "$td/sub" 2>/dev/null
 	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.c")
 	[ "$ta" = 'aaa' ] && [ "$tb" = 'bbb' ] && echo PASS > "$td/result" || echo "FAIL: a.txt [$ta] b.c [$tb]" > "$td/result"
 }
 
 t_exclude_on_cli_files() {
 	td=$1; printf 'aaa\n' > "$td/a.txt"; printf 'aaa\n' > "$td/b.c"
-	"$PROG" aaa REPLACED -i --exclude '*.txt' "$td/a.txt" "$td/b.c" 2>/dev/null
+	"$PROG" aaa REPLACED -i --exclude '\.txt$' "$td/a.txt" "$td/b.c" 2>/dev/null
 	ta=$(cat "$td/a.txt"); tb=$(cat "$td/b.c")
 	[ "$ta" = 'aaa' ] && [ "$tb" = 'REPLACED' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb]" > "$td/result"
 }
@@ -137,7 +137,7 @@ t_double_dash_include_recursive() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'match\n' > "$td/sub/a.txt"
 	printf 'match\n' > "$td/sub/b.c"
-	"$PROG" match replaced -i -r --include '*.txt' "$td/sub" 2>/dev/null
+	"$PROG" match replaced -i -r --include '\.txt$' "$td/sub" 2>/dev/null
 	txt=$(cat "$td/sub/a.txt" 2>/dev/null)
 	c=$(cat "$td/sub/b.c" 2>/dev/null)
 	[ "$txt" = 'replaced' ] && [ "$c" = 'match' ] && echo PASS > "$td/result" || echo "FAIL: txt [$txt] c [$c]" > "$td/result"
@@ -147,7 +147,7 @@ t_recursive_include_exclude_dash_fname() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'findme\n' > "$td/sub/-f.txt"
 	printf 'findme\n' > "$td/sub/g.txt"
-	"$PROG" findme found -i -r --include '*.txt' --exclude '-*' "$td/sub" 2>/dev/null
+	"$PROG" findme found -i -r --include '\.txt$' --exclude '^-' "$td/sub" 2>/dev/null
 	f=$(cat "$td/sub/-f.txt" 2>/dev/null)
 	g=$(cat "$td/sub/g.txt" 2>/dev/null)
 	[ "$f" = 'findme' ] && [ "$g" = 'found' ] && echo PASS > "$td/result" || echo "FAIL: -f [$f] g [$g]" > "$td/result"
@@ -155,7 +155,7 @@ t_recursive_include_exclude_dash_fname() {
 
 t_include_cli_file_noop() {
 	td=$1; printf 'aaa\n' > "$td/f.txt"
-	"$PROG" aaa replaced -i --include '*.txt' "$td/f.txt" 2>/dev/null
+	"$PROG" aaa replaced -i --include '\.txt$' "$td/f.txt" 2>/dev/null
 	[ "$(cat "$td/f.txt")" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: --include on CLI file should be no-op, expected [replaced] got [$(cat "$td/f.txt")]" > "$td/result"
 }
 
@@ -170,6 +170,44 @@ t_dash_filename_no_double_dash() {
 	td=$1; printf 'match\n' > "$td/-f"
 	out=$("$PROG" match replaced < "$td/-f" 2>/dev/null)
 	[ "$out" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$out]" > "$td/result"
+}
+
+t_include_regex_suffix() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'aaa\n' > "$td/sub/c.c"
+	"$PROG" aaa a_replaced -i -r --include '\.txt$' "$td/sub" 2>/dev/null
+	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.txt"); tc=$(cat "$td/sub/c.c")
+	[ "$ta" = 'a_replaced' ] && [ "$tb" = 'bbb' ] && [ "$tc" = 'aaa' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
+}
+
+t_exclude_regex_prefix() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'keep\n' > "$td/sub/k.txt"; printf 'keep\n' > "$td/sub/i.txt"
+	"$PROG" keep kept -i -r --exclude '^i' "$td/sub" 2>/dev/null
+	tk=$(cat "$td/sub/k.txt"); ti=$(cat "$td/sub/i.txt")
+	[ "$tk" = 'kept' ] && [ "$ti" = 'keep' ] && echo PASS > "$td/result" || echo "FAIL: keep [$tk] ignore [$ti]" > "$td/result"
+}
+
+t_include_regex_extended() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'aaa\n' > "$td/sub/a.txt"; printf 'aaa\n' > "$td/sub/b.txt"; printf 'aaa\n' > "$td/sub/c.c"
+	"$PROG" aaa REPLACED -i -r -E --include '\.(txt|c)$' "$td/sub" 2>/dev/null
+	ta=$(cat "$td/sub/a.txt"); tb=$(cat "$td/sub/b.txt"); tc=$(cat "$td/sub/c.c")
+	[ "$ta" = 'REPLACED' ] && [ "$tb" = 'REPLACED' ] && [ "$tc" = 'REPLACED' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb] c [$tc]" > "$td/result"
+}
+
+t_exclude_regex_cli_files() {
+	td=$1; printf 'aaa\n' > "$td/a.txt"; printf 'aaa\n' > "$td/b.c"
+	"$PROG" aaa REPLACED -i --exclude '\.txt$' "$td/a.txt" "$td/b.c" 2>/dev/null
+	ta=$(cat "$td/a.txt"); tb=$(cat "$td/b.c")
+	[ "$ta" = 'aaa' ] && [ "$tb" = 'REPLACED' ] && echo PASS > "$td/result" || echo "FAIL: a [$ta] b [$tb]" > "$td/result"
+}
+
+t_include_invalid_regex() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'aaa\n' > "$td/sub/a.txt"
+	rc=0; "$PROG" aaa bbb -i -r --include '[' "$td/sub" >/dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: invalid --include regex should error (rc=$rc)" > "$td/result"
 }
 
 TESTS="
@@ -195,5 +233,10 @@ t_recursive_include_exclude_dash_fname
 t_include_cli_file_noop
 t_recursive_to_stdout
 t_dash_filename_no_double_dash
+t_include_regex_suffix
+t_exclude_regex_prefix
+t_include_regex_extended
+t_exclude_regex_cli_files
+t_include_invalid_regex
 "
 run_suite "file operation tests" "$TESTS"

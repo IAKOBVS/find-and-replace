@@ -17,8 +17,6 @@
 #define S_LEN(s)     (sizeof(s) - 1)
 #define S_LITERAL(s) (s), (sizeof(s) - 1)
 
-#include <fnmatch.h>
-
 /* Die-with-message helper used in every translation unit. */
 #define DIE_IF_PRINT(x, fmt, ...)                      \
 	do {                                           \
@@ -80,12 +78,20 @@ typedef struct global_ty {
 	int mode;
 	int eflags;
 	int cflags;
+	/* State under which the find matcher was last compiled, so compile()
+	 * recompiles when flags flip between files mid-command-line. */
+	int compiled_regex;
+	int compiled_cflags;
 	/* Set by the scan pass when at least one match exists; decides whether the
 	 * confirmation prompt is shown. */
 	unsigned int matches_found;
 	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
 	 * instead of modifying files. Reset before the second (real) pass. */
 	int confirm_pass;
+	/* 1 when --include/--exclude were given (or edited in the confirm TUI);
+	 * guards use of the compiled include_re/exclude_re. */
+	int have_include;
+	int have_exclude;
 	size_t n;
 	size_t bak_suffix_len;
 	/* Frequently-touched growable state, grouped so the match list and the
@@ -101,18 +107,25 @@ typedef struct global_ty {
 	jstr_ty interactive_rplc_buf;
 	jstr_ty interactive_flags_buf;
 	jstr_ty interactive_files_buf;
+	jstr_ty interactive_include_buf;
+	jstr_ty interactive_exclude_buf;
+	jstr_ty interactive_backup_buf;
 	/* Dynamically calculated file cache limit */
 	size_t file_cache_max;
 	/* Dynamic tracking of preview line usage in interactive mode */
 	size_t preview_lines_printed;
 	size_t max_preview_lines;
 	/* Cold configuration, read only during startup and traversal. */
-	const char *include_glob;
+	const char *include_pat;
+	const char *exclude_pat;
 	const char *bak_suffix;
 	/* Growable list of files to edit once the user confirms. */
 	files_ty files;
-	/* Compiled regex state; largest member, touched only in regex mode. */
+	/* Compiled regexes for the find pattern and the --include/--exclude
+	 * basename filters; largest members, touched only in regex mode. */
 	jstr_re_ty regex;
+	jstr_re_ty include_re;
+	jstr_re_ty exclude_re;
 } global_ty;
 
 extern global_ty G;

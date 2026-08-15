@@ -581,6 +581,8 @@ interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const 
 			regerror(ret, &G.regex.reg, err_buf, err_size);
 			return JSTR_RET_ERR;
 		}
+		G.compiled_regex = 1;
+		G.compiled_cflags = G.cflags;
 		G.mode |= MODE_COMPILED;
 
 		/* Validate backreferences */
@@ -603,13 +605,68 @@ interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const 
 	return JSTR_RET_SUCC;
 }
 
-typedef enum {
-	FIELD_FIND,
-	FIELD_RPLC,
-	FIELD_FLAGS,
-	FIELD_FILES,
-	FIELD_COUNT
-} field_ty;
+/* Compile the interactive Include/Exclude fields into the global regexes.
+ * An empty pattern clears the filter. On invalid regex, report it and return
+ * JSTR_RET_ERR so the caller treats the whole session as invalid. */
+static jstr_ret_ty
+interactive_compile_include_exclude(const char *include, size_t include_len,
+                                    const char *exclude, size_t exclude_len,
+                                    char *err_buf, size_t err_size)
+{
+	if (include_len == 0) {
+		if (G.have_include) {
+			jstr_re_free(&G.include_re);
+			G.have_include = 0;
+		}
+	} else {
+		char tmp[128];
+		const int ret = jstr_re_comp(&G.include_re, include, G.cflags);
+		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+			regerror(ret, &G.include_re.reg, tmp, sizeof(tmp));
+			snprintf(err_buf, err_size, "Invalid Include regex: %s", tmp);
+			return JSTR_RET_ERR;
+		}
+		G.have_include = 1;
+	}
+	if (exclude_len == 0) {
+		if (G.have_exclude) {
+			jstr_re_free(&G.exclude_re);
+			G.have_exclude = 0;
+		}
+	} else {
+		char tmp[128];
+		const int ret = jstr_re_comp(&G.exclude_re, exclude, G.cflags);
+		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+			regerror(ret, &G.exclude_re.reg, tmp, sizeof(tmp));
+			snprintf(err_buf, err_size, "Invalid Exclude regex: %s", tmp);
+			return JSTR_RET_ERR;
+		}
+		G.have_exclude = 1;
+	}
+	return JSTR_RET_SUCC;
+}
+
+/* Return 1 if FILE passes the interactive filters: the Files substring
+ * filter and the Include/Exclude basename regexes (in the global state). */
+static int
+interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
+{
+	if (files_buf->size > 0 && files_buf->data) {
+		if (jstr_strstr_len(file->fname, file->fname_len, files_buf->data, files_buf->size) == NULL)
+			return 0;
+	}
+	/* Include/Exclude regexes match against the basename. */
+	const char *base = jstr_memrchr(file->fname, '/', file->fname_len);
+	base = (base != NULL && *(base + 1)) ? base + 1 : file->fname;
+	const size_t base_len = (size_t)(file->fname + file->fname_len - base);
+	if (G.have_include)
+		if (jstr_re_match_len(&G.include_re, base, base_len, 0) != JSTR_RE_RET_NOERROR)
+			return 0;
+	if (G.have_exclude)
+		if (jstr_re_match_len(&G.exclude_re, base, base_len, 0) == JSTR_RE_RET_NOERROR)
+			return 0;
+	return 1;
+}
 
 static void
 parse_interactive_flags(const char *flags, size_t len)
@@ -649,6 +706,9 @@ parse_interactive_flags(const char *flags, size_t len)
 		case 'z':
 			G.cflags &= ~JSTR_RE_CF_NEWLINE;
 			break;
+		case 'l':
+			G.mode |= MODE_PRINT_CHANGES;
+			break;
 		default:
 			break;
 		}
@@ -678,12 +738,41 @@ get_terminal_rows(void)
 	return 24; /* standard default fallback */
 }
 
+/* Return the interactive buffer for a field, or NULL for out-of-range. */
+static jstr_ty *
+field_buf(jstr_ty *R find_buf, jstr_ty *R rplc_buf, jstr_ty *R flags_buf,
+          jstr_ty *R files_buf, jstr_ty *R include_buf, jstr_ty *R exclude_buf,
+          jstr_ty *R backup_buf, size_t field)
+{
+	switch (field) {
+	case FIELD_FIND: return find_buf;
+	case FIELD_RPLC: return rplc_buf;
+	case FIELD_FLAGS: return flags_buf;
+	case FIELD_FILES: return files_buf;
+	case FIELD_INCLUDE: return include_buf;
+	case FIELD_EXCLUDE: return exclude_buf;
+	case FIELD_BACKUP: return backup_buf;
+	default: return NULL;
+	}
+}
+
+/* Fields whose edits require recompiling the find/include/exclude regexes. */
+static int
+field_affects_recompile(size_t field)
+{
+	return field == FIELD_FIND || field == FIELD_FLAGS ||
+	       field == FIELD_INCLUDE || field == FIELD_EXCLUDE;
+}
+
 jstr_ret_ty
 confirm_interactive_loop(jstr_twoway_ty *R t,
                          jstr_ty *R find_buf,
                          jstr_ty *R rplc_buf,
                          jstr_ty *R flags_buf,
-                         jstr_ty *R files_buf)
+                         jstr_ty *R files_buf,
+                         jstr_ty *R include_buf,
+                         jstr_ty *R exclude_buf,
+                         jstr_ty *R backup_buf)
 {
 	setup_terminal();
 	vim_set_insert_mode(1);
@@ -700,6 +789,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	cursors[FIELD_RPLC] = rplc_buf->size;
 	cursors[FIELD_FLAGS] = flags_buf->size;
 	cursors[FIELD_FILES] = files_buf->size;
+	cursors[FIELD_INCLUDE] = include_buf->size;
+	cursors[FIELD_EXCLUDE] = exclude_buf->size;
+	cursors[FIELD_BACKUP] = backup_buf->size;
 
 	last_err_buf[0] = '\0';
 
@@ -721,6 +813,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
 				const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 				comp_ret = interactive_compile(t, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, err_buf, sizeof(err_buf));
+				if (comp_ret == JSTR_RET_SUCC) {
+					comp_ret = interactive_compile_include_exclude(include_buf->data ? include_buf->data : "", include_buf->size, exclude_buf->data ? exclude_buf->data : "", exclude_buf->size, err_buf, sizeof(err_buf));
+				}
 				is_valid = (comp_ret == JSTR_RET_SUCC);
 
 				if (comp_ret != JSTR_RET_SUCC) {
@@ -746,10 +841,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 				preview_lines = 1;
 			} else {
-				/* Calculate max_preview_lines dynamically based on terminal height */
+				/* Calculate max_preview_lines dynamically based on terminal
+				 * height, leaving room for the controls block: header + stats
+				 * + FIELD_COUNT fields + blank line + omitted-line marker. */
 				unsigned short rows = get_terminal_rows();
-				if (rows > 9) {
-					G.max_preview_lines = rows - 9;
+				const size_t control_lines = FIELD_COUNT + 4;
+				if (rows > control_lines) {
+					G.max_preview_lines = rows - control_lines;
 				} else {
 					G.max_preview_lines = 1;
 				}
@@ -759,11 +857,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				G.preview_lines_printed = 0;
 				for (unsigned int k = 0; k < G.files.size; ++k) {
 					file_ty *file = &G.files.data[k];
-					/* File filtering by files_buf using jstr_strstr_len */
-					if (files_buf->size > 0 && files_buf->data) {
-						if (jstr_strstr_len(file->fname, file->fname_len, files_buf->data, files_buf->size) == NULL)
-							continue;
-					}
+					/* File filtering by the Files substring filter and the
+					 * Include/Exclude basename regexes */
+					if (!interactive_file_pass(file, files_buf))
+						continue;
 					size_t file_matches = 0;
 					const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);
@@ -824,6 +921,21 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_io_fwrite(files_buf->data, 1, files_buf->size, stdout);
 			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
 
+			jstr_io_fwrite(active_field == FIELD_INCLUDE ? "* Include: " : "  Include: ", 1, S_LEN("* Include: "), stdout);
+			if (include_buf->size > 0 && include_buf->data)
+				jstr_io_fwrite(include_buf->data, 1, include_buf->size, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
+
+			jstr_io_fwrite(active_field == FIELD_EXCLUDE ? "* Exclude: " : "  Exclude: ", 1, S_LEN("* Exclude: "), stdout);
+			if (exclude_buf->size > 0 && exclude_buf->data)
+				jstr_io_fwrite(exclude_buf->data, 1, exclude_buf->size, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
+
+			jstr_io_fwrite(active_field == FIELD_BACKUP ? "* Backup:  " : "  Backup:  ", 1, S_LEN("* Backup:  "), stdout);
+			if (backup_buf->size > 0 && backup_buf->data)
+				jstr_io_fwrite(backup_buf->data, 1, backup_buf->size, stdout);
+			jstr_io_fwrite("\x1b[K\n", 1, S_LEN("\x1b[K\n"), stdout);
+
 			/* Clear from the current cursor position to the bottom of the screen */
 			jstr_io_fwrite("\x1b[J", 1, S_LEN("\x1b[J"), stdout);
 
@@ -857,15 +969,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 		if (nread <= 0)
 			continue;
 
-		jstr_ty *active_buf = NULL;
-		if (active_field == FIELD_FIND)
-			active_buf = find_buf;
-		else if (active_field == FIELD_RPLC)
-			active_buf = rplc_buf;
-		else if (active_field == FIELD_FLAGS)
-			active_buf = flags_buf;
-		else if (active_field == FIELD_FILES)
-			active_buf = files_buf;
+		jstr_ty *active_buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, active_field);
 
 		if (c == '\r') {
 			/* Accept only if the current pattern compiles successfully */
@@ -932,7 +1036,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 							active_buf->size--;
 							active_buf->data[active_buf->size] = '\0';
 							needs_redraw = 1;
-							if (active_buf == find_buf || active_buf == flags_buf)
+							if (field_affects_recompile(active_field))
 								needs_recompile = 1;
 						}
 					}
@@ -963,7 +1067,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]--;
 				needs_redraw = 1;
-				if (active_buf == find_buf || active_buf == flags_buf)
+				if (field_affects_recompile(active_field))
 					needs_recompile = 1;
 			}
 		} else if (c == 21) {
@@ -972,7 +1076,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_empty_j(active_buf);
 				cursors[active_field] = 0;
 				needs_redraw = 1;
-				if (active_buf == find_buf || active_buf == flags_buf)
+				if (field_affects_recompile(active_field))
 					needs_recompile = 1;
 			}
 		} else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
@@ -989,20 +1093,12 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					active_buf->data[active_buf->size] = '\0';
 					cursors[active_field]++;
 					needs_redraw = 1;
-					if (active_buf == find_buf || active_buf == flags_buf)
+					if (field_affects_recompile(active_field))
 						needs_recompile = 1;
 				}
 			} else {
-				vim_handle_key(c, active_buf, cursors, &active_field, &needs_redraw, &needs_recompile);
-				jstr_ty *new_active_buf = NULL;
-				if (active_field == FIELD_FIND)
-					new_active_buf = find_buf;
-				else if (active_field == FIELD_RPLC)
-					new_active_buf = rplc_buf;
-				else if (active_field == FIELD_FLAGS)
-					new_active_buf = flags_buf;
-				else if (active_field == FIELD_FILES)
-					new_active_buf = files_buf;
+				vim_handle_key(c, active_buf, cursors, &active_field, &needs_redraw, &needs_recompile, FIELD_COUNT);
+				jstr_ty *new_active_buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, active_field);
 
 				if (!vim_is_insert_mode() && new_active_buf && new_active_buf->size > 0 && cursors[active_field] >= new_active_buf->size) {
 					cursors[active_field] = new_active_buf->size - 1;

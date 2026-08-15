@@ -30,7 +30,7 @@ t_overlapping() {
 
 t_end_of_options() {
 	td=$1; printf 'match\n' > "$td/f.txt"; printf 'match\n' > "$td/f.c"
-	"$PROG" match replaced -i --exclude '*.txt' "$td/f.txt" "$td/f.c" 2>/dev/null
+	"$PROG" match replaced -i --exclude '\.txt$' "$td/f.txt" "$td/f.c" 2>/dev/null
 	ct=$(cat "$td/f.txt"); cc=$(cat "$td/f.c")
 	[ "$ct" = 'match' ] && [ "$cc" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: txt [$ct] c [$cc]" > "$td/result"
 }

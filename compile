@@ -4,32 +4,35 @@ PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
 SRCS='main.c files.c process.c confirm.c procfs.c vim.c'
+NP=$(nproc 2>/dev/null || echo 2)
 CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings'
-# CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings -fanalyzer'
 LFLAGS=""
 CC=$(readlink "$(command -v cc)")
 if [ "$COVERAGE" = "1" ]; then
 	CFLAGS="-O0 --coverage"
 	LFLAGS="--coverage"
 fi
-# Compile each translation unit in parallel, then link.
 # Headers and library come from the pinned lib/jstring checkout.
 JSTR_INC="-I $DIR/lib/jstring/build/include"
 JSTR_LIB="-L $DIR/lib/jstring/build/lib"
+export DIR OUTDIR JSTR_INC CFLAGS
+
+# Compile each translation unit in parallel (xargs -P, capped at nproc), then link.
+#shellcheck disable=SC2046
+if ! printf '%s\n' $SRCS | xargs -P "$NP" -n 1 sh -c '
+	compile_one() {
+		src="$1"
+		cc -c "$DIR/$src" -o "$OUTDIR/${src%.c}.o" $JSTR_INC $CFLAGS
+	}
+	compile_one "$1"
+' _; then
+	exit 1
+fi
+
 OBJS=""
-PIDS=""
 for src in $SRCS; do
-	obj="$OUTDIR/${src%.c}.o"
-	OBJS="$OBJS $obj"
-	#shellcheck disable=SC2086
-	cc -c "$DIR/$src" -o "$obj" $JSTR_INC $CFLAGS &
-	PIDS="$PIDS $!"
+	OBJS="$OBJS $OUTDIR/${src%.c}.o"
 done
-rc=0
-for pid in $PIDS; do
-	wait "$pid" || rc=1
-done
-[ "$rc" -eq 0 ] || exit 1
 #shellcheck disable=SC2086
-cc $OBJS -o "$OUTDIR/$PROG" $JSTR_LIB -ljstr $LFLAGS || exit
-echo "cc $DIR/$SRCS -o $OUTDIR/$PROG $JSTR_INC $JSTR_LIB $CFLAGS -ljstr $LFLAGS"
+cc $OBJS -o "$OUTDIR/$PROG" $JSTR_LIB -ljstr $LFLAGS || exit 1
+echo "cc $SRCS -o $OUTDIR/$PROG $JSTR_INC $JSTR_LIB $CFLAGS -ljstr $LFLAGS (parallel xargs -P $NP)"

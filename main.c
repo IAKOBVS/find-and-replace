@@ -92,7 +92,7 @@ static const char *usage =
  * MODE_COMPILED bit alone cannot guard that, since -R/-E/-F may appear
  * anywhere on the command line, even after a file argument. */
 static jstr_ret_ty
-compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len)
+compile(jstr_twoway_ty *R t, const jstr_literal_ty *find, const jstr_literal_ty *rplc)
 {
 	const int want_regex = (G.mode & MODE_USE_REGEX) != 0;
 	if (!(G.mode & MODE_COMPILED) || want_regex != G.compiled_regex || (want_regex && G.cflags != G.compiled_cflags)) {
@@ -102,16 +102,16 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 			G.mode &= ~MODE_COMPILED;
 		}
 		if (want_regex) {
-			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
+			const int ret = jstr_re_comp(&G.regex, find->data, G.cflags);
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
-				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find);
+				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find->data);
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 			/* Validate backreferences */
 			size_t max_backref = 0;
-			for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
-				if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
-					size_t num = rplc[idx+1] - '0';
+			for (size_t idx = 0; idx + 1 < rplc->size; ++idx) {
+				if (rplc->data[idx] == '\\' && rplc->data[idx+1] >= '1' && rplc->data[idx+1] <= '9') {
+					size_t num = rplc->data[idx+1] - '0';
 					if (num > max_backref)
 						max_backref = num;
 					++idx;
@@ -122,7 +122,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 				exit(EXIT_FAILURE);
 			}
 		} else {
-			jstr_memmem_comp(t, find, find_len);
+			jstr_memmem_comp(t, find->data, find->size);
 		}
 		G.compiled_regex = want_regex;
 		G.compiled_cflags = G.cflags;
@@ -222,11 +222,10 @@ main(int argc, char **argv)
 	args_ty a;
 	jstr_twoway_ty t;
 	a.t = &t;
-	a.find = (const char *)FIND;
-	a.rplc = (const char *)RPLC;
-	/* Unescape \n, \t, ... in place; the unescaped length is the diff. */
-	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
-	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+	const jstr_literal_ty find_init = { (const char *)FIND, (unsigned int)JSTR_DIFF(jstr_unescape_p(FIND), FIND) };
+	const jstr_literal_ty rplc_init = { (const char *)RPLC, (unsigned int)JSTR_DIFF(jstr_unescape_p(RPLC), RPLC) };
+	memcpy(&a.find, &find_init, sizeof(a.find));
+	memcpy(&a.rplc, &rplc_init, sizeof(a.rplc));
 	init_defaults();
 	/* -c does two full passes: pass 1 (G.confirm_pass=1) only scans and
 	 * previews while collecting the file list; pass 2 (after 'y') re-reads
@@ -356,12 +355,13 @@ done_single:;
 		G.mode |= MODE_HAVE_FILES;
 		ret = xstat(ARG, &st);
 		DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
-		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
+		DIE_IF(jstr_chk(compile(&t, &a.find, &a.rplc)), "%s", "");
 		if (IS_REG(st.st_mode)) {
 			const size_t fname_len = strlen(ARG);
+			const jstr_literal_ty fn = { ARG, (unsigned int)fname_len };
 			if (!G.have_exclude) {
 process:
-				DIE_IF(jstr_chk(process_file(&t, &G.content_buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
+				DIE_IF(jstr_chk(process_file(&t, &G.content_buf, &fn, &st, &a.find, &a.rplc)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find.data, a.rplc.data);
 			} else {
 				/* --exclude also filters files named on the command line. */
 				const char *fname = jstr_memrchr(ARG, SEP, fname_len);
@@ -398,8 +398,8 @@ process:
 		jstr_empty_j(&G.interactive_backup_buf);
 
 		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
-			DIE_IF(jstr_append_len_j(&G.interactive_find_buf, a.find, a.find_len), "%s", "Out of memory.\n");
-			DIE_IF(jstr_append_len_j(&G.interactive_rplc_buf, a.rplc, a.rplc_len), "%s", "Out of memory.\n");
+			DIE_IF(jstr_append_len_j(&G.interactive_find_buf, a.find.data, a.find.size), "%s", "Out of memory.\n");
+			DIE_IF(jstr_append_len_j(&G.interactive_rplc_buf, a.rplc.data, a.rplc.size), "%s", "Out of memory.\n");
 			if (G.include_pat)
 				DIE_IF(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat)), "%s", "Out of memory.\n");
 			if (G.exclude_pat)
@@ -432,10 +432,10 @@ process:
 
 			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_rplc_buf, &G.interactive_flags_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf, &G.interactive_backup_buf)), "%s", "Interactive loop failed.\n");
 
-			a.find = G.interactive_find_buf.data;
-			a.find_len = G.interactive_find_buf.size;
-			a.rplc = G.interactive_rplc_buf.data;
-			a.rplc_len = G.interactive_rplc_buf.size;
+			const jstr_literal_ty find_updated = { G.interactive_find_buf.data, (unsigned int)G.interactive_find_buf.size };
+			const jstr_literal_ty rplc_updated = { G.interactive_rplc_buf.data, (unsigned int)G.interactive_rplc_buf.size };
+			memcpy(&a.find, &find_updated, sizeof(a.find));
+			memcpy(&a.rplc, &rplc_updated, sizeof(a.rplc));
 
 			/* Backup suffix edited in the TUI: apply it before the second
 			 * pass so process_buffer backs the original up with it. */
@@ -456,7 +456,8 @@ process:
 				if (!file_filter_pass(file, &G.interactive_files_buf))
 					continue;
 				size_t file_matches = 0;
-				confirm_scan_file(&t, &file->content, file->fname, file->fname_len, a.find, a.find_len, a.rplc, a.rplc_len, &file_matches);
+				const jstr_literal_ty fn = { file->fname, (unsigned int)file->fname_len };
+				confirm_scan_file(&t, &file->content, &fn, &a.find, &a.rplc, &file_matches);
 			}
 		}
 
@@ -493,8 +494,9 @@ process:
 					DIE_IF(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size), "%s", "Can't read a file->\n");
 				}
 				st_file.st_mode = file->st_mode;
-				if (jstr_chk(process_buffer(&t, &file->content, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
-					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find, a.rplc);
+				const jstr_literal_ty fn = { file->fname, (unsigned int)file->fname_len };
+				if (jstr_chk(process_buffer(&t, &file->content, &fn, &st_file, &a.find, &a.rplc)))
+					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find.data, a.rplc.data);
 			}
 			jstr_empty_j(&G.interactive_find_buf);
 			jstr_empty_j(&G.interactive_rplc_buf);
@@ -521,8 +523,8 @@ process:
 			if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
 				jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
 			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
-			DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+			DIE_IF(jstr_chk(compile(&t, &a.find, &a.rplc)), "%s", "");
+			DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, NULL, &a.find, &a.rplc)), "%s", "Failed processing stdin.\n");
 		}
 	}
 	cleanup();

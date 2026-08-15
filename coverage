@@ -41,7 +41,8 @@ br_total=0
 br_exec=0
 br_taken=0
 for src in $SRCS; do
-    gc="$TMPDIR/${src%.c}.c.gcov"
+    gc="$TMPDIR/${src}.gcov"
+    [ -f "$gc" ] || gc="$TMPDIR/${src%.c}.c.gcov"
     [ -f "$gc" ] || continue
     le=$(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$gc" || true)
     lm=$(grep -c '^    #####:' "$gc" || true)
@@ -50,32 +51,33 @@ for src in $SRCS; do
     bt=$(awk '/Branches executed:/{print $4}' "$gc")
     bp=$(awk '/Branches executed:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
     tp=$(awk '/Taken at least once:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
-    be=$(awk -v t="$bt" -v p="$bp" 'BEGIN{printf "%d", t*p/100+0.5}')
-    bk=$(awk -v t="$bt" -v p="$tp" 'BEGIN{printf "%d", t*p/100+0.5}')
-    br_total=$((br_total + bt))
+    be=$(awk -v t="${bt:-0}" -v p="${bp:-0}" 'BEGIN{printf "%d", t*p/100+0.5}')
+    bk=$(awk -v t="${bt:-0}" -v p="${tp:-0}" 'BEGIN{printf "%d", t*p/100+0.5}')
+    br_total=$((br_total + ${bt:-0}))
     br_exec=$((br_exec + be))
     br_taken=$((br_taken + bk))
 done
-lpct=$(awk "BEGIN {printf \"%.1f\", 100 * ($line_total - $line_miss) / $line_total}")
-bpct=$(awk "BEGIN {printf \"%.1f\", 100 * $br_exec / $br_total}")
-btpct=$(awk "BEGIN {printf \"%.1f\", 100 * $br_taken / $br_total}")
+lpct=$(awk -v lt="$line_total" -v lm="$line_miss" 'BEGIN {if (lt > 0) printf "%.1f", 100 * (lt - lm) / lt; else print "0.0"}')
+bpct=$(awk -v be="$br_exec" -v bt="$br_total" 'BEGIN {if (bt > 0) printf "%.1f", 100 * be / bt; else print "0.0"}')
+btpct=$(awk -v bk="$br_taken" -v bt="$br_total" 'BEGIN {if (bt > 0) printf "%.1f", 100 * bk / bt; else print "0.0"}')
 echo "  Line coverage       : $lpct% ($((line_total - line_miss))/$line_total executed)"
 echo "  Branch coverage     : $bpct% ($br_exec/$br_total branches executed)"
 echo "  Both-paths coverage : $btpct% ($br_taken/$br_total branches taken both ways)"
 echo ""
 echo "=== Per-file ==="
 for src in $SRCS; do
-    gc="$TMPDIR/${src%.c}.c.gcov"
+    gc="$TMPDIR/${src}.gcov"
+    [ -f "$gc" ] || gc="$TMPDIR/${src%.c}.c.gcov"
     [ -f "$gc" ] || continue
     le=$(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$gc" || true)
     lm=$(grep -c '^    #####:' "$gc" || true)
     bt=$(awk '/Branches executed:/{print $4}' "$gc")
     bp=$(awk '/Branches executed:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
     tp=$(awk '/Taken at least once:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
-    lp=$(awk -v e="$le" -v m="$lm" 'BEGIN{printf "%.1f", 100*e/(e+m)}')
-    bp2=$(awk -v t="$bt" -v p="$bp" 'BEGIN{printf "%.1f", t*p/100}')
-    tp2=$(awk -v t="$bt" -v p="$tp" 'BEGIN{printf "%.1f", t*p/100}')
-    printf '  %-10s lines %s%% (%d/%d)   branches %s%%/%s%% (%d)\n' "$src" "$lp" "$le" "$((le+lm))" "$bp2" "$tp2" "$bt"
+    lp=$(awk -v e="$le" -v m="$lm" 'BEGIN{if (e+m > 0) printf "%.1f", 100*e/(e+m); else print "0.0"}')
+    bp2=$(awk -v t="${bt:-0}" -v p="${bp:-0}" 'BEGIN{printf "%.1f", t*p/100}')
+    tp2=$(awk -v t="${bt:-0}" -v p="${tp:-0}" 'BEGIN{printf "%.1f", t*p/100}')
+    printf '  %-10s lines %s%% (%d/%d)   branches %s%%/%s%% (%d)\n' "$src" "$lp" "$le" "$((le+lm))" "$bp2" "$tp2" "${bt:-0}"
 done
 
 echo ""

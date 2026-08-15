@@ -4,6 +4,7 @@ PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
 SRCS='main.c files.c process.c confirm.c procfs.c vim.c'
+TEST_SRCS='tests/pty_driver.c tests/err_helper.c'
 NP=$(nproc 2>/dev/null || echo 2)
 CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings'
 LFLAGS=""
@@ -17,12 +18,18 @@ JSTR_INC="-I $DIR/lib/jstring/build/include"
 JSTR_LIB="-L $DIR/lib/jstring/build/lib"
 export DIR OUTDIR JSTR_INC CFLAGS
 
-# Compile each translation unit in parallel (xargs -P, capped at nproc), then link.
+# Compile all translation units in parallel (xargs -P, capped at nproc).
 #shellcheck disable=SC2046
-if ! printf '%s\n' $SRCS | xargs -P "$NP" -n 1 sh -c '
+if ! printf '%s\n' $SRCS $TEST_SRCS | xargs -P "$NP" -n 1 sh -c '
 	compile_one() {
 		src="$1"
-		cc -c "$DIR/$src" -o "$OUTDIR/${src%.c}.o" $JSTR_INC $CFLAGS
+		out="${src%.c}.o"
+		mkdir -p "$OUTDIR/$(dirname "$out")"
+		if [ "${src#tests/}" != "$src" ]; then
+			cc -c "$DIR/$src" -o "$OUTDIR/$out" $CFLAGS
+		else
+			cc -c "$DIR/$src" -o "$OUTDIR/$out" $JSTR_INC $CFLAGS
+		fi
 	}
 	compile_one "$1"
 ' _; then
@@ -33,6 +40,13 @@ OBJS=""
 for src in $SRCS; do
 	OBJS="$OBJS $OUTDIR/${src%.c}.o"
 done
-#shellcheck disable=SC2086
-cc $OBJS -o "$OUTDIR/$PROG" $JSTR_LIB -ljstr $LFLAGS || exit 1
-echo "cc $SRCS -o $OUTDIR/$PROG $JSTR_INC $JSTR_LIB $CFLAGS -ljstr $LFLAGS (parallel xargs -P $NP)"
+
+# Link main executable and test helpers in parallel
+{
+	cc $OBJS -o "$OUTDIR/$PROG" $JSTR_LIB -ljstr $LFLAGS &
+	cc "$OUTDIR/tests/pty_driver.o" -o "$OUTDIR/tests/pty_driver" $LFLAGS &
+	cc "$OUTDIR/tests/err_helper.o" -o "$OUTDIR/tests/err_helper" $LFLAGS &
+	wait
+} || exit 1
+
+echo "cc $SRCS -o $OUTDIR/$PROG (parallel xargs -P $NP)"

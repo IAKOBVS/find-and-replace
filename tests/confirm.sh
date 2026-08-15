@@ -459,6 +459,7 @@ else:
     os.write(fd, b"\r")
     time.sleep(0.5)
     os.write(fd, b"y\n")
+    time.sleep(0.5)
     output = b""
     try:
         while True:
@@ -1148,7 +1149,7 @@ else:
         pass
     _, status = os.waitpid(pid, 0)
     code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
-    print(code, b"Can"'"'"'t rename temp file" in output)
+    print(code, b"Can\x27t rename temp file" in output)
 ' "$td" 2>/dev/null)
 	[ "$rc" = '1 True' ] && echo PASS > "$td/result" || echo "FAIL: rc=[$rc]" > "$td/result"
 }

@@ -65,6 +65,8 @@ static const char *usage =
 	_("    Anchors only match the start or end of the string not newlines, negates -Z flag.\n")
 	_("    You can still use newlines in the FIND string, different from sed.\n")
 	_("    REG_NEWLINE is not passed as the cflag to regexec.\n")
+	_("  --grep\n")
+	_("    Grep mode: search and print matching lines without performing replacement.\n")
 	_("  -v, --version\n")
 	_("    Print version information and exit.\n")
 	_("\n")
@@ -201,7 +203,16 @@ main(int argc, char **argv)
 		fprintf(stderr, "%s", usage);
 		return EXIT_FAILURE;
 	}
-	if (jstr_nullchk(argv[2])) {
+
+	int has_grep = 0;
+	for (int k = 1; k < argc; ++k) {
+		if (argv[k] && !strcmp(argv[k], "--grep")) {
+			has_grep = 1;
+			break;
+		}
+	}
+
+	if (jstr_nullchk(argv[2]) && !has_grep) {
 		/* Only one extra argument: treat "-h" as help and "--version"/"-v"
 		 * as version output; otherwise print the usage as an error. */
 		FILE *fp = stderr;
@@ -217,17 +228,67 @@ main(int argc, char **argv)
 		fprintf(fp, "%s", usage);
 		return ret;
 	}
+
 	struct stat st;
 	int ret;
 	args_ty a;
 	jstr_twoway_ty t;
 	a.t = &t;
 	a.find = (const char *)FIND;
-	a.rplc = (const char *)RPLC;
+
+	unsigned int start_i = 3;
+	if (has_grep) {
+		int replace_omitted = 0;
+		if (jstr_nullchk(argv[2])) {
+			replace_omitted = 1;
+		} else if (argv[2][0] == '-') {
+			replace_omitted = 1;
+		} else {
+			struct stat st_check;
+			if (stat(argv[2], &st_check) == 0)
+				replace_omitted = 1;
+		}
+		if (replace_omitted) {
+			a.rplc = "";
+			a.rplc_len = 0;
+			start_i = 2;
+		} else {
+			a.rplc = (const char *)RPLC;
+			a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+			start_i = 3;
+		}
+	} else {
+		a.rplc = (const char *)RPLC;
+		a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+		start_i = 3;
+	}
 	/* Unescape \n, \t, ... in place; the unescaped length is the diff. */
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
-	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+
 	init_defaults();
+
+	int num_file_targets = 0;
+	int is_recursive = 0;
+	int end_flags_pre = 0;
+	for (unsigned int k = start_i; argv[k]; ++k) {
+		if (argv[k][0] == '-' && !end_flags_pre) {
+			if (argv[k][1] == '-') {
+				if (!strcmp(argv[k], "--")) {
+					end_flags_pre = 1;
+				} else if (!strcmp(argv[k], "--include") || !strcmp(argv[k], "--exclude")) {
+					if (argv[k + 1])
+						++k;
+				}
+			} else {
+				if (strchr(argv[k] + 1, 'r'))
+					is_recursive = 1;
+			}
+		} else {
+			num_file_targets++;
+		}
+	}
+	G.grep_multi_files = (num_file_targets > 1 || is_recursive);
+
 	/* -c does two full passes: pass 1 (G.confirm_pass=1) only scans and
 	 * previews while collecting the file list; pass 2 (after 'y') re-reads
 	 * and edits each cached file. */
@@ -235,7 +296,7 @@ main(int argc, char **argv)
 	int end_of_flags = 0;
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
-	for (i = 3; ARG; ++i) {
+	for (i = start_i; ARG; ++i) {
 		if (*ARG == '-' && !end_of_flags) {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
@@ -283,6 +344,12 @@ main(int argc, char **argv)
 				/* bare "--": stop flag parsing */
 				if (ARG[2] == '\0') {
 					end_of_flags = 1;
+					continue;
+				}
+				/* --grep */
+				if (!strcmp(ARG + 2, "grep")) {
+					G.mode |= MODE_GREP;
+					G.n = (size_t)-1;
 					continue;
 				}
 				/* --version */

@@ -57,6 +57,8 @@ Options:
     Anchors only match the start or end of the string not newlines, negates -Z flag.
     You can still use newlines in the FIND string, different from sed.
     REG_NEWLINE is not passed as the cflag to regexec.
+  --grep
+    Grep mode: search and print matching lines without performing replacement.
   -v, --version
     Print version information and exit.
 

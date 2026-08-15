@@ -27,6 +27,20 @@ typedef enum {
 	FIELD_COUNT
 } field_ty;
 
+typedef struct line_counter_ty {
+	const char *data;
+	size_t pos;  /* Offset up to which LINE is already known. */
+	size_t line; /* 1-based line number of the byte at POS. */
+} line_counter_ty;
+
+void match_pushback(matches_ty *R matches, size_t start, size_t end, const regmatch_t *rm);
+void print_size_t(size_t val);
+size_t line_get_start(const char *R data, size_t size, size_t idx);
+size_t line_get_end(const char *R data, size_t size, size_t idx);
+size_t match_line_end(const char *R data, size_t size, size_t start, size_t end);
+void line_counter_init(line_counter_ty *st, const char *R data);
+size_t line_counter_get(line_counter_ty *st, size_t idx);
+
 /* -c dry-run scan that collects matches and prints the preview. */
 jstr_ret_ty confirm_scan_file(const jstr_twoway_ty *R t,
                               const jstr_ty *R buf, const char *R fname,

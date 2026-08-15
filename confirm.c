@@ -62,7 +62,7 @@ setup_terminal(void)
 }
 
 /* Append one match range to the dynamically grown matches array. */
-static void
+void
 match_pushback(matches_ty *R matches,
                   size_t start,
                   size_t end,
@@ -167,7 +167,7 @@ file_pushback(files_ty *files,
 }
 
 /* Return the offset of the first byte of the line containing IDX. */
-static size_t
+size_t
 line_get_start(const char *R data, size_t size, size_t idx)
 {
 	const char *nl;
@@ -179,7 +179,7 @@ line_get_start(const char *R data, size_t size, size_t idx)
 
 /* Return one past the last byte of the line containing IDX (the index of the
  * terminating '\n', or SIZE if the line is not newline-terminated). */
-static size_t
+size_t
 line_get_end(const char *R data, size_t size, size_t idx)
 {
 	const char *nl = (const char *)memchr(data + idx, '\n', size - idx);
@@ -190,13 +190,8 @@ line_get_end(const char *R data, size_t size, size_t idx)
  * monotonically non-decreasing within a file, so the counter only scans the
  * region it has not visited yet: a whole pass costs O(size) newline checks
  * instead of O(requests x offset). Reset per file (the buffer changes). */
-typedef struct line_counter_ty {
-	const char *data;
-	size_t pos;  /* Offset up to which LINE is already known. */
-	size_t line; /* 1-based line number of the byte at POS. */
-} line_counter_ty;
 
-static void
+void
 line_counter_init(line_counter_ty *st, const char *R data)
 {
 	st->data = data;
@@ -204,7 +199,7 @@ line_counter_init(line_counter_ty *st, const char *R data)
 	st->line = 1;
 }
 
-static size_t
+size_t
 line_counter_get(line_counter_ty *st, size_t idx)
 {
 	if (jstr_likely(idx >= st->pos)) {
@@ -221,7 +216,7 @@ line_counter_get(line_counter_ty *st, size_t idx)
  * [START, END). When the match consumed the line's terminating newline, that
  * newline is the last byte of the block rather than a surviving terminator, so
  * END-1 is returned. */
-static size_t
+size_t
 match_line_end(const char *R data, size_t size, size_t start, size_t end)
 {
 	if (end > start && data[end - 1] == '\n')
@@ -266,7 +261,7 @@ get_size_t_width(size_t val)
 }
 
 /* Write VAL in decimal to stdout without using printf. */
-static void
+void
 print_size_t(size_t val)
 {
 	char buf[3 * sizeof(val) + 2];

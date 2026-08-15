@@ -16,6 +16,88 @@ process_buffer(const jstr_twoway_ty *R t,
                   const char *R rplc,
                   const size_t rplc_len)
 {
+	if (G.mode & MODE_GREP) {
+		G.matches.size = 0;
+		if (G.mode & MODE_USE_REGEX) {
+			if (find_len > 0) {
+				size_t off = 0;
+				size_t n = G.n;
+				while (off < buf->size && n) {
+					const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
+					regmatch_t rm[10];
+					memset(rm, 0, sizeof(rm));
+					const int ret = jstr_re_exec_len(&G.regex, buf->data + off, buf->size - off, 10, rm, eflags_curr);
+					if (ret == JSTR_RE_RET_NOERROR) {
+						const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
+						const size_t m_start = off + (size_t)rm[0].rm_so;
+						const size_t m_end = off + (size_t)rm[0].rm_eo;
+						match_pushback(&G.matches, m_start, m_end, rm);
+						--n;
+						size_t next_src = m_end;
+						if (match_len == 0) {
+							if (next_src < buf->size)
+								++next_src;
+							else
+								break;
+						}
+						off = next_src;
+					} else {
+						break;
+					}
+				}
+			}
+		} else {
+			if (find_len > 0) {
+				for (size_t off = 0; off < buf->size; ) {
+					const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
+					if (p == NULL)
+						break;
+					const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
+					const size_t m_end = m_start + find_len;
+					match_pushback(&G.matches, m_start, m_end, NULL);
+					if (G.n == 1)
+						break;
+					off = m_end;
+				}
+			}
+		}
+
+		if (G.matches.size > 0) {
+			line_counter_ty lc;
+			line_counter_init(&lc, buf->data);
+			size_t i = 0;
+			while (i < G.matches.size) {
+				size_t j = i;
+				while (j + 1 < G.matches.size && line_get_start(buf->data, buf->size, G.matches.data[j + 1].start) <= match_line_end(buf->data, buf->size, G.matches.data[j].start, G.matches.data[j].end))
+					++j;
+				const size_t block_start = line_get_start(buf->data, buf->size, G.matches.data[i].start);
+				const size_t block_end = line_get_end(buf->data, buf->size, G.matches.data[j].end);
+				const size_t line_num = line_counter_get(&lc, G.matches.data[i].start);
+
+				if (G.grep_multi_files && fname != NULL) {
+					jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+					jstr_io_fwrite(fname, 1, fname_len, stdout);
+					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+					jstr_io_putchar(':');
+					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+					print_size_t(line_num);
+					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+					jstr_io_putchar(':');
+				} else {
+					jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+					print_size_t(line_num);
+					jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+					jstr_io_putchar(':');
+				}
+				jstr_io_fwrite(buf->data + block_start, 1, block_end - block_start, stdout);
+				jstr_io_putchar('\n');
+
+				i = j + 1;
+			}
+		}
+		return JSTR_RET_SUCC;
+	}
+
 	/* Holds the length of the replaced output. As a size_t when the fixed
 	 * and regex paths both store a length; the regex variant returns a
 	 * signed offset type that may hold a negative error code. */

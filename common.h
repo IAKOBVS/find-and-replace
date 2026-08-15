@@ -38,6 +38,7 @@ typedef enum {
 	MODE_COMPILED = 1 << 6,
 	MODE_HAVE_FILES = 1 << 7,
 	MODE_CONFIRM = 1 << 8,
+	MODE_GREP = 1 << 9,
 } mode_ty;
 
 /* One byte range of a find occurrence, relative to the start of the file. */
@@ -82,6 +83,7 @@ typedef struct global_ty {
 	 * recompiles when flags flip between files mid-command-line. */
 	int compiled_regex;
 	int compiled_cflags;
+	int grep_multi_files;
 	/* Set by the scan pass when at least one match exists; decides whether the
 	 * confirmation prompt is shown. */
 	unsigned int matches_found;

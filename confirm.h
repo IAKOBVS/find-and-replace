@@ -7,9 +7,18 @@
 #include "common.h"
 
 /* ANSI escape codes used to highlight the -c confirm mode preview. */
-#define COLOR_RED       "\x1b[31m"
-#define COLOR_GREEN     "\x1b[32m"
-#define COLOR_RESET     "\x1b[0m"
+#define COLOR_RED               "\x1b[31m"
+#define COLOR_GREEN             "\x1b[32m"
+#define COLOR_RESET             "\x1b[0m"
+#define ANSI_ALT_SCREEN_ENABLE  "\x1b[?1049h"
+#define ANSI_ALT_SCREEN_DISABLE "\x1b[?1049l"
+#define ANSI_CLEAR_SCREEN       "\x1b[2J"
+#define ANSI_HOME               "\x1b[H"
+#define ANSI_CLEAR_LINE_END     "\x1b[K"
+#define ANSI_CLEAR_DOWN         "\x1b[J"
+#define ANSI_CURSOR_SHOW        "\x1b[?25h"
+#define ANSI_CURSOR_HIDE        "\x1b[?25l"
+
 #define CONFIRM_PROMPT  "Confirm changes? [y/N]: "
 #define CONFIRM_ABORTED "Aborted.\n"
 #define MATCHES_CAP_MIN 8
@@ -26,6 +35,26 @@ typedef enum {
 	FIELD_BACKUP,
 	FIELD_COUNT
 } field_ty;
+
+typedef enum {
+	KEY_NONE,
+	KEY_ENTER,
+	KEY_TAB,
+	KEY_SHIFT_TAB,
+	KEY_BACKSPACE,
+	KEY_DELETE,
+	KEY_ESC,
+	KEY_UP,
+	KEY_DOWN,
+	KEY_LEFT,
+	KEY_RIGHT,
+	KEY_CTRL_C,
+	KEY_CTRL_D,
+	KEY_CTRL_J,
+	KEY_CTRL_K,
+	KEY_CTRL_U,
+	KEY_CHAR
+} confirm_key_ty;
 
 /* -c dry-run scan that collects matches and prints the preview. */
 jstr_ret_ty confirm_scan_file(const jstr_twoway_ty *R t,

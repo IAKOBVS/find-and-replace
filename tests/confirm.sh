@@ -285,6 +285,50 @@ t_confirm_interactive_stats() {
 	fi
 }
 
+t_confirm_interactive_preview_truncated() {
+	td=$1
+	i=0
+	while [ "$i" -lt 100 ]; do
+		printf 'hello %s\n' "$i" >> "$td/f"
+		i=$((i + 1))
+	done
+	# >52 matches in one file exceeds the match budget (max_preview_lines*4 =
+	# 13*4 at 24 rows), so the per-keystroke scan must stop early: stats gain
+	# the "+" suffix and the final reprint shows the omitted marker. Exercise
+	# both the fixed-string and regex scan paths.
+	pdrive --winsize 24x80 --tail '\r' --tail 'n\n' -- hello X -c -i -g "$td/f"
+	fixed_plus=$(grep -c '+ matches' "$td/out")
+	pdrive --winsize 24x80 --tail '\r' --tail 'n\n' -- 'hel.o' X -c -i -gR "$td/f"
+	regex_plus=$(grep -c '+ matches' "$td/out")
+	if [ "$fixed_plus" -gt 0 ] && [ "$regex_plus" -gt 0 ] && grep -q 'some previews omitted' "$td/out"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: truncation marker missing. fixed_plus=$fixed_plus regex_plus=$regex_plus out=[$(cat "$td/out")]" > "$td/result"
+	fi
+}
+
+t_confirm_interactive_no_pre_tui_dump() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	esc=$(printf '\033')
+	# Pass 1 must only cache files for the interactive editor; the whole diff
+	# must not be dumped to stdout before the TUI opens (which also stalled
+	# startup with -g on a large tree). The alt-screen enter \x1b[?1049h is
+	# the first thing the TUI emits, so any preview line before it is a dump.
+	pdrive --tail '\x03' -- hello replacement -c -i "$td/f"
+	if awk -v esc="$esc" -v out="$td/out" '
+		{ buf = buf $0 "\n" }
+		END {
+			o = index(buf, esc "[?1049h")
+			p = index(buf, "f:1:-hello")
+			exit (o > 0 && p > o ? 0 : 1)
+		}
+	' "$td/out"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: preview leaked before TUI. out=[$(cat "$td/out")]" > "$td/result"
+	fi
+}
+
 t_confirm_interactive_height_capping() {
 	td=$1; printf 'line 1\nline 2\nline 3\nline 4\nline 5\n' > "$td/f"
 	pdrive --winsize 12x80 --tail '\r' --tail 'n\n' -- line replacement -c -i -g "$td/f"
@@ -933,6 +977,8 @@ t_confirm_interactive_escape_replace
 t_confirm_interactive_escape_live_preview
 t_confirm_non_interactive_backref_mismatch
 t_confirm_interactive_stats
+t_confirm_interactive_preview_truncated
+t_confirm_interactive_no_pre_tui_dump
 t_confirm_interactive_height_capping
 t_confirm_interactive_tab_expansion
 t_confirm_interactive_width_clipping

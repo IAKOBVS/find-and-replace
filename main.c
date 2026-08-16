@@ -391,7 +391,7 @@ done_single:;
 		/* Non-flag argument: a file (or directory with -r) to process. */
 		G.mode |= MODE_HAVE_FILES;
 		/* A lone "-" reads stdin at this point in the argument list. */
-		if (ARG[1] == '\0') {
+		if (ARG[0] == '-' && ARG[1] == '\0') {
 			if (G.mode & MODE_CONFIRM)
 				jstr_errdie("%s: -c does not work with '-' (stdin).\n", argv[0]);
 			if (G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))
@@ -495,7 +495,7 @@ process:
 			if (G.mode & MODE_PRINT_CHANGES)
 				init_flags[fl_idx++] = 'l';
 			init_flags[fl_idx] = '\0';
-			DIE_IF(jstr_append_len_j(&G.interactive_flags_buf, init_flags, fl_idx), "%s", "Out of memory.\n");
+			DIE_IF(jstr_append_len_j(&G.interactive_flags_buf, init_flags, (unsigned int)fl_idx), "%s", "Out of memory.\n");
 
 			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_rplc_buf, &G.interactive_flags_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf, &G.interactive_backup_buf)), "%s", "Interactive loop failed.\n");
 
@@ -518,15 +518,22 @@ process:
 				G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
 			}
 
-			/* Re-print final accepted preview to normal stdout. */
+			/* Re-print final accepted preview to normal stdout. The scan stays
+			 * bounded by the preview budget set in the TUI so a -g global scan
+			 * on a large tree does not stall here before the confirm prompt. */
 			G.matches_found = 0;
+			G.preview_full = 0;
 			for (i = 0; i < G.files.size; ++i) {
 				file_ty *file = &G.files.data[i];
 				if (!file_filter_pass(file, &G.interactive_files_buf))
 					continue;
 				size_t file_matches = 0;
 				confirm_scan_file(&t, &file->content, file->fname, file->fname_len, a.find, a.find_len, a.rplc, a.rplc_len, &file_matches);
+				if (G.preview_full)
+					break;
 			}
+			if (G.preview_full)
+				jstr_io_fwrite("... (some previews omitted)\n", 1, S_LEN("... (some previews omitted)\n"), stdout);
 		}
 
 		if (G.matches_found) {

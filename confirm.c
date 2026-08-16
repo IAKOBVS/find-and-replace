@@ -24,6 +24,12 @@ static const char *env_lines;
  * environment variables are all unavailable (non-tty, redirected output). */
 #define TERM_ROWS_FALLBACK 24
 #define TERM_COLS_FALLBACK 80
+/* Preview match budget multiplier: the -c scan collects at most
+ * max_preview_lines * this many matches per file, so a -g global scan on a
+ * huge tree cannot balloon into millions of collected matches on every TUI
+ * redraw. The preview display only needs max_preview_lines lines anyway.
+ * 4x covers same-line grouping (many matches merging into one block). */
+#define PREVIEW_MATCH_BUDGET_FACTOR 1
 /* Free-RAM estimate fallback when /proc/meminfo cannot be read; large enough
  * that the scan cache limit never artificially caps a preview. */
 #define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
@@ -491,8 +497,14 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				rplc_backref1_e = rplc_backref1 + 2;
 		}
 	}
-	/* Collect every match range so they can be grouped by line for display. */
+	/* Collect every match range so they can be grouped by line for display.
+	 * The budget bounds the scan when the preview is truncated to
+	 * max_preview_lines: with -g on a large tree, collecting every match (and
+	 * building a replacement buffer per block) would take minutes per TUI
+	 * keystroke. Only the interactive preview sets max_preview_lines, so the
+	 * non-interactive CLI -c dry run keeps collecting and printing everything. */
 	G.matches.size = 0;
+	const size_t match_budget = (G.max_preview_lines > 0) ? (size_t)G.max_preview_lines * PREVIEW_MATCH_BUDGET_FACTOR : SIZE_MAX;
 	if (G.mode & MODE_USE_REGEX) {
 		if (find_len > 0) {
 			/*
@@ -529,6 +541,10 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
 					const size_t m_start = off + (size_t)rm[0].rm_so;
 					const size_t m_end = off + (size_t)rm[0].rm_eo;
+					if (jstr_unlikely(G.matches.size >= match_budget)) {
+						G.preview_full = 1;
+						break;
+					}
 					match_pushback(&G.matches, m_start, m_end, rm);
 					--n;
 					/* Set the next search pointer to the end of the match. */
@@ -563,6 +579,10 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					break;
 				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
 				const size_t m_end = m_start + find_len;
+				if (jstr_unlikely(G.matches.size >= match_budget)) {
+					G.preview_full = 1;
+					break;
+				}
 				match_pushback(&G.matches, m_start, m_end, NULL);
 				if (G.n == 1)
 					break;
@@ -959,6 +979,9 @@ confirm_read_key(char *out_char)
 	return KEY_NONE;
 }
 
+static char err_buf[256];
+static char last_err_buf[256];
+
 jstr_ret_ty
 confirm_interactive_loop(jstr_twoway_ty *R t,
                          jstr_ty *R find_buf,
@@ -971,8 +994,6 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 {
 	setup_terminal();
 	vim_set_insert_mode(1);
-	char err_buf[256];
-	char last_err_buf[256];
 	int needs_redraw = 1;
 	int needs_recompile = 1;
 	int is_valid = 1;
@@ -995,7 +1016,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	jstr_ty find_plain = JSTR_INIT;
 	jstr_ty rplc_plain = JSTR_INIT;
 
-	while (1) {
+	for (;;) {
 		if (needs_redraw) {
 			jstr_unescape_copy(&find_plain, find_buf);
 			jstr_unescape_copy(&rplc_plain, rplc_buf);
@@ -1056,6 +1077,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				/* If compile succeeded, run previews on all cached files */
 				G.matches_found = 0;
 				G.preview_lines_printed = 0;
+				G.preview_full = 0;
 				for (unsigned int k = 0; k < G.files.size; ++k) {
 					file_ty *file = &G.files.data[k];
 					/* File filtering by the Files substring filter and the
@@ -1069,8 +1091,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 						total_matches += file_matches;
 						files_matched++;
 					}
+					/* The match budget ran out: further files would only feed a
+					 * preview that is already full. Stop scanning so a -g global
+					 * scan on a large tree stays cheap per keystroke. */
+					if (G.preview_full)
+						break;
 				}
-				if (G.preview_lines_printed >= G.max_preview_lines) {
+				if (G.preview_lines_printed >= G.max_preview_lines || G.preview_full) {
 					jstr_io_fwrite("... (some previews omitted)", 1, S_LEN("... (some previews omitted)"), stdout);
 					term_clear_line_end();
 					jstr_io_putchar('\n');
@@ -1096,8 +1123,12 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			/* Statistics line */
 			jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
 			print_size_t(total_matches);
+			if (G.preview_full)
+				jstr_io_putchar('+');
 			jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
 			print_size_t(files_matched);
+			if (G.preview_full)
+				jstr_io_putchar('+');
 			jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
 			term_clear_line_end();
 			jstr_io_putchar('\n');

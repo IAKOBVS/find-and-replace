@@ -61,7 +61,7 @@ TUs are non-static; their prototypes live in the module headers
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (14 suites, 289 tests)
+./compile && tests/run.sh   # all deterministic suites (14 suites, 293 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
@@ -75,7 +75,7 @@ TUs are non-static; their prototypes live in the module headers
 | Basic | `tests/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
 | Flags | `tests/flags.sh` | 25 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version`, `-l`, `-q`/`--quiet`, `--exclude` CLI errors |
 | Regex | `tests/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
-| Files | `tests/files.sh` | 31 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
+| Files | `tests/files.sh` | 33 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
 | Errors | `tests/errors.sh` | 23 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
 | IO | `tests/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
 | Escape | `tests/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
@@ -147,8 +147,8 @@ status (including a non-blocking reap + EIO-safe read on early marker-miss).
 ### Coverage: 95.5% of executable lines
 
 Coverage measured via `gcov` (`./coverage`, branch + line) after running all
-289 deterministic tests: 95.5% lines (1367/1432), 99.1% branches executed,
-80.4% of branches taken both ways (6 sources: main, files, process, confirm,
+293 deterministic tests: 95.5% lines (1389/1454), 99.1% branches executed,
+80.6% of branches taken both ways (6 sources: main, files, process, confirm,
 procfs, vim). The small drop from Session 11's 95.9% comes from the new
 grep/`-`-stdin code paths that need fault injection or tty input to hit
 (e.g. the `-c`/`-r` + `-` conflict errors, ftw-failure exit).
@@ -220,6 +220,8 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
 16. **NUL bytes in build copy `regex.h`** — Perl codegen turned `\0` escape in source into literal NUL byte in `build/include/jstr/regex.h`, confusing grep/rg (binary file match). Changed `copy[sz] = '\0'` to `copy[sz] = 0` in both source (`include/regex.h:297`) and build copy.
 
 17. **`t_binary_skipped` not in TESTS (same class as #4)** — `tests/run.sh:196` defined `t_binary_skipped` but never listed it, likely because binary detection (`#if 0`) was disabled. Added to TESTS with updated expectation reflecting current no-binary-detection behavior.
+
+26. **Single-character file/dir args treated as the `-` stdin placeholder** — The file-loop check `if (ARG[1] == '\0')` at `main.c:394` never verified `ARG[0] == '-'`, so any one-char argument (`.`, `a`, ...) took the stdin branch: with `-c` it misreported `-c does not work with '-' (stdin).` for a plain `.` directory; in other modes the real file was silently skipped while stdin was read instead. Fixed to `ARG[0] == '-' && ARG[1] == '\0'`. Regression tests `t_single_char_filename`, `t_single_char_confirmed_dir` (the exact `'' 'exp' -r -i -c -g -R .` report) in `tests/files.sh`.
 
 ### jstring test file added (session 2)
 
@@ -905,8 +907,51 @@ P1 `-r` and `init_defaults` items:
   `t_confirm_colored_default` — the `-c` preview colors are unconditional
   (no `isatty` gating); the earlier "gate on tty" idea was dropped by design.
 
-New tests total: files 27→31, flags 23→25, confirm 79→80, + grep suite 17 =
-**14 suites, 289 deterministic tests**.
+New tests total: files 27→33, flags 23→25, confirm 79→80, + grep suite 17 =
+**14 suites, 293 deterministic tests** (2 more in files.sh from the
+single-character-arg stdin-placeholder bug fix, bug #26).
+
+## Session 13: bounded -c preview scan; interactive pass-1 only caches files
+
+User report: typing in the FIND field of the `-c -g -r` TUI over the whole
+67.6 MB repo (3959 files) pegged the CPU for minutes and the controls never
+rendered. Root cause analysis (measured, not guessed):
+
+- The trigger was bug #26's fix letting a single `.` open the TUI over the
+  whole tree, but the pathology was pre-existing: `confirm_scan_file` collects
+  **every** match (and builds a replacement buffer per block), so with `-g` on
+  a large tree each TUI keystroke re-ran a millions-of-matches scan.
+- Additionally, pass 1 (`process_file` in confirm mode) *also* ran the full
+  unbounded scan and dumped the entire diff to stdout **before** the TUI even
+  opened (interactive `-c` printed the preview, then the alt-screen covered
+  it). This alone stalled startup with a non-empty find + `-g`.
+
+Two fixes (uncommitted, verified with pty + TDD):
+
+1. **Interactive pass-1 = cache only** (`process.c:217`): when stdin+stdout
+   are ttys, pass 1 just `file_pushback`s every file and returns; the TUI scans
+   each cached buffer live on every redraw. The non-interactive CLI `-c`
+   dry-run still scans + prints everything in pass 1 (unchanged behavior).
+2. **Bounded preview scan** (`confirm.c`): `PREVIEW_MATCH_BUDGET_FACTOR 4`;
+   `confirm_scan_file` computes `match_budget = max_preview_lines*4` (0 →
+   `SIZE_MAX`, so the non-interactive CLI stays unbounded). When `G.matches.size`
+   hits the budget it sets `G.preview_full = 1` and stops — in both the regex
+   and fixed-string scan loops. Consumers reset `G.preview_full = 0` before
+   scanning; the TUI redraw breaks the file loop, shows `N+ matches, M+ files`
+   in stats (with a trailing `+`), and prints `... (some previews omitted)`.
+   `main.c`'s post-TUI reprint is bounded the same way. Budget covers same-line
+   grouping: 4× the display cap (13 lines at 24 rows → 52 matches).
+
+Result: the user's exact command now opens instantly and each keystroke
+re-renders in ~tens of ms (whole flow measured 0.38 s under the pty, including
+the bounded scan of all cached files on every redraw).
+
+Tests (TDD, red verified by re-introducing both bugs): `t_confirm_interactive_preview_truncated`
+(100-line file > 52-match budget; asserts `+ matches` stats suffix and the
+omitted marker, exercising both fixed-string and regex scan paths) and
+`t_confirm_interactive_no_pre_tui_dump` (asserts no preview line precedes the
+alt-screen enter `\x1b[?1049h`, byte-ordered via awk `index()`). confirm 80→82,
+total **293**.
 
 ## Test-Driven Development (TDD) Guidelines
 

@@ -215,12 +215,19 @@ process_file(const jstr_twoway_ty *R t,
 	 * happens on the second pass after the user confirms. The file's content
 	 * is recorded so pass 2 edits it from memory without re-reading disk. */
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
+		/* Interactive mode: pass 1 only caches files. The confirm TUI scans
+		 * each cached buffer live (bounded to the preview budget) on every
+		 * redraw, so a pre-scan here would both dump the whole diff to stdout
+		 * before the editor opens and, with -g on a large tree, stall the
+		 * startup on an unbounded match collection. */
+		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
+			file_pushback(&G.files, fname, fname_len, st, buf);
+			return JSTR_RET_SUCC;
+		}
 		size_t matches = 0;
 		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
-		/* Only files with matches need editing on pass 2; steal their buffer.
-		 * In interactive mode, we must cache all scanned files so they can be
-		 * dynamically scanned as the user updates the find pattern. */
-		if (matches > 0 || (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)))
+		/* Only files with matches need editing on pass 2; steal their buffer. */
+		if (matches > 0)
 			file_pushback(&G.files, fname, fname_len, st, buf);
 		return ret;
 	}

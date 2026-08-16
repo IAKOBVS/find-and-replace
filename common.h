@@ -130,6 +130,10 @@ typedef struct global_ty {
 	/* Dynamic tracking of preview line usage in interactive mode */
 	size_t preview_lines_printed;
 	size_t max_preview_lines;
+	/* 1 when the -c preview scan hit its match budget and stopped early; the
+	 * TUI stats then show "N+ matches, M+ files" and scanning further files
+	 * stops. Reset by each preview consumer before it scans. */
+	int preview_full;
 	/* Cold configuration, read only during startup and traversal. */
 	const char *include_pat;
 	const char *exclude_pat;

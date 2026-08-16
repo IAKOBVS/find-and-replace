@@ -210,6 +210,27 @@ t_dash_stdin_no_double_read() {
 	[ "$out" = 'only ONCE' ] && echo PASS > "$td/result" || echo "FAIL: out=[$out]" > "$td/result"
 }
 
+t_single_char_filename() {
+	td=$1
+	cd "$td" || exit 1
+	printf 'x\n' > a
+	out=$("$PROG" x y a 2>/dev/null)
+	[ "$out" = 'y' ] && echo PASS > "$td/result" || echo "FAIL: out=[$out]" > "$td/result"
+}
+
+t_single_char_confirmed_dir() {
+	td=$1
+	cd "$td" || exit 1
+	printf 'hello\n' > f
+	rc=0
+	printf 'n\n' | "$PROG" '' 'exp' -r -i -c -g -R . >/dev/null 2>"$td/err" || rc=$?
+	if [ "$rc" -eq 0 ] && ! grep -q "stdin" "$td/err"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc err=[$(cat "$td/err")]" > "$td/result"
+	fi
+}
+
 t_include_regex_suffix() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'aaa\n' > "$td/sub/a.txt"; printf 'bbb\n' > "$td/sub/b.txt"; printf 'aaa\n' > "$td/sub/c.c"
@@ -275,6 +296,8 @@ t_dash_filename_no_double_dash
 t_dash_stdin_placeholder_replace
 t_dash_stdin_placeholder_inplace_error
 t_dash_stdin_no_double_read
+t_single_char_filename
+t_single_char_confirmed_dir
 t_include_regex_suffix
 t_exclude_regex_prefix
 t_include_regex_extended

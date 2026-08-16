@@ -3,6 +3,10 @@
 
 #include "procfs.h"
 
+/* Minimal line-based parser for /proc/meminfo-style "Key:   value" records.
+ * The buffer is treated as a sequence of newline-terminated lines; each line
+ * is split on the first delimiter and both sides are whitespace-trimmed. */
+
 void
 procfs_iter_init(struct procfs_iter *iter, const char *buf, unsigned int len)
 {
@@ -13,6 +17,8 @@ procfs_iter_init(struct procfs_iter *iter, const char *buf, unsigned int len)
 int
 procfs_iter_next(struct procfs_iter *iter, const char **key, unsigned int *key_len, const char **val, unsigned int *val_len, int delimiter)
 {
+	/* Yield the next key/value pair, returning 0 once the buffer is exhausted.
+	 * Lines without the delimiter are skipped, not reported as errors. */
 	while (iter->pos < iter->end) {
 		const char *line_start = iter->pos;
 		const char *line_end = (const char *)memchr(line_start, '\n', (size_t)(iter->end - line_start));

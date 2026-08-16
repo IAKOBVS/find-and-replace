@@ -59,6 +59,14 @@ Options:
     REG_NEWLINE is not passed as the cflag to regexec.
   -v, --version
     Print version information and exit.
+  -q, --quiet
+    Suppress status output: the per-file stderr echo from -i and the
+    matching lines in --grep mode (the exit code is still returned).
+  --grep
+    Print the lines that contain FIND (like grep) and exit 0 if any
+    matched, 1 if none, 2 on error. No files are modified. Cannot be
+    combined with -i or -c. Matching lines from named files are
+    prefixed with FILE:, lines from stdin are printed bare.
 
 FIND and REPLACE shall be placed in that exact order.
 
@@ -75,5 +83,6 @@ For example: -EI is equal to -E -I.
 -E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically
 enables -R.
 
-If no file was passed, read from stdin.
+If no file was passed, read from stdin. A lone - in FILES also reads
+stdin at that point in the argument list.
 ```

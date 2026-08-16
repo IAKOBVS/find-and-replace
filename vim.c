@@ -4,6 +4,9 @@
 #include "vim.h"
 #include <ctype.h>
 
+/* vim-mode editor state shared across the interactive TUI: whether we are
+ * typing (insert) or navigating (normal), and the pending operator ('d' or
+ * 'c') waiting for a motion key when in normal mode. */
 static int insert_mode = 1;
 static char pending_op = 0;
 
@@ -23,6 +26,8 @@ vim_set_insert_mode(int mode)
 static size_t
 get_word_forward(const jstr_ty *buf, size_t pos)
 {
+	/* vim 'w' motion: from an alnum run, skip to its end; from a punctuation
+	 * run, skip to its end; then skip trailing whitespace. */
 	if (!buf || pos >= buf->size) {
 		return buf ? buf->size : 0;
 	}
@@ -44,6 +49,8 @@ get_word_forward(const jstr_ty *buf, size_t pos)
 static size_t
 get_word_backward(const jstr_ty *buf, size_t pos)
 {
+	/* vim 'b' motion: walk back past trailing whitespace, then to the start
+	 * of the alnum (or punctuation) run that precedes the cursor. */
 	if (!buf || pos == 0) {
 		return 0;
 	}
@@ -66,6 +73,8 @@ get_word_backward(const jstr_ty *buf, size_t pos)
 static void
 delete_range(jstr_ty *buf, size_t start, size_t end)
 {
+	/* In-buffer deletion: shift the tail down over the removed range and keep
+	 * the buffer NUL-terminated. */
 	if (!buf || start >= end || start >= buf->size) {
 		return;
 	}
@@ -81,10 +90,15 @@ int
 vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile, size_t field_count)
 {
 	if (insert_mode) {
+		/* Typing is handled by the caller (insert the char into active_buf);
+		 * only normal-mode navigation lands here. */
 		return 0;
 	}
 
 	if (pending_op) {
+		/* An operator ('d'/'c') is pending: the next key is its motion, or the
+		 * key itself for a doubled operator like dd/cc. 'c' also switches back
+		 * to insert mode (like vim's c = delete + insert). */
 		char op = pending_op;
 		pending_op = 0;
 
@@ -187,6 +201,7 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 	}
 
 	switch (c) {
+	/* Insert-mode entry keys: i = here, a = after, I = line start, A = line end. */
 	case 'i':
 		insert_mode = 1;
 		*needs_redraw = 1;
@@ -249,6 +264,7 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		}
 		break;
 	case 'j':
+		/* Move down/up between TUI fields, wrapping at either edge. */
 		*active_field = (*active_field + 1) % field_count;
 		*needs_redraw = 1;
 		break;

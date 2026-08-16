@@ -44,6 +44,9 @@ TUs are non-static; their prototypes live in the module headers
 - **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - linked via `lib/jstring/build/lib/libjstr.so`
 - **Include path**: `lib/jstring/build/include/` passed via `-I` (pinned checkout, not `/usr/local/include`)
 - **Code style**: no comments, SPDX MIT header, `clang-format off/on` around the usage string
+- **Python test scripts**: every function, parameter, and local variable must be
+  fully type annotated (PEP 484, `typing` imports). Verify with `mypy
+  tests/pty_drive.py` — the shared pty driver is mypy-clean.
 - **Usage strings** are defined with `_(...)` macro calls in `main.c`; `generate-readme` parses these with `grep '_('`
 - `.gitignore` ignores `find-and-replace` binary, `*.o`, and `jstring/` (symlink/lib dir)
 - **No linter/formatter** beyond compiler flags (`-Wall -Wextra -Wpedantic`)
@@ -58,7 +61,7 @@ TUs are non-static; their prototypes live in the module headers
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (12 suites, 205 tests)
+./compile && tests/run.sh   # all deterministic suites (14 suites, 289 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
@@ -70,17 +73,19 @@ TUs are non-static; their prototypes live in the module headers
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
 | Basic | `tests/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
-| Flags | `tests/flags.sh` | 17 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version` |
+| Flags | `tests/flags.sh` | 25 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version`, `-l`, `-q`/`--quiet`, `--exclude` CLI errors |
 | Regex | `tests/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
-| Files | `tests/files.sh` | 27 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion |
-| Errors | `tests/errors.sh` | 15 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive |
+| Files | `tests/files.sh` | 31 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
+| Errors | `tests/errors.sh` | 23 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
 | IO | `tests/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
 | Escape | `tests/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
 | Empty | `tests/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
-| Misc | `tests/misc.sh` | 6 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
+| Misc | `tests/misc.sh` | 7 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
 | Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
 | Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
-| Confirm | `tests/confirm.sh` | 40 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, interactive TUI (include/exclude/backup/l flag) |
+| Confirm | `tests/confirm.sh` | 80 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll) |
+| Grep | `tests/grep.sh` | 17 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find |
+| Unit | `tests/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
@@ -102,29 +107,51 @@ All tests follow the same conventions:
 The test scripts use a batch-wait jobserver to limit concurrency and avoid file descriptor exhaustion, implemented in `tests/lib.sh`:
 
 ```
-MAX_JOBS=32
+MAX_JOBS=${FAR_MAX_JOBS:-512}
 count=0
 for t in $TESTS; do
     (
         mkdir -p "$td_root/$t"
         "$t" "$td_root/$t"
     ) &
+    launched="$launched $t"
     count=$((count + 1))
     if [ "$count" -ge "$MAX_JOBS" ]; then
-        wait
+        wait_for_results "$launched"
+        launched=""
         count=0
     fi
 done
-[ "$count" -gt 0 ] && wait
+[ "$count" -gt 0 ] && wait_for_results "$launched"
 ```
 
-Each test runs as a background subshell. After `MAX_JOBS` (32) launches, `wait` blocks until the batch finishes. The final incomplete batch is waited for after the loop. This prevents running all N tests simultaneously, which could exhaust file descriptors on systems with low `ulimit -n`.
+Each test runs as a background subshell that is guaranteed to write a result
+file (the `run_tests` wrapper records a `FAIL: no result written` fallback if
+the test function dies without one). `wait_for_results` polls the result files
+and prints `report_result` — `t_foo PASS` / `t_foo FAIL (...)` — **the moment
+each test finishes**, so PASS/FAIL stream on the fly instead of being dumped
+after the whole batch. A trailing `wait` reaps the subshells. `MAX_JOBS` (512
+by default, override with `FAR_MAX_JOBS` for low-`ulimit -n` systems) caps
+concurrency to avoid file descriptor exhaustion.
 
-All 12 deterministic suites run concurrently at the file level via `tests/run.sh`, each with its own internal batch-wait jobserver for test-level parallelism.
+All 13 deterministic suites run in order via `tests/run.sh`, each suite's
+progressive per-test output streaming straight to the terminal (no log
+capture); each suite keeps its own internal batch-wait jobserver for
+test-level parallelism, and run.sh exits non-zero if any suite failed.
+Interactive TUI tests drive the binary through `tests/pty_drive.py` (typed
+driver, mypy-clean), which creates the pty, applies
+`--winsize` to the slave **before** forking (no race with the child's first
+render), feeds `--phase`/`--tail` keystrokes, and reports the child's real exit
+status (including a non-blocking reap + EIO-safe read on early marker-miss).
 
-### Coverage: 87.3% of executable lines
+### Coverage: 95.5% of executable lines
 
-Coverage measured via `gcov` after running all 205 deterministic tests (17 basic + 17 flags + 16 regex + 27 files + 15 errors + 21 io + 9 escape + 5 empty + 6 misc + 18 edge + 14 complex + 40 confirm).
+Coverage measured via `gcov` (`./coverage`, branch + line) after running all
+289 deterministic tests: 95.5% lines (1367/1432), 99.1% branches executed,
+80.4% of branches taken both ways (6 sources: main, files, process, confirm,
+procfs, vim). The small drop from Session 11's 95.9% comes from the new
+grep/`-`-stdin code paths that need fault injection or tty input to hit
+(e.g. the `-c`/`-r` + `-` conflict errors, ftw-failure exit).
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -151,8 +178,12 @@ Coverage measured via `gcov` after running all 205 deterministic tests (17 basic
 - Empty files, empty input, empty replace string
 - Long lines and large replacement buffers
 - Interactive TUI (via pty): all 7 fields (FIND/RPLC/FLAGS/FILES/INCLUDE/EXCLUDE/BACKUP), `l` flag, include/exclude regex recompile (incl. clear-to-empty and invalid-regex errors), backup suffix, error preview
+- `--grep` mode: stdin/file/recursive, `FNAME:` line prefixes, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find
+- `-q`/`--quiet` (in-place stderr echo + grep output suppression), `-` stdin placeholder (stdout, grep, and `-c`/`-i`/`-r` conflict errors)
+- `-r` error accumulation: unreadable file mid-tree continues traversal, reports `N file(s) failed during processing.`, non-zero exit (2 in grep)
+- Unconditional `-c` preview colors (no `isatty` gating)
 
-**Remaining uncovered** (128 lines in the 4 gcov files, mostly OS-level or dead-code paths): signal handler + terminal restore, terminal-width fallbacks (`COLUMNS` env, ioctl failure), preview width-clipping branches, giant-size guards, disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors — these require fault injection or special terminal sizes and cannot be exercised in integration tests.
+**Remaining uncovered** (65 lines in the 6 gcov files, mostly OS-level or dead-code paths): signal handler + terminal restore, terminal-width fallbacks (`COLUMNS` env, ioctl failure), preview width-clipping branches, giant-size guards, disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors, `-c`/`-r` + `-` conflict errors, ftw-failure exit — these require fault injection or special terminal sizes and cannot be exercised in integration tests.
 
 ### Bugs found and fixed (17 total)
 
@@ -280,6 +311,7 @@ became a single `trailing_nl` branch. Verified identical output on a
 | 20 | Old-side line count inflated when block ended in `\n` | Old `count_newlines+1` double-counted a block whose last byte was the consumed terminator | With `match_line_end` the block never ends in its own terminator, so `count_newlines + 1` is exact (empty block = 1 empty line) | `find-and-replace.c:638` |
 | 21 | `print_hunk_header` args swapped | `new_line`/`new_count` passed in reverse produced wrong `+` ranges | Passed `(old_line, old_count, new_line, new_count)`; the function was later removed when the format dropped hunk headers | (was line 662) |
 | 22 | Every file >1 KiB silently skipped | `jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size))` passes `sz=1024` while the buffer holds `file_size` bytes, so `strlen(buf) != sz` for any >1024-byte NUL-free file → misclassified as binary → `process_file` returned early | Bound the NUL scan instead of comparing lengths: `memchr(buf->data, '\0', JSTR_MIN(1024, file_size))`. `jstr_io_isbinary` is inherently whole-file (`strlen(buf) != sz`) and cannot express a 1 KiB window. Regression tests `t_large_text_file_processed` (NUL-free >1 KiB processed) and `t_binary_nul_past_kib_processed` (NUL after byte 1024 → still processed) in `tests/io.sh` | `find-and-replace.c:688` |
+| 25 | Interactive editor lost files shorter than the initial FIND | `process_file` early-returned `if (file_size < find_len)` for fixed-string finds, so pass 1 never read/cached such files and the editor could not preview or edit them even after shortening FIND | Guard the short-circuit with `!((G.mode & MODE_CONFIRM) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))` | `process.c:147` |
 
 ### Stale test expectations fixed (pre-existing failures, unrelated to preview)
 
@@ -471,11 +503,12 @@ merged; `-i -- -filename` works) and the regex empty-buffer short-circuit
 | `lib/jstring/tests/test-replace-edge.c` | Full file | jstring edge-case tests |
 
 ### Test runner mechanics
-- `tests/lib.sh`: shared boilerplate with MAX_JOBS=32 batch-wait jobserver, `/bin/sh` compatible
+- `tests/lib.sh`: shared boilerplate with MAX_JOBS=512 (FAR_MAX_JOBS override) batch-wait jobserver, `/bin/sh` compatible; `run_tests`/`wait_for_results` prints each test name with its PASS/FAIL as it completes
 - Each test function: `td=$1`, writes PASS/FAIL to `$td/result`
 - Tests registered in TESTS heredoc variable at end of file
 - Stderr redirected to `/dev/null` unless error output is tested
 - `$PROG` = path to binary (set in `tests/lib.sh`)
+- Interactive TUI tests: `tests/pty_drive.py` (mypy-clean) — winsize applied to the pty slave before fork, `--phase`/`--tail` keystrokes, real exit status via non-blocking reap + EIO-safe marker wait
 
 ## Session 6: split single file into 4 TUs with `fr_` namespacing
 
@@ -674,6 +707,206 @@ in the usage string; `t_version` in `tests/flags.sh`.
   when `*sz == 0`, so `^$` matches empty files — from jstring commits d48000f7/
   2aaa4c85, synced to `build/include/jstr/regex.h`). Flags after `--` being
   treated as filenames is correct POSIX behavior, not a bug.
+
+## Session 9: pty driver race fix; confirm.sh fully converted to pty_drive
+
+### Interactive TUI tests: all inline python replaced by `pdrive`
+
+Every remaining inline `python3 -c` block and heredoc `drive.py` script in
+`tests/confirm.sh` was converted to the shared `pdrive` wrapper (calls
+`tests/pty_drive.py` with `--prog "$PROG" --out "$td/out" --rc "$td/rc"` and an
+auto `--ready '-- [INSERT] --'` unless `--noready`/`--ready` is given). Only the
+`pdrive` wrapper's `python3` invocation remains in confirm.sh. The 6 broken
+converted lines and ~15 inline blocks were fixed (flags_ei, terminal_size_zero
+via `--env LINES=`, terminal_cols_env `--env COLUMNS=30`, signal_term
+`--signal TERM`, rename_fail via `--after-ready`, invalid_flag_char, no_scroll
+via awk, ctrl_d, unknown_escape, control_char, cli_flags, cli_filters_backup,
+files_filter, enter_invalid, tiny_terminal `--winsize 1x40`).
+
+### Bug 24: height_capping flake was a pty winsize race, not a layout bug
+
+`t_confirm_interactive_height_capping` (~20% flake in the suite) failed with
+"height capping failed. lines=11": the interactive render printed all 5 preview
+pairs (10 lines) with no omitted marker and a `\x1b[14;16H` cursor move —
+i.e. the first render saw rows≈24 (the parent terminal's size) instead of the
+test's `--winsize 12x80`. Root cause: `pty.fork()` spawns the child immediately,
+so the child's first render raced pty_drive's post-fork `TIOCSWINSZ` ioctl. Fix
+in `tests/pty_drive.py`: `spawn_child()` now creates the pty with
+`os.openpty()`, applies the winsize to the **slave before forking**, then forks
+with `setsid` + `TIOCSCTTY` + `dup2` + `execvpe`. The race is structurally
+impossible now. Verified 10/10 green runs (previously ~20% flake); synthetic
+60-concurrent stress harness had 0/480 flakes. `tests/hcsuite.sh` (temp repro
+suite) was removed.
+
+### pty_drive.py EIO / early-exit handling
+
+`wait_for_marker` now catches `OSError` (EIO when the child exits before
+writing the marker) and returns False; on marker-miss the driver reaps the
+child via `os.waitpid(pid, os.WNOHANG)` and writes the **real** exit status to
+the rc file, falling back to `"timeout"` only if the child is still running.
+mypy clean.
+
+### Runner output: named PASS/FAIL + progressive streaming
+
+- `tests/lib.sh` `report_result` prints each test name with its result as the
+  result file appears: `t_foo PASS` / `t_foo FAIL (reason)` / `t_foo FAIL (no result)`.
+- `tests/run.sh` runs the 13 suites sequentially, each suite's progressive
+  per-test output streaming straight to the terminal (no log capture);
+  prints `PASS/FAIL suite` per suite, then
+  `=== N suites passed, M failed ===`; exit code mirrors failures. `./test`
+  therefore always prints and exits non-zero on any failure.
+- `MAX_JOBS` default raised 32 → 512 (`FAR_MAX_JOBS` override, floor 1).
+- `t_confirm_interactive_tab_expansion` negative grep fixed: GNU grep treats
+  `\t` as stray-`t`, and the post-session non-TUI echo contains a literal tab;
+  the check now truncates the TUI region at the `\x1b[?1049l` alt-screen
+  teardown and uses `grep -Fq` with a literal tab.
+
+### Verification
+
+- `tests/confirm.sh`: 79/79 (was 40 at Session 7).
+- `tests/run.sh`: **13 suites, 265 deterministic tests, 0 failed**; `./test`
+  prints full output and exits 0; fuzz 1 iteration 0 crashes.
+- `./coverage`: 95.9% lines (1305/1361), 99.2% branches executed, 80.7% taken
+  both ways (6 sources: main, files, process, confirm, procfs, vim).
+- `tests/pty_drive.py` is mypy-clean.
+
+## Session 10: interactive TUI escaping fixed; controls pinned to the bottom
+
+### Interactive FIND/REPLACE fields now unescape like the CLI
+
+The interactive editor previously seeded its FIND/REPLACE fields from the
+**already-unescaped** CLI values and used them **literally** after the loop, so
+escape sequences typed in the editor (`\t`, `\n`, octal, ...) never worked the
+way they do on the command line. Now:
+
+- `main.c` keeps the raw `argv[1]`/`argv[2]` (captured before the in-place
+  `jstr_unescape_p` call) and seeds `G.interactive_find_buf`/`rplc_buf` from
+  them; after the interactive loop the buffers are unescaped in place and
+  `size` updated (`JSTR_DIFF(jstr_unescape_p(data), data)`).
+- `confirm.c` gained `jstr_unescape_copy` (static helper): each redraw builds
+  unescaped copies of find/rplc and feeds them to `interactive_compile` and
+  `confirm_scan_file`, so the **live preview** and the backref guardrail see
+  exactly what the second pass will write. The copies are rebuilt every redraw
+  because REPLACE has `affects_recompile = 0`.
+
+New tests in `tests/confirm.sh`: `t_confirm_interactive_escape_find`
+(typed `\t` matches a real tab), `t_confirm_interactive_escape_replace`
+(typed `\n` inserts a newline), `t_confirm_interactive_escape_live_preview`
+(live preview renders the tab match). Note: typing `\t` with the pty driver
+requires `--tail '\\t'` (the bare `t` is a vim motion in normal mode).
+
+### Bug 25: interactive editor lost files shorter than the initial FIND
+
+`process_file` early-returned `if (file_size < find_len)` for fixed-string
+finds. In the interactive editor the find can still be edited to something
+shorter, but the file was never read/cached during pass 1, so it could never
+be previewed or edited. The short-circuit now only applies outside the
+interactive tty session
+(`!((G.mode & MODE_CONFIRM) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))`
+at `process.c:147`). Uncovered by `t_confirm_interactive_escape_find` (3-byte
+file, initial find `hello`); fixed before the pinning work.
+
+### Controls pinned to the bottom of the terminal
+
+The interactive controls block (`-- [INSERT] --` / Stats / 7 fields) used to
+stream directly under the preview, so with a short preview it floated near the
+top and left the bottom rows blank. Now `confirm_interactive_loop` jumps the
+cursor to a fixed bottom anchor before drawing the controls:
+
+- `start_control_line = rows - (FIELD_COUNT + 1)` (row 16 on a 24-row
+  screen): `[INSERT]` at `start_control_line`, Stats at `+1`, the 7 fields at
+  `+2..+8` so the last field (Backup) ends exactly on the terminal's last row.
+- `max_preview_lines` is unchanged (`rows - (FIELD_COUNT + 4)`), so a full
+  preview (13 lines) + omitted marker (row 14) always leaves the gap row
+  (15) blank and never collides with the pinned header at row 16.
+- The explicit blank-separator line and the `preview_lines`/`find_line`
+  locals were removed; `active_line = start_control_line + 2 + active_field`.
+
+New test `t_confirm_interactive_controls_fixed` (24x80, short preview: asserts
+`\x1b[16;1H` jump + cursor at `\x1b[18;17H`); `t_confirm_interactive_no_scroll`
+updated for the new layout (13 preview + omitted marker = 14 newlines before
+the first absolute cursor move, then jump to row 16).
+
+### Verification
+
+- `tests/run.sh`: **13 suites, 265 deterministic tests, 0 failed**; confirm
+  suite 79/79 across 4 consecutive runs (no pty flakes).
+- `./coverage`: 95.9% lines (1305/1361), 99.2% branches executed, 80.7% taken
+  both ways.
+
+## Session 11: progressive test output; DO_FREE cleanup; macro-ized magic values
+
+- **Progressive PASS/FAIL**: `tests/lib.sh` `run_tests` now polls result files
+  in `wait_for_results` and prints each test's outcome (`report_result`) the
+  instant its result file appears, instead of after the whole batch.
+  `tests/run.sh` runs the 13 suites sequentially, streaming each suite's output
+  straight to the terminal (no per-suite log capture/dump). Verified: PASS
+  lines stream (146 at 1s, 257 at 6s of a ~8s full run).
+- **`DO_FREE` cleanup pattern**: `#define DO_FREE 0` now lives explicitly in
+  `common.h` (was an implicit `#if 0`). Reused-buffer frees that used to sit in
+  the confirm TUI (`find_plain`/`rplc_plain` at `done:`) are wrapped in
+  `#if DO_FREE` like main.c's `cleanup()`. Regex recompile frees
+  (`jstr_re_free` at confirm.c:646/688/703) intentionally stay unwrapped — a
+  compiled regex object cannot be reused, so freeing is required before
+  recompile.
+- **`jstr_unescape_copy` simplified** (`confirm.c`): the manual
+  `jstr_reserve_j + memcpy + NUL` became `jstr_assign_len_j(dst, src->data,
+  src->size)` (length-explicit; `jstr_assign_j`'s strlen would also work here
+  since the interactive buffers are NUL-terminated at `size`).
+- **Magic values → macros**: `TERM_ROWS_FALLBACK 24` / `TERM_COLS_FALLBACK 80`
+  (terminal-size fallbacks), `FREE_RAM_FALLBACK (1 GiB)` and
+  `MEMINFO_BUF_SIZE (4096+1)` (/proc/meminfo), `JSTR_NMATCH_MAX 10`
+  (backref capture count, replacing the hardcoded `10`/`rm[10]` across
+  common.h/process.c/confirm.c — must stay in sync with jstring's `rm[10]`),
+  `BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)` (binary NUL sniffing window).
+- **Inline comments added** to the least-commented files: `vim.c` (the whole
+  vim-mode editor had none), `procfs.c`, and `confirm.c`'s `setup_terminal`
+  raw-mode flag rationale.
+- **`md/PLAN-IMPROVE.md`** created with a prioritized improvement list and a
+  full design plan for a new **grep mode** (read-only, no replace): semantics,
+  exit codes (0/1/2), flag conflicts with `-i`/`-c`, shared match-collection
+  extraction from `confirm_scan_file`, and a new `tests/grep.sh` suite.
+
+## Session 12: --grep mode; -q/--quiet; `-` stdin placeholder; -r error accumulation; idempotent init_defaults
+
+Implemented the grep-mode plan from `md/PLAN-IMPROVE.md` (P4 features) plus the
+P1 `-r` and `init_defaults` items:
+
+- **`--grep`** (new 14th suite `tests/grep.sh`, 17 tests): read-only, prints
+  matching lines to stdout and exits **0** (any match) / **1** (no match) /
+  **2** (error). Errors exit 2 via a new `err_exit_code()` helper in `main.c`
+  (grep mode picks 2, all other modes keep `EXIT_FAILURE`); applied to regex
+  compilation, invalid flag/`--include`/`--exclude`, stat errors, and the
+  `-i`/`-c` conflict. Matching is **line-based** (like grep — a regex cannot
+  span newlines, unlike the replace path). Lines from named files are
+  prefixed `FILE:` (stdin prints bare). Binary files are skipped silently.
+  Empty fixed-string find matches every line (grep `''` semantics). New
+  `grep_scan_file` lives in `process.c`; `process_file` routes to it right
+  after the binary check; stdin (`--grep` with no files, or via `-`) routes
+  in `main.c`. Exit code decided at end of `main` via `G.grep_matched`.
+- **`-q`/`--quiet`**: suppresses the per-file stderr echo from `-i` and the
+  matching-line output in `--grep` (exit codes still returned). Flag loop
+  `case 'q'` + `--quiet`.
+- **`-` stdin placeholder**: a lone `-` in the FILES list reads stdin at that
+  point (`find-and-replace foo bar f1 - f2`). Errors when combined with
+  `-i`/`-c`/`-r`. Sets `MODE_HAVE_FILES` so the no-files stdin fallback does
+  not double-read. Bare `-` previously fell through the flag loop as a no-op
+  (the flag branch now requires `ARG[1] != '\0'`).
+- **`-r` error accumulation**: `callback_file` no longer aborts the whole walk
+  when one file fails (unreadable, etc.) — it counts into `a.err_count`
+  (`args_ty` field) and continues, so later files are still processed. After
+  the loop `main` reports `N file(s) failed during processing.` on stderr and
+  exits non-zero (2 in grep mode). The `-c` scan pass keeps the strict
+  abort-on-error behavior (a partial preview would be unsafe to confirm).
+  Tests: `t_recursive_continues_on_error` (files.sh), `t_grep_nonexistent_file`.
+- **`init_defaults()` idempotent**: assigns `G.cflags`/`G.n`/`G.eflags`
+  instead of `|=`, so repeated calls cannot leak state.
+- **Colored diff is default**: confirmed and locked with
+  `t_confirm_colored_default` — the `-c` preview colors are unconditional
+  (no `isatty` gating); the earlier "gate on tty" idea was dropped by design.
+
+New tests total: files 27→31, flags 23→25, confirm 79→80, + grep suite 17 =
+**14 suites, 289 deterministic tests**.
 
 ## Test-Driven Development (TDD) Guidelines
 

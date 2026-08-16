@@ -5,6 +5,52 @@
 #include "files.h"
 #include "confirm.h"
 
+/* Number of leading bytes scanned for NULs when deciding a file is binary;
+ * covers the usual text/binary header region without reading the whole file. */
+#define BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)
+
+/* --grep mode: print the whole content of every line that matches FIND.
+ * Matching is line-based like grep (a regex can never span newlines here,
+ * unlike the replace path which scans the whole buffer). A fixed-string
+ * empty find matches every line, mirroring grep ''. */
+jstr_ret_ty
+grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
+               const char *R find, size_t find_len)
+{
+	const char *d = buf->data;
+	const size_t n = buf->size;
+	const char *p = d;
+	for (;;) {
+		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
+		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
+		int matched;
+		if (G.mode & MODE_USE_REGEX) {
+			matched = (jstr_re_match_len(&G.regex, p, line_len, G.eflags) == JSTR_RE_RET_NOERROR);
+		} else {
+			matched = (find_len == 0) || jstr_strstr_len(p, line_len, find, find_len) != NULL;
+		}
+		if (matched) {
+			G.grep_matched = 1;
+			if (!(G.mode & MODE_QUIET)) {
+				if (fname != NULL) {
+					if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+					if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+				}
+				if (jstr_unlikely(jstr_io_fwrite(p, 1, line_len, stdout) != line_len))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+				if (jstr_unlikely(jstr_io_fputc('\n', stdout) == EOF))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+			}
+		}
+		if (nl == NULL)
+			break;
+		p = nl + 1;
+	}
+	return JSTR_RET_SUCC;
+}
+
 jstr_ret_ty
 process_buffer(const jstr_twoway_ty *R t,
                   jstr_ty *R buf,
@@ -36,7 +82,7 @@ process_buffer(const jstr_twoway_ty *R t,
 		if (jstr_unlikely(find_len == 0)) {
 			changed.zu = 0;
 		} else {
-			changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, 10, G.n);
+			changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, JSTR_NMATCH_MAX, G.n);
 			if (jstr_re_chk(changed.d)) {
 				jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -110,11 +156,14 @@ process_buffer(const jstr_twoway_ty *R t,
 			bakp = NULL;
 		}
 		/* The file was successfully rewritten in place: report its name on
-		 * stderr (never stdout) so the caller can see what changed. */
-		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stderr) != fname_len))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		 * stderr (never stdout) so the caller can see what changed. -q
+		 * silences this echo; -l still prints it to stdout explicitly. */
+		if (!(G.mode & MODE_QUIET)) {
+			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stderr) != fname_len))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+		}
 		if (G.mode & MODE_PRINT_CHANGES) {
 			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -143,8 +192,11 @@ process_file(const jstr_twoway_ty *R t,
                 const size_t rplc_len)
 {
 	const size_t file_size = (size_t)st->st_size;
-	/* A fixed-string find longer than the whole file cannot match. */
-	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len)
+	/* A fixed-string find longer than the whole file cannot match. In the
+	 * interactive editor the find can still be edited to something shorter,
+	 * so keep such files cached there. */
+	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len &&
+	    !((G.mode & MODE_CONFIRM) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)))
 		return JSTR_RET_SUCC;
 	/* Preallocate the length of the replace string. */
 	/* Worst-case output size = input + (longer replace) + trailing newline. */
@@ -153,9 +205,12 @@ process_file(const jstr_twoway_ty *R t,
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	/* Skip files with NUL bytes in the first 1 KiB. */
-	if (jstr_io_isbinary_atleast(buf->data, file_size, JSTR_IO_KIB * 4))
+	/* Skip files with NUL bytes in the first BINARY_SCAN_SIZE bytes. */
+	if (jstr_io_isbinary_atleast(buf->data, file_size, BINARY_SCAN_SIZE))
 		return JSTR_RET_SUCC;
+	/* --grep mode never edits; scan and print matching lines instead. */
+	if (G.mode & MODE_GREP)
+		return grep_scan_file(buf, fname, fname_len, find, find_len);
 	/* During the -c dry-run pass, only scan and preview; the real edit
 	 * happens on the second pass after the user confirms. The file's content
 	 * is recorded so pass 2 edits it from memory without re-reading disk. */

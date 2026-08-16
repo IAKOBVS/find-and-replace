@@ -57,12 +57,19 @@ file_exists(const char *R fname)
 	return access(fname, F_OK) == 0;
 }
 
-/* ftw callback: process every regular file the traversal yields. */
+/* ftw callback: process every regular file the traversal yields. A single
+ * file failing to process (e.g. unreadable) must not abort the whole walk:
+ * count it and keep going so the remaining files are still handled. The -c
+ * scan pass keeps the strict behavior, since a partial preview would be
+ * unsafe to confirm against. */
 JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 {
-	const args_ty *const a = args;
-	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->dirpath_len, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len)))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	args_ty *const a = (args_ty *)(void *)args;
+	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->dirpath_len, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len))) {
+		if (G.confirm_pass && (G.mode & MODE_CONFIRM))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		++a->err_count;
+	}
 	return JSTR_RET_SUCC;
 }
 

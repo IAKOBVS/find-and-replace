@@ -17,6 +17,18 @@
 
 static struct termios orig_termios;
 static int term_initialized = 0;
+static const char *env_cols;
+static const char *env_lines;
+
+/* Terminal size fallbacks for when ioctl(TIOCGWINSZ) and the LINES/COLUMNS
+ * environment variables are all unavailable (non-tty, redirected output). */
+#define TERM_ROWS_FALLBACK 24
+#define TERM_COLS_FALLBACK 80
+/* Free-RAM estimate fallback when /proc/meminfo cannot be read; large enough
+ * that the scan cache limit never artificially caps a preview. */
+#define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
+/* Read buffer size for /proc/meminfo (a few KiB is far beyond the file size). */
+#define MEMINFO_BUF_SIZE (4096 + 1)
 
 static void
 restore_terminal(void)
@@ -100,6 +112,9 @@ setup_terminal(void)
 	if (jstr_unlikely(tcgetattr(STDIN_FILENO, &orig_termios) < 0))
 		return;
 	struct termios raw = orig_termios;
+	/* Raw mode: drop echo, line buffering, ^C/^Z/^V signals and flow control
+	 * (so Ctrl-C reaches the editor, not the shell), and newline translation
+	 * (so the editor sees '\n' as-is). Read returns after a single byte. */
 	raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
 	raw.c_iflag &= ~(IXON | ICRNL);
 	raw.c_cc[VMIN] = 1;
@@ -134,9 +149,9 @@ match_pushback(matches_ty *R matches,
 	(matches->data)[matches->size].start = start;
 	(matches->data)[matches->size].end = end;
 	if (rm) {
-		memcpy((matches->data)[matches->size].rm, rm, 10 * sizeof(regmatch_t));
+		memcpy((matches->data)[matches->size].rm, rm, JSTR_NMATCH_MAX * sizeof(regmatch_t));
 	} else {
-		memset((matches->data)[matches->size].rm, 0, 10 * sizeof(regmatch_t));
+		memset((matches->data)[matches->size].rm, 0, JSTR_NMATCH_MAX * sizeof(regmatch_t));
 	}
 	++matches->size;
 }
@@ -147,13 +162,13 @@ get_free_ram_size(void)
 #ifdef __linux__
 	const int fd = open("/proc/meminfo", O_RDONLY);
 	if (jstr_unlikely(fd == -1))
-		return 1 * JSTR_IO_GIB;
+		return FREE_RAM_FALLBACK;
 
-	char buf[4096 + 1];
+	char buf[MEMINFO_BUF_SIZE];
 	const ssize_t read_sz = read(fd, buf, sizeof(buf) - 1);
 	close(fd);
 	if (jstr_unlikely(read_sz <= 0))
-		return 1 * JSTR_IO_GIB;
+		return FREE_RAM_FALLBACK;
 
 	buf[read_sz] = '\0';
 
@@ -299,14 +314,15 @@ get_terminal_cols(void)
 	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
 		return w.ws_col;
 	}
-	const char *cols_env = getenv("COLUMNS");
-	if (cols_env != NULL) {
-		int c = atoi(cols_env);
+	if (env_cols == NULL)
+		env_cols = getenv("COLUMNS");
+	if (env_cols != NULL) {
+		int c = jstr_atoi(env_cols);
 		if (c > 0) {
 			return (unsigned short)c;
 		}
 	}
-	return 80; /* standard default fallback */
+	return TERM_COLS_FALLBACK; /* standard default fallback */
 }
 
 static unsigned short
@@ -506,9 +522,9 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				}
 				/* Dynamically compute the eflags (like REG_NOTBOL) based on offset. */
 				const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
-				regmatch_t rm[10];
+				regmatch_t rm[JSTR_NMATCH_MAX];
 				memset(rm, 0, sizeof(rm));
-				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, scan_size - off, 10, rm, eflags_curr);
+				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, scan_size - off, JSTR_NMATCH_MAX, rm, eflags_curr);
 				if (ret == JSTR_RE_RET_NOERROR) {
 					const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
 					const size_t m_start = off + (size_t)rm[0].rm_so;
@@ -785,14 +801,15 @@ get_terminal_rows(void)
 	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
 		return w.ws_row;
 	}
-	const char *lines_env = getenv("LINES");
-	if (lines_env != NULL) {
-		int l = atoi(lines_env);
+	if (env_lines == NULL)
+		env_lines = getenv("LINES");
+	if (env_lines != NULL) {
+		int l = jstr_atoi(env_lines);
 		if (l > 0) {
 			return (unsigned short)l;
 		}
 	}
-	return 24; /* standard default fallback */
+	return TERM_ROWS_FALLBACK; /* standard default fallback */
 }
 
 typedef struct {
@@ -839,6 +856,19 @@ field_affects_recompile(size_t field)
 	if (field < FIELD_COUNT)
 		return field_info_table[field].affects_recompile;
 	return 0;
+}
+
+/* Copy SRC into DST with the FIND/REPLACE escape sequences unescaped, so the
+ * live compile and preview see the same strings the CLI path would produce.
+ * DST's size is set to the unescaped length. */
+static void
+jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
+{
+	jstr_empty_j(dst);
+	if (src->size > 0 && src->data) {
+		DIE_IF(jstr_assign_len_j(dst, src->data, src->size), "%s", "Out of memory.\n");
+		dst->size = JSTR_DIFF(jstr_unescape_p(dst->data), dst->data);
+	}
 }
 
 static void
@@ -960,8 +990,15 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 	last_err_buf[0] = '\0';
 
+	/* Unescaped copies of FIND/REPLACE for the live compile and preview so the
+	 * interactive fields behave like the CLI args. */
+	jstr_ty find_plain = JSTR_INIT;
+	jstr_ty rplc_plain = JSTR_INIT;
+
 	while (1) {
 		if (needs_redraw) {
+			jstr_unescape_copy(&find_plain, find_buf);
+			jstr_unescape_copy(&rplc_plain, rplc_buf);
 			if (first_draw) {
 				term_clear_and_home();
 				first_draw = 0;
@@ -976,8 +1013,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 				err_buf[0] = '\0';
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
-				const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-				comp_ret = interactive_compile(t, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, err_buf, sizeof(err_buf));
+				const char *ptn = (find_plain.size > 0 && find_plain.data) ? find_plain.data : "";
+				comp_ret = interactive_compile(t, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, err_buf, sizeof(err_buf));
 				if (comp_ret == JSTR_RET_SUCC) {
 					comp_ret = interactive_compile_include_exclude(include_buf->data ? include_buf->data : "", include_buf->size, exclude_buf->data ? exclude_buf->data : "", exclude_buf->size, err_buf, sizeof(err_buf));
 				}
@@ -993,7 +1030,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 			size_t total_matches = 0;
 			size_t files_matched = 0;
-			size_t preview_lines = 0;
+			const unsigned short rows = get_terminal_rows();
 
 			if (!is_valid) {
 				/* Clear entire screen once on compile error to wipe out previous previews/ghost lines */
@@ -1005,12 +1042,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				term_clear_line_end();
 				jstr_io_putchar('\n');
-				preview_lines = 1;
 			} else {
 				/* Calculate max_preview_lines dynamically based on terminal
 				 * height, leaving room for the controls block: header + stats
 				 * + FIELD_COUNT fields + blank line + omitted-line marker. */
-				unsigned short rows = get_terminal_rows();
 				const size_t control_lines = FIELD_COUNT + 4;
 				if (rows > control_lines) {
 					G.max_preview_lines = rows - control_lines;
@@ -1028,8 +1063,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					if (!interactive_file_pass(file, files_buf))
 						continue;
 					size_t file_matches = 0;
-					const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_buf->size, rplc_buf->data ? rplc_buf->data : "", rplc_buf->size, &file_matches);
+					const char *ptn = (find_plain.size > 0 && find_plain.data) ? find_plain.data : "";
+					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, &file_matches);
 					if (file_matches > 0) {
 						total_matches += file_matches;
 						files_matched++;
@@ -1044,12 +1079,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */
 					term_clear_and_home();
 				}
-				preview_lines = G.preview_lines_printed;
 			}
 
-			/* Render control fields at the bottom */
-			if (is_valid && total_matches)
-				jstr_io_putchar('\n');
+			/* Render the control fields pinned to the bottom of the screen so
+			 * the last field always ends on the terminal's last row; the
+			 * preview area sits above. */
+			const size_t start_control_line = (rows > FIELD_COUNT + 1) ? rows - (FIELD_COUNT + 1) : 1;
+			term_move_cursor(start_control_line, 1);
 			if (vim_is_insert_mode())
 				jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
 			else
@@ -1076,16 +1112,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			/* Clear from the current cursor position to the bottom of the screen */
 			term_clear_down();
 
-			/* Compute absolute cursor position */
-			size_t start_control_line = preview_lines + 1; /* Controls header */
-			if (is_valid && total_matches > 0) {
-				if (preview_lines >= G.max_preview_lines) {
-					start_control_line += 1; /* omitted line */
-				}
-				start_control_line += 1; /* empty line before controls */
-			}
-			size_t find_line = start_control_line + 2;
-			size_t active_line = find_line + (size_t)active_field;
+			/* The cursor sits on the active field, anchored at the bottom.
+			 * Fields start two rows below the header (after stats). */
+			size_t active_line = start_control_line + 2 + (size_t)active_field;
 			size_t active_col = field_info_table[active_field].inactive_prefix_len + cursors[active_field] + 1;
 
 			term_move_cursor(active_line, active_col);
@@ -1213,5 +1242,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 done:
 	restore_terminal();
+#if DO_FREE /* Buffer reused across redraws; freeing is optional pre-exit. */
+	jstr_free_j(&find_plain);
+	jstr_free_j(&rplc_plain);
+#endif
 	return JSTR_RET_SUCC;
 }

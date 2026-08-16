@@ -18,4 +18,11 @@ jstr_ret_ty process_file(const jstr_twoway_ty *R t, jstr_ty *R buf,
                          const size_t find_len, const char *R rplc,
                          const size_t rplc_len);
 
+/* --grep mode: print every line of BUF matching FIND (fixed or regex) to
+ * stdout. FNAME != NULL prefixes each printed line with "FNAME:" (stdin has
+ * no prefix). Sets G.grep_matched so main can return grep's exit code. */
+jstr_ret_ty grep_scan_file(const jstr_ty *R buf, const char *R fname,
+                           size_t fname_len, const char *R find,
+                           size_t find_len);
+
 #endif /* PROCESS_H */

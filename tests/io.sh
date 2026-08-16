@@ -91,7 +91,7 @@ t_large_text_file_processed() {
 t_binary_nul_past_kib_processed() {
 	td=$1
 	i=0; : > "$td/f"
-	while [ $i -lt 120 ]; do printf 'aaaaaaaa\n' >> "$td/f"; i=$((i + 1)); done
+	while [ $i -lt 500 ]; do printf 'aaaaaaaa\n' >> "$td/f"; i=$((i + 1)); done
 	printf '\x00def\n' >> "$td/f"
 	"$PROG" def xyz -i "$td/f" > /dev/null 2>&1
 	grep -q xyz "$td/f" && echo PASS > "$td/result" || echo "FAIL: late-NUL file was skipped" > "$td/result"

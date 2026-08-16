@@ -166,6 +166,20 @@ t_l_flag_cli() {
 	fi
 }
 
+t_quiet_inplace() {
+	td=$1
+	printf 'hello\n' > "$td/f"
+	"$PROG" hello bye -i -q "$td/f" 2>"$td/err" >/dev/null
+	[ "$(cat "$td/f")" = 'bye' ] && [ ! -s "$td/err" ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] err=[$(cat "$td/err")]" > "$td/result"
+}
+
+t_quiet_long_flag() {
+	td=$1
+	printf 'hello\n' > "$td/f"
+	"$PROG" hello bye -i --quiet "$td/f" 2>"$td/err" >/dev/null
+	[ "$(cat "$td/f")" = 'bye' ] && [ ! -s "$td/err" ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] err=[$(cat "$td/err")]" > "$td/result"
+}
+
 t_exclude_long_relative_path() {
 	td=$1
 	printf 'zzz\n' > "$td/f"
@@ -211,6 +225,8 @@ t_exclude_invalid_regex
 t_version_flag_mid_args
 t_v_flag_mid_args
 t_l_flag_cli
+t_quiet_inplace
+t_quiet_long_flag
 t_exclude_long_relative_path
 "
 run_suite "flag tests" "$TESTS"

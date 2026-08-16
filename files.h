@@ -18,6 +18,10 @@ typedef struct args_ty {
 	const char *rplc;
 	size_t rplc_len;
 	const jstr_twoway_ty *t;
+	/* Number of per-file processing failures during recursive traversal.
+	 * callback_file keeps walking on error and counts here so main can
+	 * report the total and exit non-zero instead of aborting mid-tree. */
+	size_t err_count;
 } args_ty;
 
 /* stat() wrapper and backup-name existence check. */

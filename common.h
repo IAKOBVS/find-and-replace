@@ -8,6 +8,11 @@
 #define JSTR_USE_UNLOCKED_IO_READ  1
 #define JSTR_USE_UNLOCKED_IO_WRITE 1
 
+/* CLI applications exit immediately after use, so buffer frees before exit are
+ * pure overhead. 0 = skip freeing in cleanup() paths (leaks are reclaimed by
+ * the OS); set to 1 to enable them (e.g. for valgrind/ASan debugging). */
+#define DO_FREE 0
+
 #include <jstr/jstr.h>
 #include <jstr/io.h>
 #include <jstr/regex.h>
@@ -16,6 +21,11 @@
 
 #define S_LEN(s)     (sizeof(s) - 1)
 #define S_LITERAL(s) (s), (sizeof(s) - 1)
+
+/* Backreference capture count jstring's regex engine supports (its internal
+ * rm[] array holds 10 entries). Every nmatch argument and the tool's own
+ * match_ty.rm[] must stay in sync with this. */
+#define JSTR_NMATCH_MAX 10
 
 /* Die-with-message helper used in every translation unit. */
 #define DIE_IF_PRINT(x, fmt, ...)                      \
@@ -38,13 +48,15 @@ typedef enum {
 	MODE_COMPILED = 1 << 6,
 	MODE_HAVE_FILES = 1 << 7,
 	MODE_CONFIRM = 1 << 8,
+	MODE_GREP = 1 << 9,
+	MODE_QUIET = 1 << 10,
 } mode_ty;
 
 /* One byte range of a find occurrence, relative to the start of the file. */
 typedef struct match_ty {
 	size_t start;
 	size_t end;
-	regmatch_t rm[10];
+	regmatch_t rm[JSTR_NMATCH_MAX];
 } match_ty;
 
 typedef struct matches_ty {
@@ -85,6 +97,9 @@ typedef struct global_ty {
 	/* Set by the scan pass when at least one match exists; decides whether the
 	 * confirmation prompt is shown. */
 	unsigned int matches_found;
+	/* 1 when --grep found at least one matching line; decides the exit code
+	 * (0 vs 1). Set even with -q, which only silences the line output. */
+	int grep_matched;
 	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
 	 * instead of modifying files. Reset before the second (real) pass. */
 	int confirm_pass;

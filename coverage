@@ -29,9 +29,50 @@ echo "=== gcov line + branch coverage ==="
 (
     cd "$TMPDIR"
     for src in $SRCS; do
-        gcov -b -o "$TMPDIR" "$DIR/$src" 2>/dev/null
+        gcov -b -o "$TMPDIR" "$DIR/$src" 2>/dev/null | tee "gcov.$src.out" | grep -E "^File .*${src}'|Lines executed:|Branches executed:|Taken at least once:"
     done
 )
+
+# Extract branch stats for one source from gcov's stdout for that source.
+# gcov prints per-file blocks:
+#   File '/path/main.c'
+#   Lines executed:90.27% of 220
+#   Branches executed:92.42% of 264
+#   Taken at least once:73.86% of 264
+# Branch summaries are NOT written into the .gcov file, so parse stdout.
+branch_stats() {
+    src="$1"; out="$2"
+    awk -v t="$src" '
+        /^File .*\// {
+            f=$0
+            sub(/^File .*\//, "", f)
+            sub(/\x27$/, "", f)
+            inblock = (f == t)
+        }
+        inblock && /^Lines executed:/ {
+            sub(/^Lines executed:/, "", $0)
+            sub(/% of .*/, "", $0)
+            lines_pct = $0
+        }
+        inblock && /^Branches executed:/ {
+            sub(/^Branches executed:/, "", $0)
+            sub(/% of /, " ", $0)
+            br_pct = $1
+            br_tot = $2
+        }
+        inblock && /^Taken at least once:/ {
+            sub(/^Taken at least once:/, "", $0)
+            sub(/% of /, " ", $0)
+            tk_pct = $1
+        }
+        END {
+            if (br_tot == "") br_tot = 0
+            if (br_pct == "") br_pct = 0
+            if (tk_pct == "") tk_pct = 0
+            printf "%d %d %d", br_tot, br_pct * br_tot / 100 + 0.5, tk_pct * br_tot / 100 + 0.5
+        }
+    ' "$out"
+}
 
 echo ""
 echo "=== Coverage Summary ==="
@@ -47,11 +88,11 @@ for src in $SRCS; do
     lm=$(grep -c '^    #####:' "$gc" || true)
     line_total=$((line_total + le + lm))
     line_miss=$((line_miss + lm))
-    bt=$(awk '/Branches executed:/{print $4}' "$gc")
-    bp=$(awk '/Branches executed:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
-    tp=$(awk '/Taken at least once:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
-    be=$(awk -v t="$bt" -v p="$bp" 'BEGIN{printf "%d", t*p/100+0.5}')
-    bk=$(awk -v t="$bt" -v p="$tp" 'BEGIN{printf "%d", t*p/100+0.5}')
+    stats=$(branch_stats "$src" "$TMPDIR/gcov.$src.out")
+    set -- $stats
+    bt=$1
+    be=$2
+    bk=$3
     br_total=$((br_total + bt))
     br_exec=$((br_exec + be))
     br_taken=$((br_taken + bk))
@@ -69,12 +110,14 @@ for src in $SRCS; do
     [ -f "$gc" ] || continue
     le=$(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$gc" || true)
     lm=$(grep -c '^    #####:' "$gc" || true)
-    bt=$(awk '/Branches executed:/{print $4}' "$gc")
-    bp=$(awk '/Branches executed:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
-    tp=$(awk '/Taken at least once:/{gsub("%","",$2); split($2,a,":"); print a[2]}' "$gc")
+    stats=$(branch_stats "$src" "$TMPDIR/gcov.$src.out")
+    set -- $stats
+    bt=$1
+    be=$2
+    bk=$3
     lp=$(awk -v e="$le" -v m="$lm" 'BEGIN{printf "%.1f", 100*e/(e+m)}')
-    bp2=$(awk -v t="$bt" -v p="$bp" 'BEGIN{printf "%.1f", t*p/100}')
-    tp2=$(awk -v t="$bt" -v p="$tp" 'BEGIN{printf "%.1f", t*p/100}')
+    bp2=$(awk -v e="$be" -v t="$bt" 'BEGIN{printf "%.1f", (t ? 100*e/t : 0)}')
+    tp2=$(awk -v k="$bk" -v t="$bt" 'BEGIN{printf "%.1f", (t ? 100*k/t : 0)}')
     printf '  %-10s lines %s%% (%d/%d)   branches %s%%/%s%% (%d)\n' "$src" "$lp" "$le" "$((le+lm))" "$bp2" "$tp2" "$bt"
 done
 

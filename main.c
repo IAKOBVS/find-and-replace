@@ -67,6 +67,14 @@ static const char *usage =
 	_("    REG_NEWLINE is not passed as the cflag to regexec.\n")
 	_("  -v, --version\n")
 	_("    Print version information and exit.\n")
+	_("  -q, --quiet\n")
+	_("    Suppress status output: the per-file stderr echo from -i and the\n")
+	_("    matching lines in --grep mode (the exit code is still returned).\n")
+	_("  --grep\n")
+	_("    Print the lines that contain FIND (like grep) and exit 0 if any\n")
+	_("    matched, 1 if none, 2 on error. No files are modified. Cannot be\n")
+	_("    combined with -i or -c. Matching lines from named files are\n")
+	_("    prefixed with FILE:, lines from stdin are printed bare.\n")
 	_("\n")
 	_("FIND and REPLACE shall be placed in that exact order.\n")
 	_("\n")
@@ -83,9 +91,18 @@ static const char *usage =
 	_("-E (Extended Regex) and -I (ignore case) imply -R (Regex), so using -E or -I automatically\n")
 	_("enables -R.\n")
 	_("\n")
-	_("If no file was passed, read from stdin.\n");
+	_("If no file was passed, read from stdin. A lone - in FILES also reads\n")
+	_("stdin at that point in the argument list.\n");
 
 /* clang-format on */
+
+/* Exit code on error: --grep follows grep's convention of 2 for errors
+ * (distinct from 1 = no match); every other mode keeps EXIT_FAILURE. */
+static int
+err_exit_code()
+{
+	return (G.mode & MODE_GREP) ? 2 : EXIT_FAILURE;
+}
 
 /* Compile FIND (regex or Two-Way fixed-string matcher) into the global
  * state. Recompiles when the regex mode/cflags change between files; the
@@ -105,7 +122,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
 			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
 				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find);
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
+				exit(err_exit_code());
 			}
 			/* Validate backreferences */
 			size_t max_backref = 0;
@@ -119,7 +136,7 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 			}
 			if (jstr_unlikely(max_backref > G.regex.reg.re_nsub)) {
 				fprintf(stderr, "find-and-replace error: Replace backreference \\%zu exceeds find capture groups (%zu)\n", max_backref, G.regex.reg.re_nsub);
-				exit(EXIT_FAILURE);
+				exit(err_exit_code());
 			}
 		} else {
 			jstr_memmem_comp(t, find, find_len);
@@ -131,14 +148,16 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 	return JSTR_RET_SUCC;
 }
 
-/* Default flags. */
+/* Default flags. Idempotent: assigns (never ORs) so calling it again cannot
+ * leak state from an earlier call. */
 static void
 init_defaults()
 {
 	/* Anchors match on newlines. */
-	G.cflags |= JSTR_RE_CF_NEWLINE;
+	G.cflags = JSTR_RE_CF_NEWLINE;
 	/* Non-global replacement. */
 	G.n = 1;
+	G.eflags = 0;
 }
 
 /* Return 1 if FILE passes the -c confirm filters: the interactive Files
@@ -219,11 +238,15 @@ main(int argc, char **argv)
 	}
 	struct stat st;
 	int ret;
-	args_ty a;
+	args_ty a = { 0 };
 	jstr_twoway_ty t;
 	a.t = &t;
 	a.find = (const char *)FIND;
 	a.rplc = (const char *)RPLC;
+	/* Keep the raw argv forms so the interactive editor can seed its fields
+	 * with what the user typed and unescape on use (like the CLI args). */
+	const char *raw_find = (const char *)FIND;
+	const char *raw_rplc = (const char *)RPLC;
 	/* Unescape \n, \t, ... in place; the unescaped length is the diff. */
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
@@ -236,7 +259,7 @@ main(int argc, char **argv)
 	unsigned int i;
 	/* Process all arguments: flags then files, in order. */
 	for (i = 3; ARG; ++i) {
-		if (*ARG == '-' && !end_of_flags) {
+		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
 				/* Plain -i: rewrite the file in place (no backup). */
@@ -257,12 +280,12 @@ main(int argc, char **argv)
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --include flag.\n");
-					G.include_pat = ARG;
-					const int re_ret = jstr_re_comp(&G.include_re, ARG, G.cflags);
-					if (jstr_unlikely(re_ret != JSTR_RE_RET_NOERROR)) {
-						jstr_re_err(re_ret, &G.include_re, "--include pattern \"%s\" is not a valid regex.\n", ARG);
-						exit(EXIT_FAILURE);
-					}
+				G.include_pat = ARG;
+				const int re_ret = jstr_re_comp(&G.include_re, ARG, G.cflags);
+				if (jstr_unlikely(re_ret != JSTR_RE_RET_NOERROR)) {
+					jstr_re_err(re_ret, &G.include_re, "--include pattern \"%s\" is not a valid regex.\n", ARG);
+					exit(err_exit_code());
+				}
 					G.have_include = 1;
 					continue;
 				}
@@ -271,18 +294,28 @@ main(int argc, char **argv)
 					ARG_NEXT();
 					if (jstr_nullchk(ARG))
 						jstr_errdie("%s: %s", argv[0], "no argument after --exclude flag.\n");
-					G.exclude_pat = ARG;
-					const int re_ret = jstr_re_comp(&G.exclude_re, ARG, G.cflags);
-					if (jstr_unlikely(re_ret != JSTR_RE_RET_NOERROR)) {
-						jstr_re_err(re_ret, &G.exclude_re, "--exclude pattern \"%s\" is not a valid regex.\n", ARG);
-						exit(EXIT_FAILURE);
-					}
+				G.exclude_pat = ARG;
+				const int re_ret = jstr_re_comp(&G.exclude_re, ARG, G.cflags);
+				if (jstr_unlikely(re_ret != JSTR_RE_RET_NOERROR)) {
+					jstr_re_err(re_ret, &G.exclude_re, "--exclude pattern \"%s\" is not a valid regex.\n", ARG);
+					exit(err_exit_code());
+				}
 					G.have_exclude = 1;
 					continue;
 				}
 				/* bare "--": stop flag parsing */
 				if (ARG[2] == '\0') {
 					end_of_flags = 1;
+					continue;
+				}
+				/* --grep */
+				if (!strcmp(ARG + 2, "grep")) {
+					G.mode |= MODE_GREP;
+					continue;
+				}
+				/* --quiet */
+				if (!strcmp(ARG + 2, "quiet")) {
+					G.mode |= MODE_QUIET;
 					continue;
 				}
 				/* --version */
@@ -332,6 +365,9 @@ use_regex_flag:
 					case 'l':
 						G.mode |= MODE_PRINT_CHANGES;
 						break;
+					case 'q':
+						G.mode |= MODE_QUIET;
+						break;
 					case 'r':
 						G.mode |= MODE_USE_RECURSIVE;
 						break;
@@ -344,7 +380,7 @@ use_regex_flag:
 						break;
 					default:
 						fprintf(stderr, "find-and-replace: invalid flag '-%c'. See usage below:\n\n%s", *argp, usage);
-						exit(EXIT_FAILURE);
+						exit(err_exit_code());
 						break;
 					}
 				}
@@ -354,14 +390,36 @@ done_single:;
 		}
 		/* Non-flag argument: a file (or directory with -r) to process. */
 		G.mode |= MODE_HAVE_FILES;
+		/* A lone "-" reads stdin at this point in the argument list. */
+		if (ARG[1] == '\0') {
+			if (G.mode & MODE_CONFIRM)
+				jstr_errdie("%s: -c does not work with '-' (stdin).\n", argv[0]);
+			if (G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))
+				jstr_errdie("%s: -i is meaningless with '-' (stdin).\n", argv[0]);
+			if (G.mode & MODE_USE_RECURSIVE)
+				jstr_errdie("%s: -r is meaningless with '-' (stdin).\n", argv[0]);
+			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
+			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
+			if (G.mode & MODE_GREP)
+				DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a.find, a.find_len)), "%s", "Failed grep on stdin.\n");
+			else
+				DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+			continue;
+		}
 		ret = xstat(ARG, &st);
-		DIE_IF(ret == JSTR_RET_ERR, "stat(%s) failed.\n", ARG);
+		if (jstr_unlikely(ret == JSTR_RET_ERR)) {
+			fprintf(stderr, "find-and-replace: stat(%s) failed.\n", ARG);
+			exit(err_exit_code());
+		}
 		DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
 		if (IS_REG(st.st_mode)) {
 			const size_t fname_len = strlen(ARG);
 			if (!G.have_exclude) {
 process:
-				DIE_IF(jstr_chk(process_file(&t, &G.content_buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len)), "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
+				if (jstr_chk(process_file(&t, &G.content_buf, ARG, fname_len, &st, a.find, a.find_len, a.rplc, a.rplc_len))) {
+					fprintf(stderr, "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", ARG, a.find, a.rplc);
+					exit(err_exit_code());
+				}
 			} else {
 				/* --exclude also filters files named on the command line. */
 				const char *fname = jstr_memrchr(ARG, SEP, fname_len);
@@ -375,14 +433,23 @@ process:
 			 * enforced by the ftw matcher during the traversal. */
 			if (G.mode & MODE_USE_RECURSIVE) {
 				a.buf = &G.content_buf;
-				DIE_IF(jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (G.have_include || G.have_exclude) ? matcher : NULL, NULL)), "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, G.have_include ? "1" : "0");
+				if (jstr_chk(jstr_io_ftw(ARG, callback_file, &a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (G.have_include || G.have_exclude) ? matcher : NULL, NULL))) {
+					fprintf(stderr, "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", ARG, G.have_include ? "1" : "0");
+					exit(err_exit_code());
+				}
 			}
 		} else {
 			fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", ARG);
-			exit(EXIT_FAILURE);
+			exit(err_exit_code());
 		}
 	}
 	/* End of the -c dry-run pass: no file has been touched yet. */
+	/* --grep is read-only: reject it combined with -i or -c. Checked after
+	 * the whole argument list so the flags may appear in any order. */
+	if (jstr_unlikely((G.mode & MODE_GREP) && (G.mode & (MODE_CONFIRM | MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))) {
+		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i or -c.\n");
+		exit(err_exit_code());
+	}
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
 		if (jstr_unlikely(!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))))
 			jstr_errdie("%s: -c requires -i.\n", argv[0]);
@@ -398,8 +465,8 @@ process:
 		jstr_empty_j(&G.interactive_backup_buf);
 
 		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
-			DIE_IF(jstr_append_len_j(&G.interactive_find_buf, a.find, a.find_len), "%s", "Out of memory.\n");
-			DIE_IF(jstr_append_len_j(&G.interactive_rplc_buf, a.rplc, a.rplc_len), "%s", "Out of memory.\n");
+			DIE_IF(jstr_append_len_j(&G.interactive_find_buf, raw_find, strlen(raw_find)), "%s", "Out of memory.\n");
+			DIE_IF(jstr_append_len_j(&G.interactive_rplc_buf, raw_rplc, strlen(raw_rplc)), "%s", "Out of memory.\n");
 			if (G.include_pat)
 				DIE_IF(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat)), "%s", "Out of memory.\n");
 			if (G.exclude_pat)
@@ -433,9 +500,11 @@ process:
 			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_rplc_buf, &G.interactive_flags_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf, &G.interactive_backup_buf)), "%s", "Interactive loop failed.\n");
 
 			a.find = G.interactive_find_buf.data;
-			a.find_len = G.interactive_find_buf.size;
+			a.find_len = JSTR_DIFF(jstr_unescape_p(G.interactive_find_buf.data), G.interactive_find_buf.data);
+			G.interactive_find_buf.size = a.find_len;
 			a.rplc = G.interactive_rplc_buf.data;
-			a.rplc_len = G.interactive_rplc_buf.size;
+			a.rplc_len = JSTR_DIFF(jstr_unescape_p(G.interactive_rplc_buf.data), G.interactive_rplc_buf.data);
+			G.interactive_rplc_buf.size = a.rplc_len;
 
 			/* Backup suffix edited in the TUI: apply it before the second
 			 * pass so process_buffer backs the original up with it. */
@@ -481,13 +550,14 @@ process:
 				if (!file_filter_pass(file, &G.interactive_files_buf))
 					continue;
 				/* Read the file if the content is not in memory. */
+				jstr_ty *const rbuf = (file->content.data == NULL) ? &G.content_buf : &file->content;
 				if (jstr_unlikely(file->content.data == NULL)) {
 					jstr_empty_j(&G.content_buf);
 					DIE_IF(jstr_reserve_j(&G.content_buf, file->content_size), "%s", "Out of memory reading a file.\n");
 					DIE_IF(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size), "%s", "Can't read a file->\n");
 				}
 				st_file.st_mode = file->st_mode;
-				if (jstr_chk(process_buffer(&t, &file->content, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
+				if (jstr_chk(process_buffer(&t, rbuf, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
 					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find, a.rplc);
 			}
 		}
@@ -501,8 +571,23 @@ process:
 				jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
 			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
-			DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+			if (G.mode & MODE_GREP)
+				DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a.find, a.find_len)), "%s", "Failed grep on stdin.\n");
+			else
+				DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
 		}
+	}
+	/* Recursive traversal keeps going past a failing file; report the total
+	 * and exit non-zero (2 in --grep mode, matching grep's error code). */
+	if (jstr_unlikely(a.err_count > 0)) {
+		fprintf(stderr, "find-and-replace: %zu file(s) failed during processing.\n", a.err_count);
+		cleanup();
+		return err_exit_code();
+	}
+	/* --grep exit code: 0 if anything matched, 1 otherwise. */
+	if (G.mode & MODE_GREP) {
+		cleanup();
+		return G.grep_matched ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
 	cleanup();
 	return EXIT_SUCCESS;

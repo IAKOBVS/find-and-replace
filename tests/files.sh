@@ -133,6 +133,22 @@ t_recursive_partial_fail() {
 	[ "$rc" -ne 0 ] && [ "$content" = 'bbb' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc content=[$content]" > "$td/result"
 }
 
+t_recursive_continues_on_error() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'old\n' > "$td/sub/b"
+	chmod 000 "$td/sub/b"
+	printf 'old\n' > "$td/sub/a"
+	printf 'old\n' > "$td/sub/c"
+	rc=0; "$PROG" old new -i -r "$td/sub" > /dev/null 2> "$td/err" || rc=$?
+	ca=$(cat "$td/sub/a"); cb=$(cat "$td/sub/b" 2>/dev/null); cc=$(cat "$td/sub/c")
+	err=$(cat "$td/err")
+	case "$err" in
+		*"file(s) failed during processing"*) msg=1 ;;
+		*) msg=0 ;;
+	esac
+	[ "$rc" -ne 0 ] && [ "$ca" = 'new' ] && [ "$cb" != 'new' ] && [ "$cc" = 'new' ] && [ "$msg" -eq 1 ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc a[$ca] b[$cb] c[$cc] msg=$msg" > "$td/result"
+}
+
 t_double_dash_include_recursive() {
 	td=$1; mkdir -p "$td/sub"
 	printf 'match\n' > "$td/sub/a.txt"
@@ -170,6 +186,28 @@ t_dash_filename_no_double_dash() {
 	td=$1; printf 'match\n' > "$td/-f"
 	out=$("$PROG" match replaced < "$td/-f" 2>/dev/null)
 	[ "$out" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: expected [replaced] got [$out]" > "$td/result"
+}
+
+t_dash_stdin_placeholder_replace() {
+	td=$1; printf 'file one\n' > "$td/f1"; printf 'file three\n' > "$td/f2"
+	printf 'stdin two\n' > "$td/sin"
+	out=$("$PROG" one ONE "$td/f1" - "$td/f2" < "$td/sin" 2>/dev/null)
+	exp='file ONE
+stdin two
+file three'
+	[ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out] exp=[$exp]" > "$td/result"
+}
+
+t_dash_stdin_placeholder_inplace_error() {
+	td=$1; printf 'x\n' > "$td/f"
+	rc=0; "$PROG" x y -i "$td/f" - < /dev/null > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -i with - (stdin placeholder) should error (rc=$rc)" > "$td/result"
+}
+
+t_dash_stdin_no_double_read() {
+	td=$1; printf 'only once\n' > "$td/sin"
+	out=$("$PROG" once ONCE - < "$td/sin" 2>/dev/null)
+	[ "$out" = 'only ONCE' ] && echo PASS > "$td/result" || echo "FAIL: out=[$out]" > "$td/result"
 }
 
 t_include_regex_suffix() {
@@ -228,11 +266,15 @@ t_recursive_on_regular_file
 t_recursive_nonexistent_dir
 t_recursive_empty_dir
 t_recursive_partial_fail
+t_recursive_continues_on_error
 t_double_dash_include_recursive
 t_recursive_include_exclude_dash_fname
 t_include_cli_file_noop
 t_recursive_to_stdout
 t_dash_filename_no_double_dash
+t_dash_stdin_placeholder_replace
+t_dash_stdin_placeholder_inplace_error
+t_dash_stdin_no_double_read
 t_include_regex_suffix
 t_exclude_regex_prefix
 t_include_regex_extended

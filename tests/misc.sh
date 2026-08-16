@@ -35,6 +35,16 @@ t_end_of_options() {
 	[ "$ct" = 'match' ] && [ "$cc" = 'replaced' ] && echo PASS > "$td/result" || echo "FAIL: txt [$ct] c [$cc]" > "$td/result"
 }
 
+t_unknown_double_dash_flag() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	"$PROG" hello goodbye --bogus "$td/f" 2>/dev/null > "$td/out"
+	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q 'goodbye world' "$td/out"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: unknown --flag should be ignored; file=[$(cat "$td/f")] out=[$(cat "$td/out")]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_double_dash
 t_double_dash_file
@@ -42,5 +52,6 @@ t_multiline_find
 t_slash
 t_overlapping
 t_end_of_options
+t_unknown_double_dash_flag
 "
 run_suite "miscellaneous tests" "$TESTS"

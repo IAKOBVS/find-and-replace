@@ -467,13 +467,7 @@ process:
 			 * every file untouched. */
 			if (jstr_io_getchar() != 'y') {
 				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
-				jstr_empty_j(&G.interactive_find_buf);
-				jstr_empty_j(&G.interactive_rplc_buf);
-				jstr_empty_j(&G.interactive_flags_buf);
-				jstr_empty_j(&G.interactive_files_buf);
-				jstr_empty_j(&G.interactive_include_buf);
-				jstr_empty_j(&G.interactive_exclude_buf);
-				jstr_empty_j(&G.interactive_backup_buf);
+				cleanup();
 				exit(EXIT_FAILURE);
 			}
 			/* Second pass: edit each cached file's content from memory; the
@@ -496,21 +490,6 @@ process:
 				if (jstr_chk(process_buffer(&t, &file->content, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))
 					jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a.find, a.rplc);
 			}
-			jstr_empty_j(&G.interactive_find_buf);
-			jstr_empty_j(&G.interactive_rplc_buf);
-			jstr_empty_j(&G.interactive_flags_buf);
-			jstr_empty_j(&G.interactive_files_buf);
-			jstr_empty_j(&G.interactive_include_buf);
-			jstr_empty_j(&G.interactive_exclude_buf);
-			jstr_empty_j(&G.interactive_backup_buf);
-		} else {
-			jstr_empty_j(&G.interactive_find_buf);
-			jstr_empty_j(&G.interactive_rplc_buf);
-			jstr_empty_j(&G.interactive_flags_buf);
-			jstr_empty_j(&G.interactive_files_buf);
-			jstr_empty_j(&G.interactive_include_buf);
-			jstr_empty_j(&G.interactive_exclude_buf);
-			jstr_empty_j(&G.interactive_backup_buf);
 		}
 	} else {
 		/* If no file was passed, read from stdin. */

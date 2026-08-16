@@ -55,8 +55,6 @@ handle_signal(int sig)
 	_exit(EXIT_FAILURE);
 }
 
-static void print_size_t(size_t val);
-
 static void
 term_clear_screen(void)
 {
@@ -345,7 +343,7 @@ get_size_t_width(size_t val)
 }
 
 /* Write VAL in decimal to stdout without using printf. */
-static void
+void
 print_size_t(size_t val)
 {
 	char buf[3 * sizeof(val) + 2];

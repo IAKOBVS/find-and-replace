@@ -9,6 +9,28 @@
  * covers the usual text/binary header region without reading the whole file. */
 #define BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)
 
+/* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
+static jstr_ret_ty
+print_line_prefix(const char *R fname, size_t fname_len, size_t line)
+{
+	if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_unlikely(jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout)) != S_LEN(COLOR_GREEN))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	print_size_t(line);
+	if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	return JSTR_RET_SUCC;
+}
+
 /* --grep mode: print the whole content of every line that matches FIND.
  * Matching is line-based like grep (a regex can never span newlines here,
  * unlike the replace path which scans the whole buffer). A fixed-string
@@ -20,26 +42,44 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 	const char *d = buf->data;
 	const size_t n = buf->size;
 	const char *p = d;
-	for (;;) {
+	for (size_t line = 1;; ++line) {
 		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
-		int matched;
+		int matched = 0;
+		regmatch_t rm = { 0 };
 		if (G.mode & MODE_USE_REGEX) {
-			matched = (jstr_re_match_len(&G.regex, p, line_len, G.eflags) == JSTR_RE_RET_NOERROR);
+			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
 		} else {
-			matched = (find_len == 0) || jstr_strstr_len(p, line_len, find, find_len) != NULL;
+			if (find_len) {
+				const char *tmp = jstr_strstr_len(p, line_len, find, find_len);
+				if (tmp) {
+					matched = 1;
+					rm.rm_so = tmp - p;
+				}
+			}
+			if (find_len)
+				rm.rm_eo = (size_t)rm.rm_so + find_len;
 		}
 		if (matched) {
 			G.grep_matched = 1;
 			if (!(G.mode & MODE_QUIET)) {
-				if (fname != NULL) {
-					if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-						JSTR_RETURN_ERR(JSTR_RET_ERR);
-					if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
-						JSTR_RETURN_ERR(JSTR_RET_ERR);
-				}
+				if (jstr_likely(fname != NULL))
+					print_line_prefix(fname, fname_len, line);
+#if 0
 				if (jstr_unlikely(jstr_io_fwrite(p, 1, line_len, stdout) != line_len))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
+#else
+				if (jstr_unlikely(jstr_io_fwrite(p, 1, (size_t)rm.rm_so, stdout) != (size_t)rm.rm_so))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+				if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout) != S_LEN(COLOR_RED)))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+				if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_so, 1, (size_t)(rm.rm_eo - rm.rm_so), stdout) != (size_t)(rm.rm_eo - rm.rm_so)))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+				if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout) != S_LEN(COLOR_RESET)))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+				if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_eo, 1, line_len - (size_t)rm.rm_eo, stdout) != line_len - (size_t)rm.rm_eo))
+					JSTR_RETURN_ERR(JSTR_RET_ERR);
+#endif
 				if (jstr_unlikely(jstr_io_fputc('\n', stdout) == EOF))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}

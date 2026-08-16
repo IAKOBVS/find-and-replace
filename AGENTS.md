@@ -44,6 +44,7 @@ TUs are non-static; their prototypes live in the module headers
 - **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - linked via `lib/jstring/build/lib/libjstr.so`
 - **Include path**: `lib/jstring/build/include/` passed via `-I` (pinned checkout, not `/usr/local/include`)
 - **Code style**: no comments, SPDX MIT header, `clang-format off/on` around the usage string
+- **Brace style**: a single statement in `if`/`else`/`for`/`while`/`do` needs no wrapping braces (e.g. `if (x) return;`); braces are only used when the block has two or more statements. The statement must go on the **next line** — never on the same line as the condition (`if (x) return;` on one line is disallowed). In an `if`/`else if`/`else` chain, braces must be **uniform**: if one branch needs braces (two or more statements), then every branch gets braces — even the single-statement ones
 - **Python test scripts**: every function, parameter, and local variable must be
   fully type annotated (PEP 484, `typing` imports). Verify with `mypy
   tests/pty_drive.py` — the shared pty driver is mypy-clean.

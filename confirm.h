@@ -56,6 +56,10 @@ typedef enum {
 	KEY_CHAR
 } confirm_key_ty;
 
+/* Write VAL in decimal to stdout without using printf. */
+void
+print_size_t(size_t val);
+
 /* -c dry-run scan that collects matches and prints the preview. */
 jstr_ret_ty confirm_scan_file(const jstr_twoway_ty *R t,
                               const jstr_ty *R buf, const char *R fname,

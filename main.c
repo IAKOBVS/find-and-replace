@@ -73,7 +73,7 @@ static const char *usage =
 	_("  --grep\n")
 	_("    Print the lines that contain FIND (like grep) and exit 0 if any\n")
 	_("    matched, 1 if none, 2 on error. No files are modified. Cannot be\n")
-	_("    combined with -i or -c. Matching lines from named files are\n")
+	_("    combined with -i. Matching lines from named files are\n")
 	_("    prefixed with FILE:, lines from stdin are printed bare.\n")
 	_("\n")
 	_("FIND and REPLACE shall be placed in that exact order.\n")
@@ -146,6 +146,23 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 		G.mode |= MODE_COMPILED;
 	}
 	return JSTR_RET_SUCC;
+}
+
+/* Check if any non-flag file argument exists in argv starting from start_idx. */
+static int
+has_file_args_after(int start_idx, int argc, char **argv)
+{
+	for (int k = start_idx; k < argc; ++k) {
+		if (!argv[k] || argv[k][0] == '\0')
+			continue;
+		if (argv[k][0] == '-') {
+			if (!strcmp(argv[k], "--include") || !strcmp(argv[k], "--exclude"))
+				++k;
+			continue;
+		}
+		return 1;
+	}
+	return 0;
 }
 
 /* Default flags. Idempotent: assigns (never ORs) so calling it again cannot
@@ -242,14 +259,52 @@ main(int argc, char **argv)
 	jstr_twoway_ty t;
 	a.t = &t;
 	a.find = (const char *)FIND;
-	a.rplc = (const char *)RPLC;
-	/* Keep the raw argv forms so the interactive editor can seed its fields
-	 * with what the user typed and unescape on use (like the CLI args). */
+
+	int has_grep = 0;
+	for (int k = 2; k < argc; ++k) {
+		if (argv[k] && !strcmp(argv[k], "--grep")) {
+			has_grep = 1;
+			break;
+		}
+	}
+
+	unsigned int start_arg = 3;
 	const char *raw_find = (const char *)FIND;
-	const char *raw_rplc = (const char *)RPLC;
+	const char *raw_rplc = "";
+
+	if (has_grep) {
+		G.mode |= MODE_GREP;
+		int rplc_is_optional = 0;
+		if (jstr_nullchk(argv[2]) || argv[2][0] == '-') {
+			rplc_is_optional = 1;
+		} else {
+			struct stat st_check;
+			if (xstat(argv[2], &st_check) == JSTR_RET_SUCC) {
+				if (!has_file_args_after(3, argc, argv))
+					rplc_is_optional = 1;
+			}
+		}
+
+		if (rplc_is_optional) {
+			a.rplc = "";
+			raw_rplc = "";
+			a.rplc_len = 0;
+			start_arg = 2;
+		} else {
+			a.rplc = (const char *)RPLC;
+			raw_rplc = (const char *)RPLC;
+			a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+			start_arg = 3;
+		}
+	} else {
+		a.rplc = (const char *)RPLC;
+		raw_rplc = (const char *)RPLC;
+		a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+		start_arg = 3;
+	}
+
 	/* Unescape \n, \t, ... in place; the unescaped length is the diff. */
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
-	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	init_defaults();
 	/* -c does two full passes: pass 1 (G.confirm_pass=1) only scans and
 	 * previews while collecting the file list; pass 2 (after 'y') re-reads
@@ -257,8 +312,8 @@ main(int argc, char **argv)
 	G.confirm_pass = 1;
 	int end_of_flags = 0;
 	unsigned int i;
-	/* Process all arguments: flags then files, in order. */
-	for (i = 3; ARG; ++i) {
+	/* Pass 1: Parse all flags. */
+	for (i = start_arg; ARG; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
 			/* -i[SUFFIX] */
 			if (ARG[1] == 'i') {
@@ -388,6 +443,20 @@ done_single:;
 			}
 			continue;
 		}
+	}
+
+	/* Pass 2: Process file arguments. */
+	end_of_flags = 0;
+	for (i = start_arg; ARG; ++i) {
+		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
+			if (ARG[1] == '-') {
+				if (!strcmp(ARG + 2, "include") || !strcmp(ARG + 2, "exclude"))
+					ARG_NEXT();
+				else if (ARG[2] == '\0')
+					end_of_flags = 1;
+			}
+			continue;
+		}
 		/* Non-flag argument: a file (or directory with -r) to process. */
 		G.mode |= MODE_HAVE_FILES;
 		/* A lone "-" reads stdin at this point in the argument list. */
@@ -444,15 +513,15 @@ process:
 		}
 	}
 	/* End of the -c dry-run pass: no file has been touched yet. */
-	/* --grep is read-only: reject it combined with -i or -c. Checked after
+	/* --grep is read-only: reject it combined with -i. Checked after
 	 * the whole argument list so the flags may appear in any order. */
-	if (jstr_unlikely((G.mode & MODE_GREP) && (G.mode & (MODE_CONFIRM | MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))) {
-		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i or -c.\n");
+	if (jstr_unlikely((G.mode & MODE_GREP) && (G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))) {
+		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i.\n");
 		exit(err_exit_code());
 	}
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
-		if (jstr_unlikely(!(G.mode & (MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))))
-			jstr_errdie("%s: -c requires -i.\n", argv[0]);
+		if (jstr_unlikely(!(G.mode & (MODE_GREP | MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP))))
+			jstr_errdie("%s: -c requires -i or --grep.\n", argv[0]);
 		if (jstr_unlikely(!(G.mode & MODE_HAVE_FILES)))
 			jstr_errdie("%s: -c does not work with stdin.\n", argv[0]);
 
@@ -536,7 +605,7 @@ process:
 				jstr_io_fwrite("... (some previews omitted)\n", 1, S_LEN("... (some previews omitted)\n"), stdout);
 		}
 
-		if (G.matches_found) {
+		if (G.matches_found && !(G.mode & MODE_GREP)) {
 			jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout);
 			jstr_io_fflush(stdout);
 			/* Only an explicit 'y' proceeds; anything else aborts and leaves

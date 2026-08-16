@@ -113,7 +113,7 @@ t_grep_quiet() {
 
 t_grep_binary() {
 	td=$1
-	printf 'ab\x00cd' > "$td/bin"
+	printf 'ab\000cd' > "$td/bin"
 	"$PROG" ab x --grep "$td/bin" > "$td/out" 2>/dev/null
 	rc=$?
 	[ "$rc" -eq 1 ] && [ ! -s "$td/out" ] && echo PASS > "$td/result" || echo "FAIL: binary file should be skipped (rc=$rc)" > "$td/result"
@@ -147,6 +147,34 @@ t_grep_nonexistent_file() {
 	[ "$rc" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: nonexistent file in --grep should exit 2 (rc=$rc)" > "$td/result"
 }
 
+t_grep_confirm_noninteractive() {
+	td=$1
+	printf 'line 1: match\nline 2: xyz\n' > "$td/f"
+	out=$("$PROG" match --grep -c "$td/f" 2>/dev/null)
+	rc=$?
+	exp="$td/f:1:line 1: match"
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$rc" -eq 0 ] && [ "$clean_out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc clean_out=[$clean_out] exp=[$exp]" > "$td/result"
+}
+
+t_grep_confirm_no_match() {
+	td=$1
+	printf 'line 1: abc\n' > "$td/f"
+	"$PROG" xyz --grep -c "$td/f" > "$td/out" 2>/dev/null
+	rc=$?
+	[ "$rc" -eq 1 ] && [ ! -s "$td/out" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc" > "$td/result"
+}
+
+t_grep_file_before_flags() {
+	td=$1
+	printf 'line 1: match\nline 2: xyz\n' > "$td/f"
+	out=$("$PROG" match "$td/f" --grep -c 2>/dev/null)
+	rc=$?
+	exp="$td/f:1:line 1: match"
+	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+	[ "$rc" -eq 0 ] && [ "$clean_out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc clean_out=[$clean_out] exp=[$exp]" > "$td/result"
+}
+
 TESTS="
 t_grep_stdin
 t_grep_no_match
@@ -165,5 +193,8 @@ t_grep_binary
 t_grep_dash_stdin_placeholder
 t_grep_exclude_cli
 t_grep_nonexistent_file
+t_grep_confirm_noninteractive
+t_grep_confirm_no_match
+t_grep_file_before_flags
 "
 run_suite "grep mode" "$TESTS"

@@ -65,7 +65,7 @@ Options:
   --grep
     Print the lines that contain FIND (like grep) and exit 0 if any
     matched, 1 if none, 2 on error. No files are modified. Cannot be
-    combined with -i or -c. Matching lines from named files are
+    combined with -i. Matching lines from named files are
     prefixed with FILE:, lines from stdin are printed bare.
 
 FIND and REPLACE shall be placed in that exact order.

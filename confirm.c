@@ -29,7 +29,7 @@ static const char *env_lines;
  * huge tree cannot balloon into millions of collected matches on every TUI
  * redraw. The preview display only needs max_preview_lines lines anyway.
  * 4x covers same-line grouping (many matches merging into one block). */
-#define PREVIEW_MATCH_BUDGET_FACTOR 1
+#define PREVIEW_MATCH_BUDGET_FACTOR 4
 /* Free-RAM estimate fallback when /proc/meminfo cannot be read; large enough
  * that the scan cache limit never artificially caps a preview. */
 #define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
@@ -483,6 +483,100 @@ confirm_scan_file(const jstr_twoway_ty *R t,
                      size_t rplc_len,
                      size_t *R out_matches)
 {
+	if (G.mode & MODE_GREP) {
+		const char *d = buf->data;
+		const size_t n = buf->size;
+		const char *p = d;
+		const size_t match_budget = (G.max_preview_lines > 0) ? (size_t)G.max_preview_lines * PREVIEW_MATCH_BUDGET_FACTOR : SIZE_MAX;
+		unsigned short cols = 0;
+		if (term_initialized)
+			cols = get_terminal_cols();
+
+		for (size_t line = 1;; ++line) {
+			const char *nl = (const char *)memchr(p, '\n', (size_t)(d + n - p));
+			const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
+			int matched = 0;
+			regmatch_t rm = { 0 };
+			if (G.mode & MODE_USE_REGEX) {
+				if (find_len > 0)
+					matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+				else
+					matched = 1;
+			} else {
+				if (find_len > 0) {
+					const char *tmp = jstr_strstr_len(p, line_len, find, find_len);
+					if (tmp) {
+						matched = 1;
+						rm.rm_so = tmp - p;
+						rm.rm_eo = rm.rm_so + find_len;
+					}
+				} else {
+					matched = 1;
+					rm.rm_so = 0;
+					rm.rm_eo = 0;
+				}
+			}
+
+			if (matched) {
+				G.grep_matched = 1;
+				G.matches_found = 1;
+				(*out_matches)++;
+
+				if (G.max_preview_lines > 0 && *out_matches >= match_budget)
+					G.preview_full = 1;
+
+				if (!(G.mode & MODE_QUIET)) {
+					if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
+						/* Preview limit reached, skip output */
+					} else {
+						if (fname != NULL) {
+							jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+							jstr_io_fwrite(fname, 1, fname_len, stdout);
+							jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+							jstr_io_putchar(':');
+							jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+							print_size_t(line);
+							jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+							jstr_io_putchar(':');
+						}
+
+						size_t so = (size_t)rm.rm_so;
+						size_t eo = (size_t)rm.rm_eo;
+						if (so > line_len) so = line_len;
+						if (eo > line_len) eo = line_len;
+
+						if (term_initialized) {
+							unsigned short col = (fname != NULL) ? (unsigned short)(fname_len + get_size_t_width(line) + 2) : 0;
+							print_diff_line_chars(p, so, cols, &col);
+							jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+							print_diff_line_chars(p + so, eo - so, cols, &col);
+							jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+							print_diff_line_chars(p + eo, line_len - eo, cols, &col);
+							jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+							jstr_io_putchar('\n');
+							G.preview_lines_printed++;
+						} else {
+							jstr_io_fwrite(p, 1, so, stdout);
+							jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+							jstr_io_fwrite(p + so, 1, eo - so, stdout);
+							jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+							jstr_io_fwrite(p + eo, 1, line_len - eo, stdout);
+							jstr_io_putchar('\n');
+						}
+					}
+				}
+
+				if (G.preview_full)
+					break;
+			}
+
+			if (nl == NULL)
+				break;
+			p = nl + 1;
+		}
+		return JSTR_RET_SUCC;
+	}
+
 	int backref = 0;
 	const unsigned char *rplc_backref1 = NULL;
 	const unsigned char *rplc_backref1_e = NULL;
@@ -762,11 +856,14 @@ interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
 static void
 parse_interactive_flags(const char *flags, size_t len)
 {
+	int is_grep = (G.mode & MODE_GREP);
 	/* Reset to initial configuration default states */
 	G.n = 1;
 	G.mode &= ~MODE_USE_REGEX;
 	G.cflags &= ~(JSTR_RE_CF_EXTENDED | JSTR_RE_CF_ICASE);
 	G.cflags |= JSTR_RE_CF_NEWLINE;
+	if (is_grep)
+		G.mode |= MODE_GREP;
 
 	for (size_t idx = 0; idx < len; ++idx) {
 		char f = flags[idx];

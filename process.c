@@ -9,25 +9,25 @@
  * covers the usual text/binary header region without reading the whole file. */
 #define BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)
 
-/* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
+/* Print the "FNAME:" prefix of one grep line. */
 static jstr_ret_ty
-print_line_prefix(const char *R fname, size_t fname_len, size_t line)
+print_line_prefix(const char *R fname, size_t fname_len)
 {
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout)) != S_LEN(COLOR_GREEN))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	print_size_t(line);
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (isatty(STDOUT_FILENO)) {
+		if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+	} else {
+		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
 	return JSTR_RET_SUCC;
 }
 
@@ -48,42 +48,49 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 		int matched = 0;
 		regmatch_t rm = { 0 };
 		if (G.mode & MODE_USE_REGEX) {
-			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+			if (find_len > 0)
+				matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+			else
+				matched = 1;
 		} else {
 			if (find_len) {
 				const char *tmp = jstr_strstr_len(p, line_len, find, find_len);
 				if (tmp) {
 					matched = 1;
 					rm.rm_so = tmp - p;
+					rm.rm_eo = (size_t)rm.rm_so + find_len;
 				}
+			} else {
+				matched = 1;
+				rm.rm_so = 0;
+				rm.rm_eo = 0;
 			}
-			if (find_len)
-				rm.rm_eo = (size_t)rm.rm_so + find_len;
 		}
 		if (matched) {
 			G.grep_matched = 1;
 			if (!(G.mode & MODE_QUIET)) {
 				if (jstr_likely(fname != NULL))
-					print_line_prefix(fname, fname_len, line);
-#if 0
-				if (jstr_unlikely(jstr_io_fwrite(p, 1, line_len, stdout) != line_len))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-#else
-				if (jstr_unlikely(jstr_io_fwrite(p, 1, (size_t)rm.rm_so, stdout) != (size_t)rm.rm_so))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout) != S_LEN(COLOR_RED)))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_so, 1, (size_t)(rm.rm_eo - rm.rm_so), stdout) != (size_t)(rm.rm_eo - rm.rm_so)))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout) != S_LEN(COLOR_RESET)))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_eo, 1, line_len - (size_t)rm.rm_eo, stdout) != line_len - (size_t)rm.rm_eo))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-#endif
+					print_line_prefix(fname, fname_len);
+				if (isatty(STDOUT_FILENO)) {
+					if (jstr_unlikely(jstr_io_fwrite(p, 1, (size_t)rm.rm_so, stdout) != (size_t)rm.rm_so))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+					if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout) != S_LEN(COLOR_RED)))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+					if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_so, 1, (size_t)(rm.rm_eo - rm.rm_so), stdout) != (size_t)(rm.rm_eo - rm.rm_so)))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+					if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout) != S_LEN(COLOR_RESET)))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+					if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_eo, 1, line_len - (size_t)rm.rm_eo, stdout) != line_len - (size_t)rm.rm_eo))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+				} else {
+					if (jstr_unlikely(jstr_io_fwrite(p, 1, line_len, stdout) != line_len))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+				}
 				if (jstr_unlikely(jstr_io_fputc('\n', stdout) == EOF))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
 		}
+		(void)line;
 		if (nl == NULL)
 			break;
 		p = nl + 1;
@@ -248,9 +255,6 @@ process_file(const jstr_twoway_ty *R t,
 	/* Skip files with NUL bytes in the first BINARY_SCAN_SIZE bytes. */
 	if (jstr_io_isbinary_atleast(buf->data, file_size, BINARY_SCAN_SIZE))
 		return JSTR_RET_SUCC;
-	/* --grep mode never edits; scan and print matching lines instead. */
-	if (G.mode & MODE_GREP)
-		return grep_scan_file(buf, fname, fname_len, find, find_len);
 	/* During the -c dry-run pass, only scan and preview; the real edit
 	 * happens on the second pass after the user confirms. The file's content
 	 * is recorded so pass 2 edits it from memory without re-reading disk. */
@@ -271,6 +275,9 @@ process_file(const jstr_twoway_ty *R t,
 			file_pushback(&G.files, fname, fname_len, st, buf);
 		return ret;
 	}
+	/* --grep mode never edits; scan and print matching lines instead. */
+	if (G.mode & MODE_GREP)
+		return grep_scan_file(buf, fname, fname_len, find, find_len);
 	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
 	return ret;
 }

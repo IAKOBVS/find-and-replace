@@ -6,7 +6,7 @@ t_grep_stdin() {
 	printf 'hello\nworld\n' | "$PROG" hello there --grep > "$td/out" 2>/dev/null
 	rc=$?
 	out=$(cat "$td/out")
-	[ "$rc" -eq 0 ] && [ "$out" = 'hello' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	[ "$rc" -eq 0 ] && [ "$out" = '1:hello' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out]" > "$td/result"
 }
 
 t_grep_no_match() {
@@ -43,7 +43,7 @@ t_grep_single_file_prefix() {
 	printf 'foo\n' > "$td/f"
 	"$PROG" foo bar --grep "$td/f" > "$td/out" 2>/dev/null
 	rc=$?
-	exp="$td/f:foo"
+	exp="$td/f:1:foo"
 	out=$(cat "$td/out")
 	[ "$rc" -eq 0 ] && [ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] exp=[$exp]" > "$td/result"
 }
@@ -53,8 +53,8 @@ t_grep_multiple_files() {
 	printf 'foo\n' > "$td/f1"; printf 'foo\n' > "$td/f2"
 	"$PROG" foo bar --grep "$td/f1" "$td/f2" > "$td/out" 2>/dev/null
 	out=$(cat "$td/out")
-	exp="$td/f1:foo
-$td/f2:foo"
+	exp="$td/f1:1:foo
+$td/f2:1:foo"
 	[ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out] exp=[$exp]" > "$td/result"
 }
 
@@ -64,8 +64,8 @@ t_grep_recursive() {
 	"$PROG" match M --grep -r --include '\.txt$' "$td/sub" > "$td/out" 2>/dev/null
 	rc=$?
 	out=$(sort "$td/out")
-	exp="$td/sub/a.txt:match
-$td/sub/c.txt:match"
+	exp="$td/sub/a.txt:1:match
+$td/sub/c.txt:1:match"
 	[ "$rc" -eq 0 ] && [ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] exp=[$exp]" > "$td/result"
 }
 
@@ -73,8 +73,8 @@ t_grep_regex_anchor() {
 	td=$1
 	printf 'alpha\nbeta\nalpha\n' | "$PROG" '^alpha' '' --grep -R > "$td/out" 2>/dev/null
 	rc=$?
-	exp='alpha
-alpha'
+	exp='1:alpha
+3:alpha'
 	out=$(cat "$td/out")
 	[ "$rc" -eq 0 ] && [ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] exp=[$exp]" > "$td/result"
 }
@@ -84,15 +84,15 @@ t_grep_fixed() {
 	printf 'apple\nbanana\n' | "$PROG" app x --grep > "$td/out" 2>/dev/null
 	rc=$?
 	out=$(cat "$td/out")
-	[ "$rc" -eq 0 ] && [ "$out" = 'apple' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	[ "$rc" -eq 0 ] && [ "$out" = '1:apple' ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out]" > "$td/result"
 }
 
 t_grep_empty_find() {
 	td=$1
 	printf 'a\nb\n' | "$PROG" '' x --grep > "$td/out" 2>/dev/null
 	rc=$?
-	exp='a
-b'
+	exp='1:a
+2:b'
 	out=$(cat "$td/out")
 	[ "$rc" -eq 0 ] && [ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] exp=[$exp]" > "$td/result"
 }
@@ -125,9 +125,9 @@ t_grep_dash_stdin_placeholder() {
 	printf 'match two\n' > "$td/sin"
 	"$PROG" match M --grep "$td/f1" - "$td/f2" < "$td/sin" > "$td/out" 2>/dev/null
 	rc=$?
-	exp="$td/f1:match one
-match two
-$td/f2:match three"
+	exp="$td/f1:1:match one
+1:match two
+$td/f2:1:match three"
 	out=$(cat "$td/out")
 	[ "$rc" -eq 0 ] && [ "$out" = "$exp" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc out=[$out] exp=[$exp]" > "$td/result"
 }
@@ -137,7 +137,7 @@ t_grep_exclude_cli() {
 	printf 'keep\n' > "$td/k.txt"; printf 'ignore\n' > "$td/i.txt"
 	"$PROG" keep x --grep --exclude '^i' "$td/k.txt" "$td/i.txt" > "$td/out" 2>/dev/null
 	out=$(cat "$td/out")
-	[ "$out" = "$td/k.txt:keep" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out]" > "$td/result"
+	[ "$out" = "$td/k.txt:1:keep" ] && echo PASS > "$td/result" || echo "FAIL: out=[$out]" > "$td/result"
 }
 
 t_grep_nonexistent_file() {

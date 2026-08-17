@@ -9,22 +9,36 @@
  * covers the usual text/binary header region without reading the whole file. */
 #define BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)
 
-/* Print the "FNAME:" prefix of one grep line. */
+/* Print the "FNAME:LINE:" prefix of one grep line. */
 static jstr_ret_ty
-print_line_prefix(const char *R fname, size_t fname_len)
+print_line_prefix(const char *R fname, size_t fname_len, size_t line)
 {
 	if (isatty(STDOUT_FILENO)) {
-		if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
+		if (fname != NULL) {
+			if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+		}
+		if (jstr_unlikely(jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout)) != S_LEN(COLOR_GREEN))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		print_size_t(line);
 		if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	} else {
-		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (fname != NULL) {
+			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+			if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
+		}
+		print_size_t(line);
 		if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
@@ -43,6 +57,8 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 	const size_t n = buf->size;
 	const char *p = d;
 	for (size_t line = 1;; ++line) {
+		if (p == d + n)
+			break;
 		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
 		int matched = 0;
@@ -69,8 +85,7 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 		if (matched) {
 			G.grep_matched = 1;
 			if (!(G.mode & MODE_QUIET)) {
-				if (jstr_likely(fname != NULL))
-					print_line_prefix(fname, fname_len);
+				print_line_prefix(fname, fname_len, line);
 				if (isatty(STDOUT_FILENO)) {
 					if (jstr_unlikely(jstr_io_fwrite(p, 1, (size_t)rm.rm_so, stdout) != (size_t)rm.rm_so))
 						JSTR_RETURN_ERR(JSTR_RET_ERR);

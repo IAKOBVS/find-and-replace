@@ -138,7 +138,7 @@ process_buffer(const jstr_twoway_ty *R t,
 	/* Append newline if has space */
 	/* Keep the final buffer newline-terminated so file output ends cleanly. */
 	if (buf->size && buf->data[buf->size - 1] != '\n')
-		DIE_IF(jstr_pushback_j(buf, '\n'), "%s", "Out of memory.\n");
+		DIE_IF(jstr_chk(jstr_pushback_j(buf, '\n')), "%s", "Out of memory.\n");
 	if (G.mode & MODE_PRINT_STDOUT) {
 		/* Default mode: write the (replaced) buffer to stdout. */
 		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))

@@ -613,7 +613,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				if (G.mode & MODE_USE_REGEX && backref) {
 					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
 					jstr_empty_j(&G.rplc_buf);
-					DIE_IF(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1), "%s", "Out of memory.\n");
+					DIE_IF(jstr_chk(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1)), "%s", "Out of memory.\n");
 					DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
 					const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
 					jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
@@ -884,7 +884,7 @@ jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
 {
 	jstr_empty_j(dst);
 	if (src->size > 0 && src->data) {
-		DIE_IF(jstr_assign_len_j(dst, src->data, src->size), "%s", "Out of memory.\n");
+		DIE_IF(jstr_chk(jstr_assign_len_j(dst, src->data, src->size)), "%s", "Out of memory.\n");
 		dst->size = JSTR_DIFF(jstr_unescape_p(dst->data), dst->data);
 	}
 }
@@ -1244,7 +1244,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 		case KEY_CHAR:
 			if (vim_is_insert_mode()) {
 				if (active_buf) {
-					DIE_IF(jstr_reserve_j(active_buf, active_buf->size + 2), "%s", "Out of memory.\n");
+					DIE_IF(jstr_chk(jstr_reserve_j(active_buf, active_buf->size + 2)), "%s", "Out of memory.\n");
 					memmove(active_buf->data + cursors[active_field] + 1, active_buf->data + cursors[active_field], active_buf->size - cursors[active_field]);
 					active_buf->data[cursors[active_field]] = c;
 					active_buf->size++;

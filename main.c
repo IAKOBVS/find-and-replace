@@ -465,14 +465,14 @@ process:
 		jstr_empty_j(&G.interactive_backup_buf);
 
 		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
-			DIE_IF(jstr_append_len_j(&G.interactive_find_buf, raw_find, strlen(raw_find)), "%s", "Out of memory.\n");
+			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_find_buf, raw_find, strlen(raw_find))), "%s", "Out of memory.\n");
 			DIE_IF(jstr_append_len_j(&G.interactive_rplc_buf, raw_rplc, strlen(raw_rplc)), "%s", "Out of memory.\n");
 			if (G.include_pat)
-				DIE_IF(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat)), "%s", "Out of memory.\n");
+				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat))), "%s", "Out of memory.\n");
 			if (G.exclude_pat)
-				DIE_IF(jstr_append_len_j(&G.interactive_exclude_buf, G.exclude_pat, strlen(G.exclude_pat)), "%s", "Out of memory.\n");
+				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_exclude_buf, G.exclude_pat, strlen(G.exclude_pat))), "%s", "Out of memory.\n");
 			if (G.bak_suffix)
-				DIE_IF(jstr_append_len_j(&G.interactive_backup_buf, G.bak_suffix, G.bak_suffix_len), "%s", "Out of memory.\n");
+				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_backup_buf, G.bak_suffix, G.bak_suffix_len)), "%s", "Out of memory.\n");
 
 			char init_flags[16];
 			int fl_idx = 0;
@@ -495,7 +495,7 @@ process:
 			if (G.mode & MODE_PRINT_CHANGES)
 				init_flags[fl_idx++] = 'l';
 			init_flags[fl_idx] = '\0';
-			DIE_IF(jstr_append_len_j(&G.interactive_flags_buf, init_flags, (unsigned int)fl_idx), "%s", "Out of memory.\n");
+			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_flags_buf, init_flags, (unsigned int)fl_idx)), "%s", "Out of memory.\n");
 
 			DIE_IF(jstr_chk(confirm_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_rplc_buf, &G.interactive_flags_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf, &G.interactive_backup_buf)), "%s", "Interactive loop failed.\n");
 
@@ -560,8 +560,8 @@ process:
 				jstr_ty *const rbuf = (file->content.data == NULL) ? &G.content_buf : &file->content;
 				if (jstr_unlikely(file->content.data == NULL)) {
 					jstr_empty_j(&G.content_buf);
-					DIE_IF(jstr_reserve_j(&G.content_buf, file->content_size), "%s", "Out of memory reading a file.\n");
-					DIE_IF(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size), "%s", "Can't read a file->\n");
+					DIE_IF(jstr_chk(jstr_reserve_j(&G.content_buf, file->content_size)), "%s", "Out of memory reading a file.\n");
+					DIE_IF(jstr_chk(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size)), "%s", "Can't read a file->\n");
 				}
 				st_file.st_mode = file->st_mode;
 				if (jstr_chk(process_buffer(&t, rbuf, file->fname, file->fname_len, &st_file, a.find, a.find_len, a.rplc, a.rplc_len)))

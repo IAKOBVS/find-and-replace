@@ -378,7 +378,7 @@ t_confirm_vim_motions() {
 	# $ (end), X (delete before cursor) -> find "hll"
 	# 0 (home), w (next word -> clamped to end), b (back to start)
 	# Accept then abort so the file stays untouched; inspect the Find field.
-	pdrive --phase 1b --phase 30@300 --phase 6c --phase 78 --phase 24 --phase 58 --phase 30 --phase 77 --phase 62 --phase 0d --tail 'n\n' -- hello replacement -c -i "$td/f"
+	pdrive --phase 1b --phase 30@150 --phase 6c --phase 78 --phase 24 --phase 58 --phase 30 --phase 77 --phase 62 --phase 0d --tail 'n\n' -- hello replacement -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q 'Find:    hll' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -389,7 +389,7 @@ t_confirm_vim_motions() {
 t_confirm_vim_word_motions() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	# Normal mode: 0 (home), w (next word), x (delete char), b (back), x
-	pdrive --phase 1b --phase 30@200 --phase 77 --phase 78 --phase 62 --phase 78 --phase 0d --tail 'y\n' -- 'foo-bar baz' replacement -c -i "$td/f"
+	pdrive --phase 1b --phase 30@150 --phase 77 --phase 78 --phase 62 --phase 78 --phase 0d --tail 'y\n' -- 'foo-bar baz' replacement -c -i "$td/f"
 	if grep -q 'Find:    oobar baz' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -400,7 +400,7 @@ t_confirm_vim_word_motions() {
 t_confirm_vim_delete_eol() {
 	td=$1; printf 'hell world\n' > "$td/f"
 	# Normal mode: x deletes char at cursor (end of field -> last char)
-	pdrive --phase 1b --phase 78@200 --phase 0d --tail 'y\n' -- hello replacement -c -i "$td/f"
+	pdrive --phase 1b --phase 78@150 --phase 0d --tail 'y\n' -- hello replacement -c -i "$td/f"
 	if grep -q 'Find:    hell' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -411,7 +411,7 @@ t_confirm_vim_delete_eol() {
 t_confirm_vim_delete_dd() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	# Normal mode: dd (delete whole line), ihello (insert mode, re-type)
-	pdrive --phase 1b --phase 6464@200 --phase 6968656c6c6f@200 --phase 0d --tail 'y\n' -- hello replacement -c -i "$td/f"
+	pdrive --phase 1b --phase 6464@150 --phase 6968656c6c6f@150 --phase 0d --tail 'y\n' -- hello replacement -c -i "$td/f"
 	if grep -q 'Find:    hello' "$td/out" && [ "$(cat "$td/f")" = 'replacement world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -422,7 +422,7 @@ t_confirm_vim_delete_dd() {
 t_confirm_vim_change_cw() {
 	td=$1; printf 'qux-bar world\n' > "$td/f"
 	# Normal mode: 0 (home), cwqux (change word to "qux")
-	pdrive --phase 1b --phase 30@200 --phase 6377717578@200 --phase 0d --tail 'y\n' -- foo-bar replacement -c -i "$td/f"
+	pdrive --phase 1b --phase 30@150 --phase 6377717578@150 --phase 0d --tail 'y\n' -- foo-bar replacement -c -i "$td/f"
 	if grep -q 'Find:    qux-bar' "$td/out" && [ "$(cat "$td/f")" = 'replacement world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -484,7 +484,7 @@ t_confirm_interactive_flags_ei() {
 t_vim_normal_mode_word_motions() {
 	td=$1; printf 'foo bar az\n' > "$td/f"
 	# ESC then vim motions: 0 w w x b w w
-	pdrive --phase 1b --phase 30@300 --phase 77 --phase 77 --phase 78 --phase 62 --phase 77 --phase 77 --phase 0d --tail 'y\n' -- 'foo bar baz' X -c -i "$td/f"
+	pdrive --phase 1b --phase 30@150 --phase 77 --phase 77 --phase 78 --phase 62 --phase 77 --phase 77 --phase 0d --tail 'y\n' -- 'foo bar baz' X -c -i "$td/f"
 	if [ "$(cat "$td/rc")" = 0 ] && [ "$(cat "$td/f")" = 'X' ] && grep -q 'Find:    foo bar az' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -497,39 +497,39 @@ t_vim_delete_ops() {
 	good=1
 	# dw: 0 d w -> find "bar baz"
 	printf 'foo bar baz\n' > "$td/f1"
-pdrive --phase 1b --phase 30@300 --phase 64 --phase 77 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f1"
+pdrive --phase 1b --phase 30@150 --phase 64 --phase 77 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f1"
 	[ "$(cat "$td/f1")" = 'foo X' ] || good=0
 	# db: $ d b -> find "foo bar z" (no match, cursor clamps to end-1)
 	printf 'foo bar baz\n' > "$td/f2"
-pdrive --phase 1b --phase 24@300 --phase 64 --phase 62 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f2"
+pdrive --phase 1b --phase 24@150 --phase 64 --phase 62 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f2"
 	[ "$(cat "$td/f2")" = 'foo bar baz' ] || good=0
 	# d0: $ d 0 -> find "z"
 	printf 'foo bar baz\n' > "$td/f3"
-pdrive --phase 1b --phase 24@300 --phase 64 --phase 30 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f3"
+pdrive --phase 1b --phase 24@150 --phase 64 --phase 30 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f3"
 	[ "$(cat "$td/f3")" = 'foo bar baX' ] || good=0
 	# d0: b d 0 -> find "baz"
 	printf 'foo bar baz\n' > "$td/f4"
-pdrive --phase 1b --phase 62@300 --phase 64 --phase 30 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f4"
+pdrive --phase 1b --phase 62@150 --phase 64 --phase 30 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f4"
 	[ "$(cat "$td/f4")" = 'foo bar X' ] || good=0
 	# d$: 0 d $ -> find empty, no matches, file untouched
 	printf 'foo bar baz\n' > "$td/f5"
-pdrive --phase 1b --phase 30@300 --phase 64 --phase 24 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f5"
+pdrive --phase 1b --phase 30@150 --phase 64 --phase 24 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f5"
 	[ "$(cat "$td/f5")" = 'foo bar baz' ] || good=0
 	# dd: 0 d d -> find empty, file untouched
 	printf 'foo bar baz\n' > "$td/f6"
-pdrive --phase 1b --phase 30@300 --phase 64 --phase 64 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f6"
+pdrive --phase 1b --phase 30@150 --phase 64 --phase 64 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f6"
 	[ "$(cat "$td/f6")" = 'foo bar baz' ] || good=0
 	# x: 0 x -> delete first char -> find "oo bar baz"
 	printf 'foo bar baz\n' > "$td/f7"
-pdrive --phase 1b --phase 30@300 --phase 78 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f7"
+pdrive --phase 1b --phase 30@150 --phase 78 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f7"
 	[ "$(cat "$td/f7")" = 'fX' ] || good=0
 	# X: $ X -> delete char before end cursor -> find "foo bar bz" (no match)
 	printf 'foo bar baz\n' > "$td/f8"
-pdrive --phase 1b --phase 24@300 --phase 58 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f8"
+pdrive --phase 1b --phase 24@150 --phase 58 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f8"
 	[ "$(cat "$td/f8")" = 'foo bar baz' ] || good=0
 	# D: 0 D -> delete to end -> find empty, file untouched
 	printf 'foo bar baz\n' > "$td/f9"
-pdrive --phase 1b --phase 30@300 --phase 44 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f9"
+pdrive --phase 1b --phase 30@150 --phase 44 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f9"
 	[ "$(cat "$td/f9")" = 'foo bar baz' ] || good=0
 	if [ "$good" -eq 1 ]; then
 		echo PASS > "$td/result"
@@ -543,31 +543,31 @@ t_vim_change_ops() {
 	good=1
 	# cw: 0 c w -> find "bar baz", insert mode
 	printf 'foo bar baz\n' > "$td/f1"
-pdrive --phase 1b --phase 30@300 --phase 63 --phase 77 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f1"
+pdrive --phase 1b --phase 30@150 --phase 63 --phase 77 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f1"
 	[ "$(cat "$td/f1")" = 'foo X' ] || good=0
 	# cb: 0 c b -> no-op (cursor at 0), find unchanged
 	printf 'foo bar baz\n' > "$td/f2"
-pdrive --phase 1b --phase 30@300 --phase 63 --phase 62 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f2"
+pdrive --phase 1b --phase 30@150 --phase 63 --phase 62 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f2"
 	[ "$(cat "$td/f2")" = 'X' ] || good=0
 	# c0: $ c 0 -> find "z"
 	printf 'foo bar baz\n' > "$td/f3"
-pdrive --phase 1b --phase 24@300 --phase 63 --phase 30 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f3"
+pdrive --phase 1b --phase 24@150 --phase 63 --phase 30 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f3"
 	[ "$(cat "$td/f3")" = 'foo bar baX' ] || good=0
 	# c$: 0 c $ -> find empty, file untouched
 	printf 'foo bar baz\n' > "$td/f4"
-pdrive --phase 1b --phase 30@300 --phase 63 --phase 24 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f4"
+pdrive --phase 1b --phase 30@150 --phase 63 --phase 24 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f4"
 	[ "$(cat "$td/f4")" = 'foo bar baz' ] || good=0
 	# cc: 0 c c -> find empty, file untouched
 	printf 'foo bar baz\n' > "$td/f5"
-pdrive --phase 1b --phase 30@300 --phase 63 --phase 63 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f5"
+pdrive --phase 1b --phase 30@150 --phase 63 --phase 63 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f5"
 	[ "$(cat "$td/f5")" = 'foo bar baz' ] || good=0
 	# C: 0 w C -> find "foo ", file "Xbar baz"
 	printf 'foo bar baz\n' > "$td/f6"
-pdrive --phase 1b --phase 30@300 --phase 77 --phase 43 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f6"
+pdrive --phase 1b --phase 30@150 --phase 77 --phase 43 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f6"
 	[ "$(cat "$td/f6")" = 'Xbar baz' ] || good=0
 	# C: 0 C -> find empty, file untouched
 	printf 'foo bar baz\n' > "$td/f7"
-pdrive --phase 1b --phase 30@300 --phase 43 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f7"
+pdrive --phase 1b --phase 30@150 --phase 43 --phase 0d --tail 'y\n' -- 'foo bar baz' 'X' -c -i "$td/f7"
 	[ "$(cat "$td/f7")" = 'foo bar baz' ] || good=0
 	if [ "$good" -eq 1 ]; then
 		echo PASS > "$td/result"
@@ -581,19 +581,19 @@ t_vim_insert_motions() {
 	good=1
 	# I: insert at home -> find "Xhello"
 	printf 'Xhello world\n' > "$td/f1"
-pdrive --phase 1b --phase 49@300 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f1"
+pdrive --phase 1b --phase 49@150 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f1"
 	[ "$(cat "$td/f1")" = 'R world' ] || good=0
 	# A: insert at end -> find "helloX"
 	printf 'helloX world\n' > "$td/f2"
-pdrive --phase 1b --phase 41@300 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f2"
+pdrive --phase 1b --phase 41@150 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f2"
 	[ "$(cat "$td/f2")" = 'R world' ] || good=0
 	# 0 l i: insert at cursor 1 -> find "hXello"
 	printf 'hXello world\n' > "$td/f3"
-pdrive --phase 1b --phase 30@300 --phase 6c --phase 69 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f3"
+pdrive --phase 1b --phase 30@150 --phase 6c --phase 69 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f3"
 	[ "$(cat "$td/f3")" = 'R world' ] || good=0
 	# 0 l a: append after cursor -> find "heXllo"
 	printf 'heXllo world\n' > "$td/f4"
-pdrive --phase 1b --phase 30@300 --phase 6c --phase 61 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f4"
+pdrive --phase 1b --phase 30@150 --phase 6c --phase 61 --phase 58 --phase 0d --tail 'y\n' -- 'hello' 'R' -c -i "$td/f4"
 	[ "$(cat "$td/f4")" = 'R world' ] || good=0
 	if [ "$good" -eq 1 ]; then
 		echo PASS > "$td/result"
@@ -607,11 +607,11 @@ t_vim_jk_field_nav() {
 	good=1
 	# j: down to Replace, i inserts at cursor (clamped to end-1), type zz
 	printf 'hello world\n' > "$td/f1"
-pdrive --phase 1b --phase 6a@300 --phase 69 --phase 7a --phase 7a --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f1"
+pdrive --phase 1b --phase 6a@150 --phase 69 --phase 7a --phase 7a --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f1"
 	[ "$(cat "$td/f1")" = 'replacemenzzt world' ] || good=0
 	# k k j: up to Backup (wrap), down to Exclude... then j to Backup, type bak suffix
 	printf 'hello world\n' > "$td/f2"
-pdrive --phase 1b --phase 6b@300 --phase 6b --phase 6a --phase 69 --phase 62616b --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f2"
+pdrive --phase 1b --phase 6b@150 --phase 6b --phase 6a --phase 69 --phase 62616b --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f2"
 	[ "$(cat "$td/f2")" = 'replacement world' ] || good=0
 	[ "$(cat "$td/f2bak" 2>/dev/null)" = 'hello world' ] || good=0
 	if [ "$good" -eq 1 ]; then
@@ -677,11 +677,11 @@ t_interactive_arrows() {
 	# up, down, right, left, right (restore cursor), shift-tab, delete, shift-tab,
 	# down, down (back to Find), type X -> find "helloX"
 	printf 'helloX world\n' > "$td/f1"
-pdrive --phase 1b5b41 --phase 1b5b42@250 --phase 1b5b43@250 --phase 1b5b44@250 --phase 1b5b43@250 --phase 1b5b5a@250 --phase 1b5b337e@250 --phase 1b5b5a@250 --phase 1b5b42@250 --phase 1b5b42@250 --phase 58@250 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f1"
+pdrive --phase 1b5b41 --phase 1b5b42@150 --phase 1b5b43@150 --phase 1b5b44@150 --phase 1b5b43@150 --phase 1b5b5a@150 --phase 1b5b337e@150 --phase 1b5b5a@150 --phase 1b5b42@150 --phase 1b5b42@150 --phase 58@150 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f1"
 	[ "$(cat "$td/f1")" = 'replacement world' ] || good=0
 	# ESC 0 then Delete key in normal mode deletes first char -> find "ello"
 	printf 'hello world\n' > "$td/f2"
-pdrive --phase 1b --phase 30@250 --phase 1b5b337e@250 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f2"
+pdrive --phase 1b --phase 30@150 --phase 1b5b337e@150 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f2"
 	[ "$(cat "$td/f2")" = 'hreplacement world' ] || good=0
 	if [ "$good" -eq 1 ]; then
 		echo PASS > "$td/result"
@@ -693,7 +693,7 @@ pdrive --phase 1b --phase 30@250 --phase 1b5b337e@250 --phase 0d --tail 'y\n' --
 t_interactive_ctrl_j_k() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	# Ctrl-J down (Replace), Ctrl-J down (Flags), Ctrl-K up (Replace), type zz
-pdrive --phase 0a --phase 0a@250 --phase 0b@250 --phase 7a@250 --phase 7a@250 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f"
+pdrive --phase 0a --phase 0a@150 --phase 0b@150 --phase 7a@150 --phase 7a@150 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f"
 	[ "$(cat "$td/f")" = 'replacementzz world' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
 }
 
@@ -723,7 +723,7 @@ t_confirm_regex_scan_empty() {
 t_vim_dd() {
 	td=$1; printf 'foo bar baz\n' > "$td/f"
 	# dd empties the find field; no matches -> no prompt, file untouched
-pdrive --phase 1b --phase 64@300 --phase 64 --phase 0d --tail 'n\n' -- 'foo bar' 'X' -c -i "$td/f"
+pdrive --phase 1b --phase 64@150 --phase 64 --phase 0d --tail 'n\n' -- 'foo bar' 'X' -c -i "$td/f"
 	[ "$(cat "$td/f")" = 'foo bar baz' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
 }
 
@@ -808,7 +808,7 @@ t_confirm_interactive_ctrl_d() {
 
 t_confirm_interactive_unknown_escape() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b5b58 --phase 04@300 -- hello HI -c -i "$td/f"
+	pdrive --phase 1b5b58 --phase 04@150 -- hello HI -c -i "$td/f"
 	if [ "$(cat "$td/rc")" = 1 ] && [ "$(cat "$td/f")" = 'hello world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -818,7 +818,7 @@ t_confirm_interactive_unknown_escape() {
 
 t_confirm_interactive_control_char() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 01 --phase 04@300 -- hello HI -c -i "$td/f"
+	pdrive --phase 01 --phase 04@150 -- hello HI -c -i "$td/f"
 	if [ "$(cat "$td/rc")" = 1 ] && [ "$(cat "$td/f")" = 'hello world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -848,7 +848,7 @@ t_confirm_interactive_cli_filters_backup() {
 
 t_confirm_interactive_files_filter() {
 	td=$1; printf 'hello\n' > "$td/f1.txt"; printf 'hello\n' > "$td/f2.log"
-	pdrive --phase 09 --phase 09 --phase 09 --phase 66@200 --phase 31@200 --phase 0d --tail 'y\n' -- hello HI -c -i "$td/f1.txt" "$td/f2.log"
+	pdrive --phase 09 --phase 09 --phase 09 --phase 66@150 --phase 31@150 --phase 0d --tail 'y\n' -- hello HI -c -i "$td/f1.txt" "$td/f2.log"
 	if [ "$(cat "$td/f1.txt")" = 'HI' ] && [ "$(cat "$td/f2.log")" = 'hello' ]; then
 		echo PASS > "$td/result"
 	else
@@ -858,7 +858,7 @@ t_confirm_interactive_files_filter() {
 
 t_confirm_interactive_enter_invalid() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 0d --phase 04@300 -- '[' HI -c -i -R "$td/f"
+	pdrive --phase 0d --phase 04@150 -- '[' HI -c -i -R "$td/f"
 	if [ "$(cat "$td/rc")" = 1 ] && [ "$(cat "$td/f")" = 'hello world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -878,7 +878,7 @@ t_confirm_interactive_tiny_terminal() {
 
 t_vim_word_punct_forward() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 30@300 --phase 77 --phase 78 --phase 04@300 -- '#foo' x -c -i "$td/f"
+	pdrive --phase 1b --phase 30@150 --phase 77 --phase 78 --phase 04@150 -- '#foo' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q -- 'Find:    #oo' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -888,7 +888,7 @@ t_vim_word_punct_forward() {
 
 t_vim_word_punct_backward() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 24@300 --phase 62 --phase 78 --phase 04@300 -- 'foo--x' x -c -i "$td/f"
+	pdrive --phase 1b --phase 24@150 --phase 62 --phase 78 --phase 04@150 -- 'foo--x' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q -- 'Find:    foo-x' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -898,7 +898,7 @@ t_vim_word_punct_backward() {
 
 t_vim_w_empty_field() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 04@300 -- 'hello' x -c -i "$td/f"
+	pdrive --phase 1b --phase 04@150 -- 'hello' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -908,7 +908,7 @@ t_vim_w_empty_field() {
 
 t_vim_dw_clamp() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 30@300 --phase 77 --phase 64 --phase 77 --phase 04@300 -- 'hello world' x -c -i "$td/f"
+	pdrive --phase 1b --phase 30@150 --phase 77 --phase 64 --phase 77 --phase 04@150 -- 'hello world' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q -- 'Find:    hello' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -918,7 +918,7 @@ t_vim_dw_clamp() {
 
 t_vim_ddollar_clamp() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 24@300 --phase 64 --phase 24 --phase 04@300 -- 'abc' x -c -i "$td/f"
+	pdrive --phase 1b --phase 24@150 --phase 64 --phase 24 --phase 04@150 -- 'abc' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q -- 'Find:    ab' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -928,7 +928,7 @@ t_vim_ddollar_clamp() {
 
 t_vim_D_clamp() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 24@300 --phase 44 --phase 04@300 -- 'abc' x -c -i "$td/f"
+	pdrive --phase 1b --phase 24@150 --phase 44 --phase 04@150 -- 'abc' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q -- 'Find:    ab' "$td/out"; then
 		echo PASS > "$td/result"
 	else
@@ -938,7 +938,7 @@ t_vim_D_clamp() {
 
 t_vim_h_and_default() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 1b --phase 71@300 --phase 68 --phase 78 --phase 04@300 -- 'hello' x -c -i "$td/f"
+	pdrive --phase 1b --phase 71@150 --phase 68 --phase 78 --phase 04@150 -- 'hello' x -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'hello world' ] && grep -q -- 'Find:    helo' "$td/out"; then
 		echo PASS > "$td/result"
 	else

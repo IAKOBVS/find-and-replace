@@ -946,6 +946,18 @@ t_vim_h_and_default() {
 	fi
 }
 
+t_confirm_grep_interactive() {
+	td=$1; printf 'hello world\nfoo bar\n' > "$td/f"
+	pdrive --tail '\r' -- hello --grep -c "$td/f"
+	clean_out=$(sed 's/\x1b\[[0-9;]*m//g' "$td/out")
+	if printf '%s\n' "$clean_out" | grep -q 'hello world' && [ "$(cat "$td/f")" = 'hello world
+foo bar' ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: grep interactive check failed. out=[$(cat "$td/out")]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_colored_default
@@ -1029,6 +1041,7 @@ t_vim_dw_clamp
 t_vim_ddollar_clamp
 t_vim_D_clamp
 t_vim_h_and_default
+t_confirm_grep_interactive
 "
 
 run_suite "confirm tests" "$TESTS"

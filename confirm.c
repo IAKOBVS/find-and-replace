@@ -884,8 +884,8 @@ jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
 {
 	jstr_empty_j(dst);
 	if (src->size > 0 && src->data) {
-		DIE_IF(jstr_assign_len_j(dst, src->data, src->size), "%s", "Out of memory.\n");
-		dst->size = JSTR_DIFF(jstr_unescape_p(dst->data), dst->data);
+		DIE_IF(jstr_reserve_j(dst, src->size + 1), "%s", "Out of memory.\n");
+		dst->size = JSTR_DIFF(jstr_unescapecpy_p(dst->data, src->data), dst->data);
 	}
 }
 

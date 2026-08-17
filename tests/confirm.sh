@@ -264,6 +264,19 @@ t_confirm_interactive_escape_live_preview() {
 	fi
 }
 
+t_confirm_interactive_unescape_copy_capacity() {
+	td=$1; printf 'SPDX-License-Identifier: MIT\n' > "$td/f"
+	# Typing a pattern whose length lands on buffer capacity boundaries (e.g. 32 chars)
+	# verifies that jstr_unescape_copy allocates capacity for the NUL terminator (+1)
+	# without triggering heap corruption or aborts during TUI redraws.
+	pdrive --tail '\x15' --tail '12345678901234567890123456789012' --tail '3' --tail '\r' --tail 'y\n' -- 'the' '' -c -i "$td/f"
+	if [ -f "$td/rc" ] && [ "$(cat "$td/rc")" = "0" ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: interactive unescape copy triggered crash or error rc=[$(cat "$td/rc" 2>/dev/null)]" > "$td/result"
+	fi
+}
+
 t_confirm_non_interactive_backref_mismatch() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	rc=0
@@ -625,7 +638,7 @@ t_terminal_size_zero() {
 	td=$1
 	i=1; : > "$td/f"
 	while [ $i -le 20 ]; do printf 'X\n' >> "$td/f"; i=$((i + 1)); done
-	pdrive --env LINES= --tail '\r' --tail 'y\n' -- X Y -c -i -g "$td/f"
+	pdrive --winsize 24x80 --env LINES= --tail '\r' --tail 'y\n' -- X Y -c -i -g "$td/f"
 	yg=$(tr -cd 'Y' < "$td/f" | wc -c)
 	if [ "$(cat "$td/rc")" = 0 ] && [ "$yg" -eq 20 ] && grep -q '20 matches, 1 files' "$td/out" && grep -q 'some previews omitted' "$td/out"; then
 		echo PASS > "$td/result"
@@ -975,6 +988,7 @@ t_confirm_interactive_backref_mismatch
 t_confirm_interactive_escape_find
 t_confirm_interactive_escape_replace
 t_confirm_interactive_escape_live_preview
+t_confirm_interactive_unescape_copy_capacity
 t_confirm_non_interactive_backref_mismatch
 t_confirm_interactive_stats
 t_confirm_interactive_preview_truncated

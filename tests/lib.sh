@@ -10,9 +10,11 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 td_root=$(mktemp -d)
 trap 'rm -rf "$td_root"' EXIT
 
-# Per-suite test-level parallelism cap. Default 512 lets each suite run all of
-# its tests concurrently; override with FAR_MAX_JOBS (e.g. low-ulimit systems).
-MAX_JOBS=${FAR_MAX_JOBS:-512}
+strip_ansi() {
+	sed 's/\x1b\[[0-9;]*m//g'
+}
+
+MAX_JOBS=${FAR_MAX_JOBS:-64}
 [ "$MAX_JOBS" -ge 1 ] || MAX_JOBS=1
 
 report_result() {
@@ -26,10 +28,9 @@ report_result() {
 }
 
 run_tests() {
-	TESTS="$1"
 	launched=""
 	count=0
-	for t in $TESTS; do
+	for t in $1; do
 		(
 			mkdir -p "$td_root/$t"
 			if ! "$t" "$td_root/$t"; then
@@ -49,8 +50,6 @@ run_tests() {
 }
 
 wait_for_results() {
-	# Poll the result files of the given tests, printing each test's outcome
-	# the moment its result appears, then reap the finished subshells.
 	left="$1"
 	while [ -n "$left" ]; do
 		rest=""

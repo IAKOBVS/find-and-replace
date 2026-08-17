@@ -1,14 +1,15 @@
 #!/bin/sh
-# Fuzz test: runs find-and-replace with randomish inputs, checks for crashes
+# Fuzz test: runs find-and-replace with randomish inputs, checks for crashes.
+# Iterations run in parallel (capped at FUZZ_MAX_JOBS).
 
 PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROG="$PROG_DIR/find-and-replace"
 export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 N=${1:-500}
-FAIL=0
-
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
+ncpu() { nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4; }
+_cpu=$(ncpu)
+FUZZ_MAX_JOBS=${FAR_FUZZ_MAX_JOBS:-$((_cpu * 2))}
+[ "$FUZZ_MAX_JOBS" -ge 1 ] || FUZZ_MAX_JOBS=1
 
 td=$(mktemp -d)
 trap 'rm -rf "$td"' EXIT
@@ -18,15 +19,15 @@ randstr() {
 		| head -c "$1"
 }
 
-printf '\n=== fuzz tests (%d iterations) ===\n\n' "$N"
-
-i=0
-while [ "$i" -lt "$N" ]; do
+run_one() {
+	local i=$1 td=$2 PROG=$3
+	local itd="$td/$i"
+	mkdir -p "$itd"
+	local find rplc input flags rc
 	find=$(randstr $(( (i % 47) + 1 )))
 	rplc=$(randstr $(( (i % 31) + 1 )))
 	input=$(randstr $(( (i % 199) + 1 )))
 
-	# Random flags: pick from expanded set including -Z/-z/-G
 	case $((i % 16)) in
 		0) flags='' ;;
 		1) flags='-g' ;;
@@ -46,61 +47,95 @@ while [ "$i" -lt "$N" ]; do
 		15) flags='-Gg' ;;
 	esac
 
-	# Run via stdin
+	# stdin
 	printf '%s' "$input" | "$PROG" "$find" "$rplc" $flags > /dev/null 2>&1
 	rc=$?
 	if [ "$rc" -gt 127 ]; then
-		red "CRASH (signal $((rc - 128))) on iteration $i (stdin)"
-		FAIL=$((FAIL + 1))
+		echo "CRASH signal $((rc - 128)) iteration $i stdin" > "$itd/result"
+		return
 	elif [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
-		red "UNEXPECTED EXIT CODE $rc on iteration $i (stdin)"
-		FAIL=$((FAIL + 1))
+		echo "BADRC $rc iteration $i stdin" > "$itd/result"
+		return
 	fi
 
-	# Run with file input
-	printf '%s' "$input" > "$td/f"
-	printf '%s' "$input" | "$PROG" "$find" "$rplc" $flags "$td/f" > /dev/null 2>&1
+	# file
+	printf '%s' "$input" > "$itd/f"
+	printf '%s' "$input" | "$PROG" "$find" "$rplc" $flags "$itd/f" > /dev/null 2>&1
 	rc=$?
 	if [ "$rc" -gt 127 ]; then
-		red "CRASH (signal $((rc - 128))) on iteration $i (file mode)"
-		FAIL=$((FAIL + 1))
+		echo "CRASH signal $((rc - 128)) iteration $i file" > "$itd/result"
+		return
 	elif [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
-		red "UNEXPECTED EXIT CODE $rc on iteration $i (file mode)"
-		FAIL=$((FAIL + 1))
+		echo "BADRC $rc iteration $i file" > "$itd/result"
+		return
 	fi
 
-	# In-place mode (no suffix)
-	printf '%s' "$input" > "$td/f2"
-	"$PROG" "$find" "$rplc" -i "$td/f2" > /dev/null 2>&1
+	# in-place
+	printf '%s' "$input" > "$itd/f2"
+	"$PROG" "$find" "$rplc" -i "$itd/f2" > /dev/null 2>&1
 	rc=$?
 	if [ "$rc" -gt 127 ]; then
-		red "CRASH (signal $((rc - 128))) on iteration $i (in-place)"
-		FAIL=$((FAIL + 1))
+		echo "CRASH signal $((rc - 128)) iteration $i inplace" > "$itd/result"
+		return
 	elif [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
-		red "UNEXPECTED EXIT CODE $rc on iteration $i (in-place)"
-		FAIL=$((FAIL + 1))
+		echo "BADRC $rc iteration $i inplace" > "$itd/result"
+		return
 	fi
 
-	# In-place with backup suffix (every 3rd iteration)
+	# in-place with backup
 	if [ $((i % 3)) -eq 0 ]; then
-		printf '%s' "$input" > "$td/f3"
-		"$PROG" "$find" "$rplc" -i.bak "$td/f3" > /dev/null 2>&1
+		printf '%s' "$input" > "$itd/f3"
+		"$PROG" "$find" "$rplc" -i.bak "$itd/f3" > /dev/null 2>&1
 		rc=$?
 		if [ "$rc" -gt 127 ]; then
-			red "CRASH (signal $((rc - 128))) on iteration $i (in-place .bak)"
-			FAIL=$((FAIL + 1))
+			echo "CRASH signal $((rc - 128)) iteration $i inplace-bak" > "$itd/result"
+			return
 		elif [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
-			red "UNEXPECTED EXIT CODE $rc on iteration $i (in-place .bak)"
-			FAIL=$((FAIL + 1))
+			echo "BADRC $rc iteration $i inplace-bak" > "$itd/result"
+			return
 		fi
 	fi
 
+	echo "OK" > "$itd/result"
+}
+
+printf '\n=== fuzz tests (%d iterations, %d jobs) ===\n\n' "$N" "$FUZZ_MAX_JOBS"
+
+launched=""
+count=0
+i=0
+while [ "$i" -lt "$N" ]; do
+	run_one "$i" "$td" "$PROG" &
+	launched="$launched $i"
+	count=$((count + 1))
+	if [ "$count" -ge "$FUZZ_MAX_JOBS" ]; then
+		wait
+		for j in $launched; do
+			r=$(cat "$td/$j/result" 2>/dev/null)
+			case "$r" in
+				CRASH*) printf '\033[31m%s\033[0m\n' "$r"; FAIL=$((FAIL + 1)) ;;
+				BADRC*) printf '\033[31m%s\033[0m\n' "$r"; FAIL=$((FAIL + 1)) ;;
+			esac
+		done
+		launched=""
+		count=0
+	fi
 	i=$((i + 1))
 done
+if [ "$count" -gt 0 ]; then
+	wait
+	for j in $launched; do
+		r=$(cat "$td/$j/result" 2>/dev/null)
+		case "$r" in
+			CRASH*) printf '\033[31m%s\033[0m\n' "$r"; FAIL=$((FAIL + 1)) ;;
+			BADRC*) printf '\033[31m%s\033[0m\n' "$r"; FAIL=$((FAIL + 1)) ;;
+		esac
+	done
+fi
 
-if [ "$FAIL" -eq 0 ]; then
-	green "fuzz: $N iterations, 0 crashes"
+if [ "${FAIL:-0}" -eq 0 ]; then
+	printf '\033[32mfuzz: %d iterations, 0 crashes\033[0m\n' "$N"
 else
-	red "fuzz: $FAIL crashes in $N iterations"
+	printf '\033[31mfuzz: %d crashes in %d iterations\033[0m\n' "$FAIL" "$N"
 fi
 exit $((FAIL > 0))

@@ -390,6 +390,12 @@ done_single:;
 		}
 		/* Non-flag argument: a file (or directory with -r) to process. */
 		G.mode |= MODE_HAVE_FILES;
+		/* Empty find in replace mode is a no-op; skip all processing. */
+		if (a.find_len == 0) {
+			if (G.mode & MODE_GREP)
+				G.grep_matched = 1;
+			continue;
+		}
 		/* A lone "-" reads stdin at this point in the argument list. */
 		if (ARG[0] == '-' && ARG[1] == '\0') {
 			if (G.mode & MODE_CONFIRM)
@@ -398,6 +404,14 @@ done_single:;
 				jstr_errdie("%s: -i is meaningless with '-' (stdin).\n", argv[0]);
 			if (G.mode & MODE_USE_RECURSIVE)
 				jstr_errdie("%s: -r is meaningless with '-' (stdin).\n", argv[0]);
+			if (a.find_len == 0) {
+				if (!(G.mode & MODE_GREP)) {
+					DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
+					if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+				}
+				continue;
+			}
 			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
 			if (G.mode & MODE_GREP)
@@ -533,16 +547,24 @@ process:
 					break;
 			}
 			if (G.preview_full)
-				jstr_io_fwrite("... (some previews omitted)\n", 1, S_LEN("... (some previews omitted)\n"), stdout);
+				(void)jstr_unlikely(jstr_io_fwrite("... (some previews omitted)\n", 1, S_LEN("... (some previews omitted)\n"), stdout) != S_LEN("... (some previews omitted)\n"));
 		}
 
 		if (G.matches_found) {
-			jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout);
-			jstr_io_fflush(stdout);
+			if (jstr_unlikely(jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout) != S_LEN(CONFIRM_PROMPT))) {
+				fprintf(stderr, "find-and-replace: write error on prompt.\n");
+				cleanup();
+				exit(EXIT_FAILURE);
+			}
+			if (jstr_unlikely(jstr_io_fflush(stdout) == EOF)) {
+				fprintf(stderr, "find-and-replace: flush error on prompt.\n");
+				cleanup();
+				exit(EXIT_FAILURE);
+			}
 			/* Only an explicit 'y' proceeds; anything else aborts and leaves
 			 * every file untouched. */
 			if (jstr_io_getchar() != 'y') {
-				jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
+				(void)jstr_unlikely(jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr) != S_LEN(CONFIRM_ABORTED));
 				cleanup();
 				exit(EXIT_FAILURE);
 			}
@@ -576,12 +598,22 @@ process:
 				jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
 			if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
 				jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
-			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-			DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
-			if (G.mode & MODE_GREP)
-				DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a.find, a.find_len)), "%s", "Failed grep on stdin.\n");
-			else
-				DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+			if (a.find_len == 0) {
+				if (!(G.mode & MODE_GREP)) {
+					DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
+					if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
+						JSTR_RETURN_ERR(JSTR_RET_ERR);
+				} else {
+					G.grep_matched = 1;
+				}
+			} else {
+				DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
+				DIE_IF(jstr_chk(compile(&t, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "");
+				if (G.mode & MODE_GREP)
+					DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a.find, a.find_len)), "%s", "Failed grep on stdin.\n");
+				else
+					DIE_IF(jstr_chk(process_buffer(&t, &G.content_buf, NULL, 0, NULL, a.find, a.find_len, a.rplc, a.rplc_len)), "%s", "Failed processing stdin.\n");
+			}
 		}
 	}
 	/* Recursive traversal keeps going past a failing file; report the total

@@ -28,21 +28,17 @@ get_word_forward(const jstr_ty *buf, size_t pos)
 {
 	/* vim 'w' motion: from an alnum run, skip to its end; from a punctuation
 	 * run, skip to its end; then skip trailing whitespace. */
-	if (!buf || pos >= buf->size) {
+	if (!buf || pos >= buf->size)
 		return buf ? buf->size : 0;
-	}
 	if (isalnum((unsigned char)buf->data[pos])) {
-		while (pos < buf->size && isalnum((unsigned char)buf->data[pos])) {
+		while (pos < buf->size && isalnum((unsigned char)buf->data[pos]))
 			pos++;
-		}
 	} else {
-		while (pos < buf->size && !isalnum((unsigned char)buf->data[pos]) && !isspace((unsigned char)buf->data[pos])) {
+		while (pos < buf->size && !isalnum((unsigned char)buf->data[pos]) && !isspace((unsigned char)buf->data[pos]))
 			pos++;
-		}
 	}
-	while (pos < buf->size && isspace((unsigned char)buf->data[pos])) {
+	while (pos < buf->size && isspace((unsigned char)buf->data[pos]))
 		pos++;
-	}
 	return pos;
 }
 
@@ -51,21 +47,17 @@ get_word_backward(const jstr_ty *buf, size_t pos)
 {
 	/* vim 'b' motion: walk back past trailing whitespace, then to the start
 	 * of the alnum (or punctuation) run that precedes the cursor. */
-	if (!buf || pos == 0) {
+	if (!buf || pos == 0)
 		return 0;
-	}
 	pos--;
-	while (pos > 0 && isspace((unsigned char)buf->data[pos])) {
+	while (pos > 0 && isspace((unsigned char)buf->data[pos]))
 		pos--;
-	}
 	if (isalnum((unsigned char)buf->data[pos])) {
-		while (pos > 0 && isalnum((unsigned char)buf->data[pos - 1])) {
+		while (pos > 0 && isalnum((unsigned char)buf->data[pos - 1]))
 			pos--;
-		}
 	} else {
-		while (pos > 0 && !isalnum((unsigned char)buf->data[pos - 1]) && !isspace((unsigned char)buf->data[pos - 1])) {
+		while (pos > 0 && !isalnum((unsigned char)buf->data[pos - 1]) && !isspace((unsigned char)buf->data[pos - 1]))
 			pos--;
-		}
 	}
 	return pos;
 }
@@ -75,12 +67,10 @@ delete_range(jstr_ty *buf, size_t start, size_t end)
 {
 	/* In-buffer deletion: shift the tail down over the removed range and keep
 	 * the buffer NUL-terminated. */
-	if (!buf || start >= end || start >= buf->size) {
+	if (!buf || start >= end || start >= buf->size)
 		return;
-	}
-	if (end > buf->size) {
+	if (end > buf->size)
 		end = buf->size;
-	}
 	memmove(buf->data + start, buf->data + end, buf->size - end);
 	buf->size -= (end - start);
 	buf->data[buf->size] = '\0';
@@ -115,9 +105,8 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 				if (active_buf) {
 					size_t end_pos = get_word_forward(active_buf, cursors[*active_field]);
 					delete_range(active_buf, cursors[*active_field], end_pos);
-					if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+					if (cursors[*active_field] >= active_buf->size && active_buf->size > 0)
 						cursors[*active_field] = active_buf->size - 1;
-					}
 					*needs_redraw = 1;
 					*needs_recompile = 1;
 				}
@@ -142,9 +131,8 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 			} else if (c == '$') {
 				if (active_buf) {
 					delete_range(active_buf, cursors[*active_field], active_buf->size);
-					if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+					if (cursors[*active_field] >= active_buf->size && active_buf->size > 0)
 						cursors[*active_field] = active_buf->size - 1;
-					}
 					*needs_redraw = 1;
 					*needs_recompile = 1;
 				}
@@ -208,9 +196,8 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		break;
 	case 'a':
 		insert_mode = 1;
-		if (active_buf && cursors[*active_field] < active_buf->size) {
+		if (active_buf && cursors[*active_field] < active_buf->size)
 			cursors[*active_field]++;
-		}
 		*needs_redraw = 1;
 		break;
 	case 'I':
@@ -220,9 +207,8 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		break;
 	case 'A':
 		insert_mode = 1;
-		if (active_buf) {
+		if (active_buf)
 			cursors[*active_field] = active_buf->size;
-		}
 		*needs_redraw = 1;
 		break;
 	case 'd':
@@ -231,9 +217,8 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 	case 'D':
 		if (active_buf) {
 			delete_range(active_buf, cursors[*active_field], active_buf->size);
-			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0)
 				cursors[*active_field] = active_buf->size - 1;
-			}
 			*needs_redraw = 1;
 			*needs_recompile = 1;
 		}
@@ -277,20 +262,17 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 		*needs_redraw = 1;
 		break;
 	case '$':
-		if (active_buf) {
+		if (active_buf)
 			cursors[*active_field] = (active_buf->size > 0) ? active_buf->size - 1 : 0;
-		}
 		*needs_redraw = 1;
 		break;
 	case 'x':
 		if (active_buf && active_buf->size > 0) {
-			if (cursors[*active_field] >= active_buf->size) {
+			if (cursors[*active_field] >= active_buf->size)
 				cursors[*active_field] = active_buf->size - 1;
-			}
 			delete_range(active_buf, cursors[*active_field], cursors[*active_field] + 1);
-			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0)
 				cursors[*active_field] = active_buf->size - 1;
-			}
 			*needs_redraw = 1;
 			*needs_recompile = 1;
 		}
@@ -306,9 +288,8 @@ vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_fiel
 	case 'w':
 		if (active_buf) {
 			cursors[*active_field] = get_word_forward(active_buf, cursors[*active_field]);
-			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0) {
+			if (cursors[*active_field] >= active_buf->size && active_buf->size > 0)
 				cursors[*active_field] = active_buf->size - 1;
-			}
 			*needs_redraw = 1;
 		}
 		break;

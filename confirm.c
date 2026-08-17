@@ -29,7 +29,7 @@ static const char *env_lines;
  * huge tree cannot balloon into millions of collected matches on every TUI
  * redraw. The preview display only needs max_preview_lines lines anyway.
  * 4x covers same-line grouping (many matches merging into one block). */
-#define PREVIEW_MATCH_BUDGET_FACTOR 1
+#define PREVIEW_MATCH_BUDGET_FACTOR 4
 /* Free-RAM estimate fallback when /proc/meminfo cannot be read; large enough
  * that the scan cache limit never artificially caps a preview. */
 #define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
@@ -55,16 +55,26 @@ handle_signal(int sig)
 	_exit(EXIT_FAILURE);
 }
 
+static int
+io_ok(void)
+{
+	return !ferror(stdout);
+}
+
 static void
 term_clear_screen(void)
 {
-	jstr_io_fwrite(ANSI_CLEAR_SCREEN, 1, S_LEN(ANSI_CLEAR_SCREEN), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(ANSI_CLEAR_SCREEN, 1, S_LEN(ANSI_CLEAR_SCREEN), stdout);
 }
 
 static void
 term_home(void)
 {
-	jstr_io_fwrite(ANSI_HOME, 1, S_LEN(ANSI_HOME), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(ANSI_HOME, 1, S_LEN(ANSI_HOME), stdout);
 }
 
 static void
@@ -77,35 +87,45 @@ term_clear_and_home(void)
 static void
 term_clear_line_end(void)
 {
-	jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
 }
 
 static void
 term_clear_down(void)
 {
-	jstr_io_fwrite(ANSI_CLEAR_DOWN, 1, S_LEN(ANSI_CLEAR_DOWN), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(ANSI_CLEAR_DOWN, 1, S_LEN(ANSI_CLEAR_DOWN), stdout);
 }
 
 static void
 term_show_cursor(void)
 {
-	jstr_io_fwrite(ANSI_CURSOR_SHOW, 1, S_LEN(ANSI_CURSOR_SHOW), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(ANSI_CURSOR_SHOW, 1, S_LEN(ANSI_CURSOR_SHOW), stdout);
 }
 
 static void
 term_hide_cursor(void)
 {
-	jstr_io_fwrite(ANSI_CURSOR_HIDE, 1, S_LEN(ANSI_CURSOR_HIDE), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(ANSI_CURSOR_HIDE, 1, S_LEN(ANSI_CURSOR_HIDE), stdout);
 }
 
 static void
 term_move_cursor(size_t line, size_t col)
 {
-	jstr_io_fwrite("\x1b[", 1, S_LEN("\x1b["), stdout);
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite("\x1b[", 1, S_LEN("\x1b["), stdout);
 	print_size_t(line);
-	jstr_io_putchar(';');
+	(void)jstr_io_putchar(';');
 	print_size_t(col);
-	jstr_io_putchar('H');
+	(void)jstr_io_putchar('H');
 }
 
 static void
@@ -127,10 +147,16 @@ setup_terminal(void)
 		return;
 	term_initialized = 1;
 	/* Enter alt screen, clear/home, hide cursor */
-	jstr_io_fwrite(ANSI_ALT_SCREEN_ENABLE, 1, S_LEN(ANSI_ALT_SCREEN_ENABLE), stdout);
+	if (jstr_unlikely(jstr_io_fwrite(ANSI_ALT_SCREEN_ENABLE, 1, S_LEN(ANSI_ALT_SCREEN_ENABLE), stdout) != S_LEN(ANSI_ALT_SCREEN_ENABLE))) {
+		term_initialized = 0;
+		return;
+	}
 	term_clear_and_home();
 	term_hide_cursor();
-	jstr_io_fflush(stdout);
+	if (jstr_unlikely(jstr_io_fflush(stdout) == EOF)) {
+		restore_terminal();
+		return;
+	}
 	atexit(restore_terminal);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
@@ -152,11 +178,10 @@ match_pushback(matches_ty *R matches,
 	}
 	(matches->data)[matches->size].start = start;
 	(matches->data)[matches->size].end = end;
-	if (rm) {
+	if (rm)
 		memcpy((matches->data)[matches->size].rm, rm, JSTR_NMATCH_MAX * sizeof(regmatch_t));
-	} else {
+	else
 		memset((matches->data)[matches->size].rm, 0, JSTR_NMATCH_MAX * sizeof(regmatch_t));
-	}
 	++matches->size;
 }
 
@@ -309,22 +334,18 @@ static unsigned short
 get_terminal_cols(void)
 {
 	struct winsize w;
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
 		return w.ws_col;
-	}
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
 		return w.ws_col;
-	}
-	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
 		return w.ws_col;
-	}
 	if (env_cols == NULL)
 		env_cols = getenv("COLUMNS");
 	if (env_cols != NULL) {
 		int c = jstr_atoi(env_cols);
-		if (c > 0) {
+		if (c > 0)
 			return (unsigned short)c;
-		}
 	}
 	return TERM_COLS_FALLBACK; /* standard default fallback */
 }
@@ -346,6 +367,8 @@ get_size_t_width(size_t val)
 void
 print_size_t(size_t val)
 {
+	if (jstr_unlikely(!io_ok()))
+		return;
 	char buf[3 * sizeof(val) + 2];
 	size_t i = sizeof(buf);
 	if (val == 0)
@@ -354,18 +377,20 @@ print_size_t(size_t val)
 		buf[--i] = (char)('0' + val % 10);
 		val /= 10;
 	}
-	jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
+	(void)jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
 }
 
 /* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
 static void
 print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix)
 {
-	jstr_io_fwrite(fname, 1, fname_len, stdout);
-	jstr_io_putchar(':');
+	if (jstr_unlikely(!io_ok()))
+		return;
+	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
+	(void)jstr_io_putchar(':');
 	print_size_t(line);
-	jstr_io_putchar(':');
-	jstr_io_putchar(prefix);
+	(void)jstr_io_putchar(':');
+	(void)jstr_io_putchar(prefix);
 }
 
 /* Print S of LEN bytes, expanding tab characters to 8-column stops and
@@ -374,6 +399,8 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefi
 static void
 print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr)
 {
+	if (jstr_unlikely(!io_ok()))
+		return;
 	unsigned short col = *col_ptr;
 	unsigned short limit = (cols > 1) ? (cols - 1) : 0;
 	for (size_t i = 0; i < len; ++i) {
@@ -381,15 +408,13 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
 		if (c == '\t') {
 			unsigned short next_tab = (unsigned short)((col + 8) & ~7);
 			while (col < next_tab) {
-				if (col < limit) {
-					jstr_io_putchar(' ');
-				}
+				if (col < limit)
+					(void)jstr_io_putchar(' ');
 				col++;
 			}
 		} else {
-			if (col < limit) {
-				jstr_io_putchar(c);
-			}
+			if (col < limit)
+				(void)jstr_io_putchar(c);
 			col++;
 		}
 	}
@@ -409,18 +434,19 @@ static void
 print_diff_lines(const char *R data, size_t len, char prefix, const char *color, unsigned int color_len,
                     const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
 {
+	if (jstr_unlikely(!io_ok()))
+		return;
 	const char *p = data;
 	const char *const end = data + len;
 	size_t line = start_line;
 	const char *nl;
 	unsigned short cols = 0;
-	if (term_initialized) {
+	if (term_initialized)
 		cols = get_terminal_cols();
-	}
-	jstr_io_fwrite(color, 1, color_len, stdout);
+	(void)jstr_io_fwrite(color, 1, color_len, stdout);
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
 		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
-			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			return;
 		}
 		print_line_prefix(fname, fname_len, line++, prefix);
@@ -428,18 +454,18 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
 			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
 		} else {
-			jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
+			(void)jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
 		}
 		if (term_initialized)
-			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
-		jstr_io_putchar('\n');
+			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+		(void)jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
 		p = nl + 1;
 	}
 	if (p < end) {
 		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
-			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			return;
 		}
 		/* The final line is not newline-terminated: print it as-is. */
@@ -448,28 +474,28 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
 			print_diff_line_chars(p, (size_t)(end - p), cols, &col);
 		} else {
-			jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
+			(void)jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
 		}
 		if (term_initialized)
-			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
-		jstr_io_putchar('\n');
+			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+		(void)jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
 	} else if (trailing_nl) {
 		if (term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= G.max_preview_lines) {
-			jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			return;
 		}
 		/* DATA ended in '\n' (or is empty): the empty line that follows the
 		 * block survives only when the block's terminating '\n' does. */
 		print_line_prefix(fname, fname_len, line, prefix);
 		if (term_initialized)
-			jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
-		jstr_io_putchar('\n');
+			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+		(void)jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
 	}
-	jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 }
 
 jstr_ret_ty
@@ -551,11 +577,9 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					 * If the match was zero-length (e.g. ^$ or empty group), advance
 					 * past one character to prevent infinite loops, copying that character plain.
 					 */
-					if (match_len == 0) {
-						if (next_src < scan_size) {
+					if (match_len == 0)
+						if (next_src < scan_size)
 							++next_src;
-						}
-					}
 					off = next_src;
 					/* If the match occurred at the end of the string, stop immediately. */
 					if (matched_at_end)
@@ -810,22 +834,18 @@ static unsigned short
 get_terminal_rows(void)
 {
 	struct winsize w;
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
 		return w.ws_row;
-	}
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
 		return w.ws_row;
-	}
-	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
 		return w.ws_row;
-	}
 	if (env_lines == NULL)
 		env_lines = getenv("LINES");
 	if (env_lines != NULL) {
 		int l = jstr_atoi(env_lines);
-		if (l > 0) {
+		if (l > 0)
 			return (unsigned short)l;
-		}
 	}
 	return TERM_ROWS_FALLBACK; /* standard default fallback */
 }
@@ -892,14 +912,14 @@ jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
 static void
 confirm_render_field(const field_info_ty *info, const jstr_ty *buf, int is_active)
 {
-	if (is_active) {
-		jstr_io_fwrite(info->active_prefix, 1, info->active_prefix_len, stdout);
-	} else {
-		jstr_io_fwrite(info->inactive_prefix, 1, info->inactive_prefix_len, stdout);
-	}
-	if (buf && buf->size > 0 && buf->data) {
-		jstr_io_fwrite(buf->data, 1, buf->size, stdout);
-	}
+	if (jstr_unlikely(!io_ok()))
+		return;
+	if (is_active)
+		(void)jstr_io_fwrite(info->active_prefix, 1, info->active_prefix_len, stdout);
+	else
+		(void)jstr_io_fwrite(info->inactive_prefix, 1, info->inactive_prefix_len, stdout);
+	if (buf && buf->size > 0 && buf->data)
+		(void)jstr_io_fwrite(buf->data, 1, buf->size, stdout);
 	term_clear_line_end();
 }
 
@@ -1016,6 +1036,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 	for (;;) {
 		if (needs_redraw) {
+			if (jstr_unlikely(!io_ok()))
+				break;
 			jstr_unescape_copy(&find_plain, find_buf);
 			jstr_unescape_copy(&rplc_plain, rplc_buf);
 			if (first_draw) {
@@ -1034,16 +1056,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
 				const char *ptn = (find_plain.size > 0 && find_plain.data) ? find_plain.data : "";
 				comp_ret = interactive_compile(t, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, err_buf, sizeof(err_buf));
-				if (comp_ret == JSTR_RET_SUCC) {
+				if (comp_ret == JSTR_RET_SUCC)
 					comp_ret = interactive_compile_include_exclude(include_buf->data ? include_buf->data : "", include_buf->size, exclude_buf->data ? exclude_buf->data : "", exclude_buf->size, err_buf, sizeof(err_buf));
-				}
 				is_valid = (comp_ret == JSTR_RET_SUCC);
 
-				if (comp_ret != JSTR_RET_SUCC) {
+				if (comp_ret != JSTR_RET_SUCC)
 					jstr_strcpy_len(last_err_buf, err_buf, strlen(err_buf));
-				} else {
+				else
 					last_err_buf[0] = '\0';
-				}
 				needs_recompile = 0;
 			}
 
@@ -1055,22 +1075,21 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				/* Clear entire screen once on compile error to wipe out previous previews/ghost lines */
 				term_clear_and_home();
 				/* Print regex compilation error in red */
-				jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				jstr_io_fwrite("Regex error: ", 1, S_LEN("Regex error: "), stdout);
-				jstr_io_fwrite(last_err_buf, 1, strlen(last_err_buf), stdout);
-				jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+				(void)jstr_io_fwrite("Regex error: ", 1, S_LEN("Regex error: "), stdout);
+				(void)jstr_io_fwrite(last_err_buf, 1, strlen(last_err_buf), stdout);
+				(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 				term_clear_line_end();
-				jstr_io_putchar('\n');
+				(void)jstr_io_putchar('\n');
 			} else {
 				/* Calculate max_preview_lines dynamically based on terminal
 				 * height, leaving room for the controls block: header + stats
 				 * + FIELD_COUNT fields + blank line + omitted-line marker. */
 				const size_t control_lines = FIELD_COUNT + 4;
-				if (rows > control_lines) {
+				if (rows > control_lines)
 					G.max_preview_lines = rows - control_lines;
-				} else {
+				else
 					G.max_preview_lines = 1;
-				}
 
 				/* If compile succeeded, run previews on all cached files */
 				G.matches_found = 0;
@@ -1095,10 +1114,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					if (G.preview_full)
 						break;
 				}
-				if (G.preview_lines_printed >= G.max_preview_lines || G.preview_full) {
-					jstr_io_fwrite("... (some previews omitted)", 1, S_LEN("... (some previews omitted)"), stdout);
-					term_clear_line_end();
-					jstr_io_putchar('\n');
+			if (G.preview_lines_printed >= G.max_preview_lines || G.preview_full) {
+				(void)jstr_io_fwrite("... (some previews omitted)", 1, S_LEN("... (some previews omitted)"), stdout);
+				term_clear_line_end();
+				(void)jstr_io_putchar('\n');
 				}
 				if (total_matches == 0) {
 					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */
@@ -1112,30 +1131,30 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			const size_t start_control_line = (rows > FIELD_COUNT + 1) ? rows - (FIELD_COUNT + 1) : 1;
 			term_move_cursor(start_control_line, 1);
 			if (vim_is_insert_mode())
-				jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
+				(void)jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
 			else
-				jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
+				(void)jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
 			term_clear_line_end();
-			jstr_io_putchar('\n');
+			(void)jstr_io_putchar('\n');
 
 			/* Statistics line */
-			jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
+			(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
 			print_size_t(total_matches);
 			if (G.preview_full)
-				jstr_io_putchar('+');
-			jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
+				(void)jstr_io_putchar('+');
+			(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
 			print_size_t(files_matched);
 			if (G.preview_full)
-				jstr_io_putchar('+');
-			jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
+				(void)jstr_io_putchar('+');
+			(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
 			term_clear_line_end();
-			jstr_io_putchar('\n');
+			(void)jstr_io_putchar('\n');
 
 			for (size_t f = 0; f < FIELD_COUNT; ++f) {
 				const jstr_ty *buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, f);
 				confirm_render_field(&field_info_table[f], buf, f == active_field);
 				if (f != FIELD_COUNT - 1)
-					jstr_io_putchar('\n');
+					(void)jstr_io_putchar('\n');
 			}
 
 			/* Clear from the current cursor position to the bottom of the screen */
@@ -1149,7 +1168,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			term_move_cursor(active_line, active_col);
 			term_show_cursor();
 
-			jstr_io_fflush(stdout);
+			(void)jstr_unlikely(jstr_io_fflush(stdout) == EOF);
 			needs_redraw = 0;
 		}
 
@@ -1207,16 +1226,15 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 		case KEY_ESC:
 			vim_set_insert_mode(0);
-			if (active_buf && cursors[active_field] >= active_buf->size && active_buf->size > 0) {
+			if (active_buf && cursors[active_field] >= active_buf->size && active_buf->size > 0)
 				cursors[active_field] = active_buf->size - 1;
-			}
 			needs_redraw = 1;
 			break;
 
 		case KEY_CTRL_C:
 		case KEY_CTRL_D:
 			restore_terminal();
-			jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
+			(void)jstr_io_fwrite(CONFIRM_ABORTED, 1, S_LEN(CONFIRM_ABORTED), stderr);
 			exit(EXIT_FAILURE);
 
 		case KEY_BACKSPACE:
@@ -1258,9 +1276,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				vim_handle_key(c, active_buf, cursors, &active_field, &needs_redraw, &needs_recompile, FIELD_COUNT);
 				jstr_ty *new_active_buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, active_field);
 
-				if (!vim_is_insert_mode() && new_active_buf && new_active_buf->size > 0 && cursors[active_field] >= new_active_buf->size) {
+				if (!vim_is_insert_mode() && new_active_buf && new_active_buf->size > 0 && cursors[active_field] >= new_active_buf->size)
 					cursors[active_field] = new_active_buf->size - 1;
-				}
 			}
 			break;
 

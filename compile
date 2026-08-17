@@ -2,7 +2,11 @@
 
 PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
-OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
+if [ "$COVERAGE" = "1" ] && [ -z "$COVERAGE_OUTDIR" ]; then
+	OUTDIR="$(mktemp -d)"
+else
+	OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
+fi
 SRCS='main.c files.c process.c confirm.c procfs.c vim.c'
 NP=$(nproc 2>/dev/null || echo 2)
 CFLAGS='-march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings'

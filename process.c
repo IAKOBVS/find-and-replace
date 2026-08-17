@@ -9,18 +9,20 @@
  * covers the usual text/binary header region without reading the whole file. */
 #define BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)
 
-/* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
+/* Print the "FNAME:LINE:" prefix of a grep line. */
 static jstr_ret_ty
 print_line_prefix(const char *R fname, size_t fname_len, size_t line)
 {
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_likely(fname != NULL)) {
+		if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
 	if (jstr_unlikely(jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout)) != S_LEN(COLOR_GREEN))
 		JSTR_RETURN_ERR(JSTR_RET_ERR);
 	print_size_t(line);
@@ -33,8 +35,7 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line)
 
 /* --grep mode: print the whole content of every line that matches FIND.
  * Matching is line-based like grep (a regex can never span newlines here,
- * unlike the replace path which scans the whole buffer). A fixed-string
- * empty find matches every line, mirroring grep ''. */
+ * unlike the replace path which scans the whole buffer). */
 jstr_ret_ty
 grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
                const char *R find, size_t find_len)
@@ -46,40 +47,19 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
 		int matched = 0;
-		regmatch_t rm = { 0 };
 		if (G.mode & MODE_USE_REGEX) {
+			regmatch_t rm = { 0 };
 			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
 		} else {
-			if (find_len) {
-				const char *tmp = jstr_strstr_len(p, line_len, find, find_len);
-				if (tmp) {
-					matched = 1;
-					rm.rm_so = tmp - p;
-				}
-			}
-			if (find_len)
-				rm.rm_eo = (size_t)rm.rm_so + find_len;
+			if (jstr_strstr_len(p, line_len, find, find_len) != NULL)
+				matched = 1;
 		}
 		if (matched) {
 			G.grep_matched = 1;
 			if (!(G.mode & MODE_QUIET)) {
-				if (jstr_likely(fname != NULL))
-					print_line_prefix(fname, fname_len, line);
-#if 0
+				print_line_prefix(fname, fname_len, line);
 				if (jstr_unlikely(jstr_io_fwrite(p, 1, line_len, stdout) != line_len))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
-#else
-				if (jstr_unlikely(jstr_io_fwrite(p, 1, (size_t)rm.rm_so, stdout) != (size_t)rm.rm_so))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout) != S_LEN(COLOR_RED)))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_so, 1, (size_t)(rm.rm_eo - rm.rm_so), stdout) != (size_t)(rm.rm_eo - rm.rm_so)))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout) != S_LEN(COLOR_RESET)))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fwrite(p + rm.rm_eo, 1, line_len - (size_t)rm.rm_eo, stdout) != line_len - (size_t)rm.rm_eo))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-#endif
 				if (jstr_unlikely(jstr_io_fputc('\n', stdout) == EOF))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
 			}
@@ -118,17 +98,12 @@ process_buffer(const jstr_twoway_ty *R t,
 			buf->data[buf->size - 1] = '\0';
 			--buf->size;
 		}
-		/* The regex engine rejects empty patterns, so short-circuit them. */
-		if (jstr_unlikely(find_len == 0)) {
-			changed.zu = 0;
-		} else {
-			changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, JSTR_NMATCH_MAX, G.n);
-			if (jstr_re_chk(changed.d)) {
-				jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			changed.zu = (size_t)changed.d;
+		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, JSTR_NMATCH_MAX, G.n);
+		if (jstr_re_chk(changed.d)) {
+			jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
+		changed.zu = (size_t)changed.d;
 	} else {
 		/* Fixed-string path uses the precompiled Two-Way matcher. */
 		changed.zu = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);

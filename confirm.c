@@ -1255,12 +1255,10 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 
 			term_move_cursor(start_control_line, 1);
 
-			(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 			if (vim_is_insert_mode())
 				(void)jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
 			else
 				(void)jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
-			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			term_clear_line_end();
 			(void)jstr_io_putchar('\n');
 

@@ -963,6 +963,18 @@ t_vim_h_and_default() {
 	fi
 }
 
+t_confirm_interactive_empty_find_then_type() {
+	td=$1; printf 'hello world\nfoo bar\nhello again\n' > "$td/f"
+	# Start with empty find, type "h" via --tail then "ello" via --phase hex, quit.
+	pdrive --tail 'h' --phase 65 --phase 6c --phase 6c --phase 6f --phase 04 \
+		-- '' '' -c -i "$td/f"
+	if grep -q -- '-hello world' "$td/out" && grep -q '+ello world' "$td/out"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: empty find then typing 'hello' did not show preview matches" > "$td/result"
+	fi
+}
+
 TESTS="
 t_confirm_yes
 t_confirm_colored_default
@@ -1047,6 +1059,7 @@ t_vim_dw_clamp
 t_vim_ddollar_clamp
 t_vim_D_clamp
 t_vim_h_and_default
+t_confirm_interactive_empty_find_then_type
 "
 
 run_suite "confirm tests" "$TESTS"

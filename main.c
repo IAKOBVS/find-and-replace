@@ -592,7 +592,8 @@ main(int argc, char **argv)
 		if (a.find_len == 0) {
 			if (G.mode & MODE_GREP)
 				G.grep_matched = 1;
-			continue;
+			if (!(G.mode & MODE_CONFIRM))
+				continue;
 		}
 		if (ARG[0] == '-' && ARG[1] == '\0') {
 			if (jstr_chk(process_stdin_arg(&a, &t, argv[0]))) {

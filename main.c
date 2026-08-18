@@ -342,7 +342,7 @@ process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 	DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 	DIE_IF(jstr_chk(compile(t, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "");
 	if (G.mode & MODE_GREP)
-		DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
+		DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 	else
 		DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
 	return JSTR_RET_SUCC;
@@ -529,7 +529,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 		DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 		DIE_IF(jstr_chk(compile(t, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "");
 		if (G.mode & MODE_GREP)
-			DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
+			DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 		else
 			DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
 	}

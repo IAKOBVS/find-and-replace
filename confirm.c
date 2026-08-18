@@ -1169,12 +1169,11 @@ grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
 	G.selected_line = 0;
 	const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 	const size_t find_len = find_buf->size;
-	(void)t;
 	for (unsigned int k = 0; k < G.files.size; ++k) {
 		file_ty *file = &G.files.data[k];
 		if (!interactive_file_pass(file, files_buf))
 			continue;
-		grep_collect_file(&file->content, file->fname, file->fname_len, ptn, find_len);
+		grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
 	}
 	G.total_lines = G.grep_lines.size;
 	if (G.selected_line >= G.total_lines && G.total_lines > 0)

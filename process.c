@@ -37,7 +37,7 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line)
  * Matching is line-based like grep (a regex can never span newlines here,
  * unlike the replace path which scans the whole buffer). */
 jstr_ret_ty
-grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
+grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname, size_t fname_len,
                const char *R find, size_t find_len)
 {
 	const char *d = buf->data;
@@ -52,12 +52,12 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 		if (G.mode & MODE_USE_REGEX) {
 			regmatch_t rm = { 0 };
 			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
-			if (jstr_unlikely(matched)) {
+			if (matched) {
 				moff = (size_t)rm.rm_so;
 				mlen = (size_t)(rm.rm_eo - rm.rm_so);
 			}
 		} else {
-			const char *hit = jstr_strstr_len(p, line_len, find, find_len);
+			const char *hit = (const char *)jstr_memmem_exec(t, p, line_len, find, find_len);
 			if (hit != NULL) {
 				matched = 1;
 				moff = (size_t)(hit - p);
@@ -87,7 +87,7 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 
 /* --grep TUI: collect every matching line into G.grep_lines. */
 void
-grep_collect_file(const jstr_ty *R buf, const char *R fname,
+grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
                   size_t fname_len, const char *R find,
                   size_t find_len)
 {
@@ -103,12 +103,12 @@ grep_collect_file(const jstr_ty *R buf, const char *R fname,
 		if (G.mode & MODE_USE_REGEX) {
 			regmatch_t rm = { 0 };
 			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
-			if (jstr_unlikely(matched)) {
+			if (matched) {
 				moff = (size_t)rm.rm_so;
 				mlen = (size_t)(rm.rm_eo - rm.rm_so);
 			}
 		} else {
-			const char *hit = jstr_strstr_len(p, line_len, find, find_len);
+			const char *hit = (const char *)jstr_memmem_exec(t, p, line_len, find, find_len);
 			if (hit != NULL) {
 				matched = 1;
 				moff = (size_t)(hit - p);
@@ -317,7 +317,7 @@ process_file(const jstr_twoway_ty *R t,
 			file_pushback(&G.files, fname, fname_len, st, buf);
 			return JSTR_RET_SUCC;
 		}
-		return grep_scan_file(buf, fname, fname_len, find, find_len);
+		return grep_scan_file(t, buf, fname, fname_len, find, find_len);
 	}
 	/* During the -c dry-run pass, only scan and preview; the real edit
 	 * happens on the second pass after the user confirms. The file's content

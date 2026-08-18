@@ -110,7 +110,7 @@ t_grep_quiet() {
 
 t_grep_binary() {
 	td=$1
-	printf 'ab\x00cd' > "$td/bin"
+	printf 'ab\000cd' > "$td/bin"
 	"$PROG" ab x --grep "$td/bin" > "$td/out" 2>/dev/null
 	rc=$?
 	[ "$rc" -eq 1 ] && [ ! -s "$td/out" ] && echo PASS > "$td/result" || echo "FAIL: binary file should be skipped (rc=$rc)" > "$td/result"

@@ -71,6 +71,90 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 	return JSTR_RET_SUCC;
 }
 
+/* Report modified file path to stderr (unless quiet) and stdout (if -l is enabled). */
+static jstr_ret_ty
+report_changed_file(const char *R fname, size_t fname_len)
+{
+	if (!(G.mode & MODE_QUIET)) {
+		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stderr) != fname_len))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	if (G.mode & MODE_PRINT_CHANGES) {
+		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		if (jstr_chk(jstr_io_putchar('\n')))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	return JSTR_RET_SUCC;
+}
+
+/* Write buffer to file with backup suffix (-iSUFFIX). */
+static jstr_ret_ty
+write_inplace_backup(const jstr_ty *R buf, const char *R fname, size_t fname_len, const struct stat *st)
+{
+	char bak[JSTR_IO_PATH_MAX];
+	if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
+		jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	char *p = jstr_mempcpy(bak, fname, fname_len);
+	jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
+	if (jstr_unlikely(file_exists(bak))) {
+		jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", bak);
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	if (jstr_unlikely(rename(fname, bak)))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	return JSTR_RET_SUCC;
+}
+
+/* Write buffer atomically using a temporary file (plain -i). */
+static jstr_ret_ty
+write_inplace_temp(const jstr_ty *R buf, const char *R fname, size_t fname_len)
+{
+	int fd_tmp = -1;
+	char *bakp = NULL;
+	char bak[JSTR_IO_PATH_MAX];
+	bakp = bak;
+	if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak))) {
+		jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	char *p = jstr_mempcpy(bak, fname, fname_len);
+	p = jstr_stpcpy_len(p, S_LITERAL(".XXXXXX"));
+	fd_tmp = mkstemp(bak);
+	if (jstr_unlikely(fd_tmp == -1)) {
+		bakp = NULL;
+		jstr_errdie("Can't make a file (%s) to temporarily write replacements to.\n", bak);
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	if (jstr_chk(jstr_io_writefilefd_len_j(buf, fd_tmp))) {
+		jstr_errdie("Can't write replacements to temp file (%s).\n", bak);
+		goto err;
+	}
+	if (jstr_unlikely(close(fd_tmp) == -1)) {
+		fd_tmp = -1;
+		jstr_errdie("Can't close temp file (%s).\n", bak);
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	fd_tmp = -1;
+	if (jstr_unlikely(rename(bak, fname))) {
+		jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname);
+		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	}
+	return JSTR_RET_SUCC;
+err:
+	if (fd_tmp != -1)
+		if (close(fd_tmp) < 0) {}
+	if (bakp != NULL)
+		if (unlink(bakp) < 0) {}
+	return JSTR_RET_ERR;
+}
+
 jstr_ret_ty
 process_buffer(const jstr_twoway_ty *R t,
                   jstr_ty *R buf,
@@ -89,9 +173,6 @@ process_buffer(const jstr_twoway_ty *R t,
 		size_t zu;
 		jstr_re_off_ty d;
 	} changed;
-	int fd_tmp = -1;
-	char *bakp = NULL;
-	char bak[JSTR_IO_PATH_MAX];
 	if (G.mode & MODE_USE_REGEX) {
 		/* Temporarily remove trailing newline. */
 		if (buf->size && buf->data[buf->size - 1] == '\n') {
@@ -123,76 +204,16 @@ process_buffer(const jstr_twoway_ty *R t,
 		if (changed.zu == 0)
 			return JSTR_RET_SUCC;
 		if (G.mode & MODE_PRINT_FILE_BACKUP) {
-			/* -iSUFFIX: rename the original aside, then write the new file. */
-			if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
-				jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			char *p = jstr_mempcpy(bak, fname, fname_len);
-			jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
-			if (jstr_unlikely(file_exists(bak))) {
-				jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", bak);
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			if (jstr_unlikely(rename(fname, bak)))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
+			if (jstr_chk(write_inplace_backup(buf, fname, fname_len, st)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		} else {
-			/* Plain -i: write to a temp file next to the original, then
-			 * rename it over the original for an atomic replace. */
-			bakp = bak;
-			if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak))) {
-				jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			char *p = jstr_mempcpy(bak, fname, fname_len);
-			p = jstr_stpcpy_len(p, S_LITERAL(".XXXXXX"));
-			fd_tmp = mkstemp(bak);
-			if (jstr_unlikely(fd_tmp == -1)) {
-				bakp = NULL;
-				jstr_errdie("Can't make a file (%s) to temporarily write replacements to.\n", bak);
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			if (jstr_chk(jstr_io_writefilefd_len_j(buf, fd_tmp))) {
-				jstr_errdie("Can't write replacements to temp file (%s).\n", bak);
-				goto err;
-			}
-			if (jstr_unlikely(close(fd_tmp) == -1)) {
-				fd_tmp = -1;
-				jstr_errdie("Can't close temp file (%s).\n", bak);
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			fd_tmp = -1;
-			if (jstr_unlikely(rename(bak, fname))) {
-				jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname);
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			}
-			bakp = NULL;
-		}
-		/* The file was successfully rewritten in place: report its name on
-		 * stderr (never stdout) so the caller can see what changed. -q
-		 * silences this echo; -l still prints it to stdout explicitly. */
-		if (!(G.mode & MODE_QUIET)) {
-			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stderr) != fname_len))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
+			if (jstr_chk(write_inplace_temp(buf, fname, fname_len)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
-		if (G.mode & MODE_PRINT_CHANGES) {
-			if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-			if (jstr_chk(jstr_io_putchar('\n')))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-		}
+		if (jstr_chk(report_changed_file(fname, fname_len)))
+			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
 	return JSTR_RET_SUCC;
-err:
-	if (fd_tmp != -1)
-		if (close(fd_tmp) < 0) {}
-	if (bakp != NULL)
-		if (unlink(bakp) < 0) {}
-	return JSTR_RET_ERR;
 }
 
 jstr_ret_ty

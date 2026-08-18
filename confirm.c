@@ -498,6 +498,94 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 }
 
+static void
+confirm_scan_regex_matches(const jstr_ty *R buf, size_t find_len, size_t match_budget)
+{
+	if (find_len == 0)
+		return;
+	/*
+	 * Scan for regex matches on the file buffer.
+	 * Mirror the state machine in jstr_internal_re_rplcn_backref_len_from_exec
+	 * to precisely align the on-the-fly confirm preview with actual replacements.
+	 * Like process_buffer, the final trailing newline is excluded from the
+	 * scanned region so regex semantics match the real replacement exactly.
+	 */
+	const size_t scan_size = (buf->size && buf->data[buf->size - 1] == '\n') ? buf->size - 1 : buf->size;
+	size_t off = 0;
+	int prev_zero = 1; /* Tracks if the previous match was zero-length. */
+	size_t n = G.n;
+	if (scan_size == 0)
+		n = 1;
+	while (n) {
+		/*
+		 * Stop if we are starting search at the end of the string, unless the
+		 * previous match was zero-length (which lets us match anchors at EOF).
+		 */
+		int matched_at_end = (off == scan_size);
+		if (matched_at_end) {
+			if (!prev_zero)
+				break;
+		} else if (off > scan_size) {
+			break;
+		}
+		/* Dynamically compute the eflags (like REG_NOTBOL) based on offset. */
+		const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
+		regmatch_t rm[JSTR_NMATCH_MAX];
+		memset(rm, 0, sizeof(rm));
+		const int ret = jstr_re_exec_len(&G.regex, buf->data + off, scan_size - off, JSTR_NMATCH_MAX, rm, eflags_curr);
+		if (ret == JSTR_RE_RET_NOERROR) {
+			const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
+			const size_t m_start = off + (size_t)rm[0].rm_so;
+			const size_t m_end = off + (size_t)rm[0].rm_eo;
+			if (jstr_unlikely(G.matches.size >= match_budget)) {
+				G.preview_full = 1;
+				break;
+			}
+			match_pushback(&G.matches, m_start, m_end, rm);
+			--n;
+			/* Set the next search pointer to the end of the match. */
+			size_t next_src = m_end;
+			/*
+			 * If the match was zero-length (e.g. ^$ or empty group), advance
+			 * past one character to prevent infinite loops, copying that character plain.
+			 */
+			if (match_len == 0)
+				if (next_src < scan_size)
+					++next_src;
+			off = next_src;
+			/* If the match occurred at the end of the string, stop immediately. */
+			if (matched_at_end)
+				break;
+			prev_zero = (match_len == 0);
+		} else {
+			break;
+		}
+	}
+}
+
+static void
+confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R find, size_t find_len, size_t match_budget)
+{
+	if (find_len == 0)
+		return;
+	/* Fixed-string pass uses the precompiled Two-Way matcher. */
+	for (size_t off = 0; off < buf->size; ) {
+		const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
+		if (p == NULL)
+			break;
+		const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
+		const size_t m_end = m_start + find_len;
+		if (jstr_unlikely(G.matches.size >= match_budget)) {
+			G.preview_full = 1;
+			break;
+		}
+		match_pushback(&G.matches, m_start, m_end, NULL);
+		if (G.n == 1)
+			break;
+		off = m_end;
+	}
+}
+
 jstr_ret_ty
 confirm_scan_file(const jstr_twoway_ty *R t,
                      const jstr_ty *R buf,
@@ -521,97 +609,12 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				rplc_backref1_e = rplc_backref1 + 2;
 		}
 	}
-	/* Collect every match range so they can be grouped by line for display.
-	 * The budget bounds the scan when the preview is truncated to
-	 * max_preview_lines: with -g on a large tree, collecting every match (and
-	 * building a replacement buffer per block) would take minutes per TUI
-	 * keystroke. Only the interactive preview sets max_preview_lines, so the
-	 * non-interactive CLI -c dry run keeps collecting and printing everything. */
 	G.matches.size = 0;
 	const size_t match_budget = (G.max_preview_lines > 0) ? (size_t)G.max_preview_lines * PREVIEW_MATCH_BUDGET_FACTOR : SIZE_MAX;
-	if (G.mode & MODE_USE_REGEX) {
-		if (find_len > 0) {
-			/*
-			 * Scan for regex matches on the file buffer.
-			 * Mirror the state machine in jstr_internal_re_rplcn_backref_len_from_exec
-			 * to precisely align the on-the-fly confirm preview with actual replacements.
-			 * Like process_buffer, the final trailing newline is excluded from the
-			 * scanned region so regex semantics match the real replacement exactly.
-			 */
-			const size_t scan_size = (buf->size && buf->data[buf->size - 1] == '\n') ? buf->size - 1 : buf->size;
-			size_t off = 0;
-			int prev_zero = 1; /* Tracks if the previous match was zero-length. */
-			size_t n = G.n;
-			if (scan_size == 0)
-				n = 1;
-			while (n) {
-				/*
-				 * Stop if we are starting search at the end of the string, unless the
-				 * previous match was zero-length (which lets us match anchors at EOF).
-				 */
-				int matched_at_end = (off == scan_size);
-				if (matched_at_end) {
-					if (!prev_zero)
-						break;
-				} else if (off > scan_size) {
-					break;
-				}
-				/* Dynamically compute the eflags (like REG_NOTBOL) based on offset. */
-				const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
-				regmatch_t rm[JSTR_NMATCH_MAX];
-				memset(rm, 0, sizeof(rm));
-				const int ret = jstr_re_exec_len(&G.regex, buf->data + off, scan_size - off, JSTR_NMATCH_MAX, rm, eflags_curr);
-				if (ret == JSTR_RE_RET_NOERROR) {
-					const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
-					const size_t m_start = off + (size_t)rm[0].rm_so;
-					const size_t m_end = off + (size_t)rm[0].rm_eo;
-					if (jstr_unlikely(G.matches.size >= match_budget)) {
-						G.preview_full = 1;
-						break;
-					}
-					match_pushback(&G.matches, m_start, m_end, rm);
-					--n;
-					/* Set the next search pointer to the end of the match. */
-					size_t next_src = m_end;
-					/*
-					 * If the match was zero-length (e.g. ^$ or empty group), advance
-					 * past one character to prevent infinite loops, copying that character plain.
-					 */
-					if (match_len == 0)
-						if (next_src < scan_size)
-							++next_src;
-					off = next_src;
-					/* If the match occurred at the end of the string, stop immediately. */
-					if (matched_at_end)
-						break;
-					prev_zero = (match_len == 0);
-				} else if (ret == JSTR_RE_RET_NOMATCH) {
-					break;
-				} else {
-					break;
-				}
-			}
-		}
-	} else {
-		if (find_len > 0) {
-			/* Fixed-string pass uses the precompiled Two-Way matcher. */
-			for (size_t off = 0; off < buf->size; ) {
-				const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
-				if (p == NULL)
-					break;
-				const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
-				const size_t m_end = m_start + find_len;
-				if (jstr_unlikely(G.matches.size >= match_budget)) {
-					G.preview_full = 1;
-					break;
-				}
-				match_pushback(&G.matches, m_start, m_end, NULL);
-				if (G.n == 1)
-					break;
-				off = m_end;
-			}
-		}
-	}
+	if (G.mode & MODE_USE_REGEX)
+		confirm_scan_regex_matches(buf, find_len, match_budget);
+	else
+		confirm_scan_fixed_matches(t, buf, find, find_len, match_budget);
 	if (G.matches.size > 0) {
 		G.matches_found = 1;
 		/* Merge all matches that lie on the same line into a single block so
@@ -1000,6 +1003,31 @@ confirm_read_key(char *out_char)
 static char err_buf[256];
 static char last_err_buf[256];
 
+static void
+render_tui_header_and_stats(size_t start_control_line, size_t total_matches, size_t files_matched)
+{
+	term_move_cursor(start_control_line, 1);
+	if (vim_is_insert_mode())
+		(void)jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
+	else
+		(void)jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
+	term_clear_line_end();
+	(void)jstr_io_putchar('\n');
+
+	/* Statistics line */
+	(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
+	print_size_t(total_matches);
+	if (G.preview_full)
+		(void)jstr_io_putchar('+');
+	(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
+	print_size_t(files_matched);
+	if (G.preview_full)
+		(void)jstr_io_putchar('+');
+	(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
+	term_clear_line_end();
+	(void)jstr_io_putchar('\n');
+}
+
 jstr_ret_ty
 confirm_interactive_loop(jstr_twoway_ty *R t,
                          jstr_ty *R find_buf,
@@ -1129,26 +1157,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			 * the last field always ends on the terminal's last row; the
 			 * preview area sits above. */
 			const size_t start_control_line = (rows > FIELD_COUNT + 1) ? rows - (FIELD_COUNT + 1) : 1;
-			term_move_cursor(start_control_line, 1);
-			if (vim_is_insert_mode())
-				(void)jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
-			else
-				(void)jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
-			term_clear_line_end();
-			(void)jstr_io_putchar('\n');
-
-			/* Statistics line */
-			(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
-			print_size_t(total_matches);
-			if (G.preview_full)
-				(void)jstr_io_putchar('+');
-			(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
-			print_size_t(files_matched);
-			if (G.preview_full)
-				(void)jstr_io_putchar('+');
-			(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
-			term_clear_line_end();
-			(void)jstr_io_putchar('\n');
+			render_tui_header_and_stats(start_control_line, total_matches, files_matched);
 
 			for (size_t f = 0; f < FIELD_COUNT; ++f) {
 				const jstr_ty *buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, f);

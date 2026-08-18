@@ -25,4 +25,10 @@ jstr_ret_ty grep_scan_file(const jstr_ty *R buf, const char *R fname,
                            size_t fname_len, const char *R find,
                            size_t find_len);
 
+/* --grep TUI: collect every matching line into G.grep_lines instead of
+ * printing. FNAME/FNAME_LEN identify the source file. */
+void grep_collect_file(const jstr_ty *R buf, const char *R fname,
+                       size_t fname_len, const char *R find,
+                       size_t find_len);
+
 #endif /* PROCESS_H */

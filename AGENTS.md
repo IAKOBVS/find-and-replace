@@ -62,7 +62,7 @@ TUs are non-static; their prototypes live in the module headers
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (14 suites, 293 tests)
+./compile && tests/run.sh   # all deterministic suites (14 suites, 308 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
@@ -84,8 +84,8 @@ TUs are non-static; their prototypes live in the module headers
 | Misc | `tests/misc.sh` | 7 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
 | Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
 | Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
-| Confirm | `tests/confirm.sh` | 80 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll) |
-| Grep | `tests/grep.sh` | 17 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find |
+| Confirm | `tests/confirm.sh` | 87 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
+| Grep | `tests/grep.sh` | 28 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
 | Unit | `tests/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
@@ -102,6 +102,7 @@ All tests follow the same conventions:
 - **The binary path** is available as `$PROG` (set in `tests/lib.sh`, sourced by all test files).
 - **Stderr is redirected to `/dev/null`** (`2>/dev/null`) unless the test specifically checks error output.
 - **Tests are registered** by listing their function name in the `TESTS` variable. Only listed functions are executed by the runner.
+- **Every bug gets a regression test.** When a bug is found and fixed, add a test that specifically exercises the broken code path. Name it descriptively (e.g. `t_grep_interactive_file_cache` for the file-caching ordering bug) and comment the root cause at the top of the test function.
 
 ### Test runner parallelism
 
@@ -148,7 +149,7 @@ status (including a non-blocking reap + EIO-safe read on early marker-miss).
 ### Coverage: 95.5% of executable lines
 
 Coverage measured via `gcov` (`./coverage`, branch + line) after running all
-293 deterministic tests: 95.5% lines (1389/1454), 99.1% branches executed,
+308 deterministic tests: 95.5% lines (1389/1454), 99.1% branches executed,
 80.6% of branches taken both ways (6 sources: main, files, process, confirm,
 procfs, vim). The small drop from Session 11's 95.9% comes from the new
 grep/`-`-stdin code paths that need fault injection or tty input to hit
@@ -186,7 +187,7 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
 
 **Remaining uncovered** (65 lines in the 6 gcov files, mostly OS-level or dead-code paths): signal handler + terminal restore, terminal-width fallbacks (`COLUMNS` env, ioctl failure), preview width-clipping branches, giant-size guards, disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors, `-c`/`-r` + `-` conflict errors, ftw-failure exit — these require fault injection or special terminal sizes and cannot be exercised in integration tests.
 
-### Bugs found and fixed (17 total)
+### Bugs found and fixed (31 total)
 
 1. **`jstr_io_writefilefd_len` newline condition inverted** — `jstring/include/io.h:161` in writev path: `(s[sz - 1] == '\n') ? 1 : 0` causes a double `\n` when content already ends with newline (which `process_buffer` always ensures). Fixed to `(s[sz - 1] != '\n') ? 1 : 0` in both `include/io.h` and `build/include/jstr/io.h`. The tool now uses the jstring write functions directly with correct single-trailing-newline output in all modes.
 
@@ -223,6 +224,14 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
 17. **`t_binary_skipped` not in TESTS (same class as #4)** — `tests/run.sh:196` defined `t_binary_skipped` but never listed it, likely because binary detection (`#if 0`) was disabled. Added to TESTS with updated expectation reflecting current no-binary-detection behavior.
 
 26. **Single-character file/dir args treated as the `-` stdin placeholder** — The file-loop check `if (ARG[1] == '\0')` at `main.c:394` never verified `ARG[0] == '-'`, so any one-char argument (`.`, `a`, ...) took the stdin branch: with `-c` it misreported `-c does not work with '-' (stdin).` for a plain `.` directory; in other modes the real file was silently skipped while stdin was read instead. Fixed to `ARG[0] == '-' && ARG[1] == '\0'`. Regression tests `t_single_char_filename`, `t_single_char_confirmed_dir` (the exact `'' 'exp' -r -i -c -g -R .` report) in `tests/files.sh`.
+
+27. **`G.grep_collect` set after file loop — grep TUI never launched** — `G.grep_collect` was assigned at `main.c:608` (after the file-processing loop), so `process_file` never cached files during the loop. By the time `grep_collect` was set, `G.files` was empty and `grep_interactive_loop` had nothing to show. Additionally, `G.interactive_find_buf` was never seeded with `raw_find`, so even if the TUI launched, `grep_rescan` matched against an empty find (matching every line). Fixed by moving the `G.grep_collect` assignment into `parse_long_flag` (when `--grep` is parsed, before any files are processed) and seeding all interactive buffers (`find_buf`, `files_buf`, `include_buf`, `exclude_buf`) before calling `grep_interactive_loop`. Regression test `t_grep_interactive_file_cache` in `tests/grep.sh`.
+
+28. **Grep TUI missing FIND field; controls not pinned; vim mode broken** — Three related grep TUI deficiencies: (a) the grep TUI only had Files/Include/Exclude fields with no FIND field, so the user could not change the find string interactively; (b) controls were not pinned to the bottom of the terminal — they streamed inline after the preview content, so with a short preview the controls floated near the top; (c) `vim_set_insert_mode(1)` was never called, the `[INSERT]`/`[NORMAL]` label was hardcoded to `[INSERT]`, and the cursor positioning did not account for the field index offset. Fixed by adding GREP_FIELD_FIND as field 0, calling `vim_set_insert_mode(1)`, rendering `[INSERT]`/`[NORMAL]` via `vim_is_insert_mode()`, and using `term_move_cursor(start_control_line, 1)` to anchor controls to the bottom. Regression tests `t_grep_interactive_find_field`, `t_grep_interactive_controls_fixed`, `t_grep_interactive_vim_mode` in `tests/grep.sh`.
+
+29. **Confirm TUI scrolling stopped at vis_end — `G.total_lines` capped** — `print_diff_lines` returned early when `G.preview_lines_printed >= vis_end` (the visible window limit), so `G.total_lines = G.preview_lines_printed` was capped at `vis_end`. After scrolling down, `G.selected_line + 1 < G.total_lines` became false too early, preventing further Ctrl-J scrolling. Fixed by changing the three early `return` statements in `print_diff_lines` to set a `render` flag to 0 and continue counting lines without rendering. Regression test `t_confirm_interactive_scroll_past_visend` in `tests/confirm.sh` (20-line file, 15 Ctrl-J presses past old vis_end).
+
+30. **Grep output did not highlight matched strings** — `grep_scan_file` (non-interactive) printed the full matching line without wrapping the matched portion in red, and `grep_print_line` (interactive TUI) did the same. Fixed by computing `match_off`/`match_len` in `grep_collect_file` (using `jstr_strstr_len` for fixed-string, `regmatch_t.rm_so/rm_eo` for regex) and wrapping the match in `COLOR_RED`/`COLOR_RESET` in both `grep_scan_file` and `grep_print_line`. Regression tests `t_grep_match_highlight` and `t_grep_regex_highlight` in `tests/grep.sh`.
 
 ### jstring test file added (session 2)
 
@@ -909,7 +918,7 @@ P1 `-r` and `init_defaults` items:
   (no `isatty` gating); the earlier "gate on tty" idea was dropped by design.
 
 New tests total: files 27→33, flags 23→25, confirm 79→80, + grep suite 17 =
-**14 suites, 293 deterministic tests** (2 more in files.sh from the
+**14 suites, 308 deterministic tests** (2 more in files.sh from the
 single-character-arg stdin-placeholder bug fix, bug #26).
 
 ## Session 13: bounded -c preview scan; interactive pass-1 only caches files
@@ -951,8 +960,8 @@ Tests (TDD, red verified by re-introducing both bugs): `t_confirm_interactive_pr
 (100-line file > 52-match budget; asserts `+ matches` stats suffix and the
 omitted marker, exercising both fixed-string and regex scan paths) and
 `t_confirm_interactive_no_pre_tui_dump` (asserts no preview line precedes the
-alt-screen enter `\x1b[?1049h`, byte-ordered via awk `index()`). confirm 80→82,
-total **293**.
+alt-screen enter `\x1b[?1049h`, byte-ordered via awk `index()`). confirm 80→82→86,
+total **308**.
 
 ## Test-Driven Development (TDD) Guidelines
 

@@ -76,4 +76,12 @@ jstr_ret_ty confirm_interactive_loop(jstr_twoway_ty *R t,
                                      jstr_ty *R exclude_buf,
                                      jstr_ty *R backup_buf);
 
+/* --grep TUI: scrollable match browser. Prints the selected line to stdout
+ * on Enter, exits 0. Ctrl-C/D exits without printing. */
+jstr_ret_ty grep_interactive_loop(jstr_twoway_ty *R t,
+                                   jstr_ty *R find_buf,
+                                   jstr_ty *R files_buf,
+                                   jstr_ty *R include_buf,
+                                   jstr_ty *R exclude_buf);
+
 #endif /* CONFIRM_H */

@@ -65,6 +65,24 @@ typedef struct matches_ty {
 	match_ty *data;
 } matches_ty;
 
+/* A single matching line collected for the grep TUI. Pointers into file
+ * content buffers are stable across the scan (files are cached in G.files). */
+typedef struct grep_line_ty {
+	const char *fname;
+	size_t fname_len;
+	size_t line_num;
+	const char *content;
+	size_t content_len;
+	size_t match_off;
+	size_t match_len;
+} grep_line_ty;
+
+typedef struct grep_lines_ty {
+	size_t cap;
+	size_t size;
+	grep_line_ty *data;
+} grep_lines_ty;
+
 /* One file collected during the -c scan pass: its name, stat, and full
  * content. The content buffer is stolen from the shared buf so pass 2 edits
  * it from memory instead of re-walking argv/ftw or re-reading the file. */
@@ -103,6 +121,9 @@ typedef struct global_ty {
 	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
 	 * instead of modifying files. Reset before the second (real) pass. */
 	int confirm_pass;
+	/* 1 when --grep + tty: process_file caches files instead of printing
+	 * so the grep TUI can scan them interactively. */
+	int grep_collect;
 	/* 1 when --include/--exclude were given (or edited in the confirm TUI);
 	 * guards use of the compiled include_re/exclude_re. */
 	int have_include;
@@ -134,6 +155,12 @@ typedef struct global_ty {
 	 * TUI stats then show "N+ matches, M+ files" and scanning further files
 	 * stops. Reset by each preview consumer before it scans. */
 	int preview_full;
+	/* Scroll state for the interactive preview. */
+	size_t scroll_offset;
+	size_t selected_line;
+	size_t total_lines;
+	/* Grep TUI match collection (no budget limit). */
+	grep_lines_ty grep_lines;
 	/* Cold configuration, read only during startup and traversal. */
 	const char *include_pat;
 	const char *exclude_pat;

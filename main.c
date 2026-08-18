@@ -306,6 +306,8 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 	}
 	if (!strcmp(arg + 2, "grep")) {
 		G.mode |= MODE_GREP;
+		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))
+			G.grep_collect = 1;
 		return 1;
 	}
 	if (!strcmp(arg + 2, "quiet")) {
@@ -592,7 +594,7 @@ main(int argc, char **argv)
 		if (a.find_len == 0) {
 			if (G.mode & MODE_GREP)
 				G.grep_matched = 1;
-			if (!(G.mode & MODE_CONFIRM))
+			if (!(G.mode & (MODE_CONFIRM | MODE_GREP)))
 				continue;
 		}
 		if (ARG[0] == '-' && ARG[1] == '\0') {
@@ -624,6 +626,18 @@ main(int argc, char **argv)
 		return err_exit_code();
 	}
 	if (G.mode & MODE_GREP) {
+		if (G.grep_collect && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
+			jstr_empty_j(&G.interactive_find_buf);
+			jstr_empty_j(&G.interactive_files_buf);
+			jstr_empty_j(&G.interactive_include_buf);
+			jstr_empty_j(&G.interactive_exclude_buf);
+			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_find_buf, raw_find, strlen(raw_find))), "%s", "Out of memory.\n");
+			if (G.include_pat)
+				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat))), "%s", "Out of memory.\n");
+			if (G.exclude_pat)
+				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_exclude_buf, G.exclude_pat, strlen(G.exclude_pat))), "%s", "Out of memory.\n");
+			grep_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf);
+		}
 		cleanup();
 		return G.grep_matched ? EXIT_SUCCESS : EXIT_FAILURE;
 	}

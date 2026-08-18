@@ -47,18 +47,32 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
 		int matched = 0;
+		size_t moff = 0;
+		size_t mlen = 0;
 		if (G.mode & MODE_USE_REGEX) {
 			regmatch_t rm = { 0 };
 			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+			if (jstr_unlikely(matched)) {
+				moff = (size_t)rm.rm_so;
+				mlen = (size_t)(rm.rm_eo - rm.rm_so);
+			}
 		} else {
-			if (jstr_strstr_len(p, line_len, find, find_len) != NULL)
+			const char *hit = jstr_strstr_len(p, line_len, find, find_len);
+			if (hit != NULL) {
 				matched = 1;
+				moff = (size_t)(hit - p);
+				mlen = find_len;
+			}
 		}
 		if (matched) {
 			G.grep_matched = 1;
 			if (!(G.mode & MODE_QUIET)) {
 				print_line_prefix(fname, fname_len, line);
-				if (jstr_unlikely(jstr_io_fwrite(p, 1, line_len, stdout) != line_len))
+				(void)jstr_io_fwrite(p, 1, moff, stdout);
+				(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+				(void)jstr_io_fwrite(p + moff, 1, mlen, stdout);
+				(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				if (jstr_unlikely(jstr_io_fwrite(p + moff + mlen, 1, line_len - moff - mlen, stdout) != line_len - moff - mlen))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
 				if (jstr_unlikely(jstr_io_fputc('\n', stdout) == EOF))
 					JSTR_RETURN_ERR(JSTR_RET_ERR);
@@ -69,6 +83,59 @@ grep_scan_file(const jstr_ty *R buf, const char *R fname, size_t fname_len,
 		p = nl + 1;
 	}
 	return JSTR_RET_SUCC;
+}
+
+/* --grep TUI: collect every matching line into G.grep_lines. */
+void
+grep_collect_file(const jstr_ty *R buf, const char *R fname,
+                  size_t fname_len, const char *R find,
+                  size_t find_len)
+{
+	const char *d = buf->data;
+	const size_t n = buf->size;
+	const char *p = d;
+	for (size_t line = 1;; ++line) {
+		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
+		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
+		int matched = 0;
+		size_t moff = 0;
+		size_t mlen = 0;
+		if (G.mode & MODE_USE_REGEX) {
+			regmatch_t rm = { 0 };
+			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+			if (jstr_unlikely(matched)) {
+				moff = (size_t)rm.rm_so;
+				mlen = (size_t)(rm.rm_eo - rm.rm_so);
+			}
+		} else {
+			const char *hit = jstr_strstr_len(p, line_len, find, find_len);
+			if (hit != NULL) {
+				matched = 1;
+				moff = (size_t)(hit - p);
+				mlen = find_len;
+			}
+		}
+		if (matched) {
+			G.grep_matched = 1;
+			if (G.grep_lines.size >= G.grep_lines.cap) {
+				G.grep_lines.cap = (G.grep_lines.cap == 0 ? 32 : G.grep_lines.cap * 2);
+				grep_line_ty *const tmp = (grep_line_ty *)realloc(G.grep_lines.data, G.grep_lines.cap * sizeof(grep_line_ty));
+				DIE_IF(!tmp, "%s", "Out of memory allocating grep results.\n");
+				G.grep_lines.data = tmp;
+			}
+			G.grep_lines.data[G.grep_lines.size].fname = fname;
+			G.grep_lines.data[G.grep_lines.size].fname_len = fname_len;
+			G.grep_lines.data[G.grep_lines.size].line_num = line;
+			G.grep_lines.data[G.grep_lines.size].content = p;
+			G.grep_lines.data[G.grep_lines.size].content_len = line_len;
+			G.grep_lines.data[G.grep_lines.size].match_off = moff;
+			G.grep_lines.data[G.grep_lines.size].match_len = mlen;
+			++G.grep_lines.size;
+		}
+		if (nl == NULL)
+			break;
+		p = nl + 1;
+	}
 }
 
 /* Report modified file path to stderr (unless quiet) and stdout (if -l is enabled). */
@@ -229,10 +296,10 @@ process_file(const jstr_twoway_ty *R t,
 {
 	const size_t file_size = (size_t)st->st_size;
 	/* A fixed-string find longer than the whole file cannot match. In the
-	 * interactive editor the find can still be edited to something shorter,
-	 * so keep such files cached there. */
+	 * interactive editor or grep TUI, the find can still be edited to
+	 * something shorter, so keep such files cached there. */
 	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len &&
-	    !((G.mode & MODE_CONFIRM) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)))
+	    !((G.mode & (MODE_CONFIRM | MODE_GREP)) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)))
 		return JSTR_RET_SUCC;
 	/* Preallocate the length of the replace string. */
 	/* Worst-case output size = input + (longer replace) + trailing newline. */
@@ -244,9 +311,14 @@ process_file(const jstr_twoway_ty *R t,
 	/* Skip files with NUL bytes in the first BINARY_SCAN_SIZE bytes. */
 	if (jstr_io_isbinary_atleast(buf->data, file_size, BINARY_SCAN_SIZE))
 		return JSTR_RET_SUCC;
-	/* --grep mode never edits; scan and print matching lines instead. */
-	if (G.mode & MODE_GREP)
+	/* --grep mode: cache files for the TUI, or print matching lines directly. */
+	if (G.mode & MODE_GREP) {
+		if (G.grep_collect) {
+			file_pushback(&G.files, fname, fname_len, st, buf);
+			return JSTR_RET_SUCC;
+		}
 		return grep_scan_file(buf, fname, fname_len, find, find_len);
+	}
 	/* During the -c dry-run pass, only scan and preview; the real edit
 	 * happens on the second pass after the user confirms. The file's content
 	 * is recorded so pass 2 edits it from memory without re-reading disk. */

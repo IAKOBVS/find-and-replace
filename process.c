@@ -40,6 +40,8 @@ jstr_ret_ty
 grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname, size_t fname_len,
                const char *R find, size_t find_len)
 {
+	if (find_len == 0)
+		return JSTR_RET_SUCC;
 	const char *d = buf->data;
 	const size_t n = buf->size;
 	const char *p = d;

@@ -202,6 +202,19 @@ t_exclude_long_relative_path() {
 	fi
 }
 
+# REPLACE argument can be omitted when --grep is used; argv[2] is a flag.
+t_grep_omit_replace() {
+	td=$1
+	printf 'test line\nfoo bar\n' > "$td/in"
+	out=$("$PROG" 't' -r --grep "$td/in" 2>/dev/null | strip_ansi)
+	rc=$?
+	if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'test line'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	fi
+}
+
 TESTS="
 t_explicit_F
 t_literal_F_with_dot
@@ -228,5 +241,6 @@ t_l_flag_cli
 t_quiet_inplace
 t_quiet_long_flag
 t_exclude_long_relative_path
+t_grep_omit_replace
 "
 run_suite "flag tests" "$TESTS"

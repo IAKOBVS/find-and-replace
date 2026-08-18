@@ -166,10 +166,9 @@ init_defaults()
 static int
 file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
 {
-	if (files_buf->size > 0 && files_buf->data) {
+	if (files_buf->size > 0 && files_buf->data)
 		if (jstr_strstr_len(file->fname, file->fname_len, files_buf->data, files_buf->size) == NULL)
 			return 0;
-	}
 	/* Include/Exclude regexes match against the basename, like the flag
 	 * parser and the ftw matcher. */
 	const char *base = jstr_memrchr(file->fname, SEP, file->fname_len);
@@ -562,16 +561,27 @@ main(int argc, char **argv)
 	jstr_twoway_ty t;
 	a.t = &t;
 	a.find = (const char *)FIND;
-	a.rplc = (const char *)RPLC;
 	const char *raw_find = (const char *)FIND;
-	const char *raw_rplc = (const char *)RPLC;
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
-	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+	const char *raw_rplc;
+	/* If argv[2] starts with '-', it's a flag, not REPLACE.  Allow grep/confirm
+	 * modes to omit the REPLACE argument. */
+	unsigned int i;
+	if (argv[2] && argv[2][0] == '-') {
+		a.rplc = "";
+		a.rplc_len = 0;
+		raw_rplc = "";
+		i = 2;
+	} else {
+		a.rplc = (const char *)RPLC;
+		raw_rplc = (const char *)RPLC;
+		a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+		i = 3;
+	}
 	init_defaults();
 	G.confirm_pass = 1;
 	int end_of_flags = 0;
-	unsigned int i;
-	for (i = 3; ARG; ++i) {
+	for (; ARG; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {

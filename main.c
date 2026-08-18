@@ -214,7 +214,7 @@ cleanup()
 
 /* Handle single-character combined flags (e.g., -EI, -gR). */
 static void
-parse_single_flags(const char *arg, const char *prog_name)
+parse_single_flags(const char *arg)
 {
 	for (const char *argp = arg + 1; *argp != '\0'; ++argp) {
 		switch (*argp) {
@@ -263,7 +263,7 @@ parse_single_flags(const char *arg, const char *prog_name)
 			printf("find-and-replace %s\n", VERSION);
 			exit(EXIT_SUCCESS);
 		default:
-			fprintf(stderr, "%s: invalid flag '-%c'. See usage below:\n\n%s", prog_name, *argp, usage);
+			fprintf(stderr, "find-and-replace: invalid flag '-%c'. See usage below:\n\n%s", *argp, usage);
 			exit(err_exit_code());
 		}
 	}
@@ -320,7 +320,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 }
 
 /* Process a lone "-" stdin placeholder. */
-static void
+static jstr_ret_ty
 process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 {
 	if (G.mode & MODE_CONFIRM)
@@ -333,9 +333,9 @@ process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 		if (!(G.mode & MODE_GREP)) {
 			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 			if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
-				return;
+				return JSTR_RET_ERR;
 		}
-		return;
+		return JSTR_RET_SUCC;
 	}
 	DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 	DIE_IF(jstr_chk(compile(t, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "");
@@ -343,6 +343,7 @@ process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 		DIE_IF(jstr_chk(grep_scan_file(&G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 	else
 		DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
+	return JSTR_RET_SUCC;
 }
 
 /* Process a target regular file or directory argument. */
@@ -507,7 +508,7 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 }
 
 /* Process stdin fallback when no file argument was passed. */
-static void
+static jstr_ret_ty
 process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 {
 	if (jstr_unlikely(G.bak_suffix != NULL) || jstr_unlikely(!(G.mode & MODE_PRINT_STDOUT)))
@@ -518,7 +519,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 		if (!(G.mode & MODE_GREP)) {
 			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 			if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
-				return;
+				return JSTR_RET_ERR;
 		} else {
 			G.grep_matched = 1;
 		}
@@ -530,6 +531,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 		else
 			DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
 	}
+	return JSTR_RET_SUCC;
 }
 
 int
@@ -583,7 +585,7 @@ main(int argc, char **argv)
 				if (parse_long_flag(argv, &i, &end_of_flags))
 					continue;
 			}
-			parse_single_flags(ARG, argv[0]);
+			parse_single_flags(ARG);
 			continue;
 		}
 		G.mode |= MODE_HAVE_FILES;
@@ -593,7 +595,10 @@ main(int argc, char **argv)
 			continue;
 		}
 		if (ARG[0] == '-' && ARG[1] == '\0') {
-			process_stdin_arg(&a, &t, argv[0]);
+			if (jstr_chk(process_stdin_arg(&a, &t, argv[0]))) {
+				cleanup();
+				exit(err_exit_code());
+			}
 			continue;
 		}
 		process_target_arg(ARG, &a, &t);
@@ -605,8 +610,12 @@ main(int argc, char **argv)
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
 		run_confirm_mode(&a, &t, raw_find, raw_rplc, argv);
 	} else {
-		if (!(G.mode & MODE_HAVE_FILES))
-			process_no_files_stdin(&a, &t, argv);
+		if (!(G.mode & MODE_HAVE_FILES)) {
+			if (jstr_chk(process_no_files_stdin(&a, &t, argv))) {
+				cleanup();
+				exit(err_exit_code());
+			}
+		}
 	}
 	if (jstr_unlikely(a.err_count > 0)) {
 		fprintf(stderr, "find-and-replace: %zu file(s) failed during processing.\n", a.err_count);

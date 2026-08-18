@@ -1147,11 +1147,10 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				term_clear_line_end();
 				(void)jstr_io_putchar('\n');
 				}
-				if (total_matches == 0) {
-					/* Clear entire screen once on zero matches to wipe out previous previews/ghost lines */
-					term_clear_and_home();
-				}
 			}
+
+			/* Clear remaining preview area below the printed previews before rendering controls */
+			term_clear_down();
 
 			/* Render the control fields pinned to the bottom of the screen so
 			 * the last field always ends on the terminal's last row; the

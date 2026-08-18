@@ -181,6 +181,23 @@ t_confirm_preview_many_blocks() {
 	[ "$n" -eq 50 ] && [ "$yg" -eq 50 ] && [ "$xg" -eq 0 ] && printf '%s\n' "$clean_out" | grep -q -- ':100:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:+Y' && echo PASS > "$td/result" || echo "FAIL: n=$n yg=$yg xg=$xg out=[$(printf '%s\n' "$clean_out" | head -3)]" > "$td/result"
 }
 
+t_confirm_interactive_garbage_preview_cleared() {
+	td=$1
+	printf 'line 1 match\nline 2 match\nline 3 match\nline 4 match\n' > "$td/f"
+	esc=$(printf '\033')
+	# Initial Find is "match" (4 lines matched).
+	# Ctrl-U clears Find, then type "line 1" (1 line matched).
+	pdrive --winsize 24x80 --tail '\x15line 1' --tail '\x03' -- match replacement -c -i "$td/f"
+	# In the final redraw frame (after Find: line 1), verify clear-down (\x1b[J)
+	# appears right after the preview lines and before the control header positioning (\x1b[16;1H).
+	last_frame=$(awk 'BEGIN{RS="\x1b\\[H"} {last=$0} END{print last}' "$td/out")
+	if printf '%s' "$last_frame" | grep -q 'Find:    line 1' && printf '%s' "$last_frame" | grep -q -z "f:1:+.*${esc}\\[J.*${esc}\\[16;1H"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: clear-down sequence missing between preview and controls in frame: [$last_frame]" > "$td/result"
+	fi
+}
+
 t_confirm_interactive_live_preview() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	pdrive --tail '\x7f\x7f\x7f\x7f\x7fworld\r' --tail 'y\n' -- hello replacement -c -i "$td/f"
@@ -967,6 +984,7 @@ t_confirm_preview_no_trailing_newline
 t_confirm_preview_delete_line
 t_confirm_preview_empty_line_insert
 t_confirm_preview_many_blocks
+t_confirm_interactive_garbage_preview_cleared
 t_confirm_interactive_live_preview
 t_confirm_interactive_multi_field
 t_confirm_interactive_layout

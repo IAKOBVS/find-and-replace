@@ -538,6 +538,9 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 int
 main(int argc, char **argv)
 {
+	/* Give stdout a large buffer to batch the many small fwrite/putc calls
+	 * during TUI redraws; fflush is called explicitly at each frame end. */
+	setvbuf(stdout, NULL, _IOFBF, 16384);
 	/* FIND/REPLACE are the first two arguments; missing -> print usage. */
 	if (jstr_nullchk(argv[1])) {
 		fprintf(stderr, "%s", usage);
@@ -564,20 +567,10 @@ main(int argc, char **argv)
 	const char *raw_find = (const char *)FIND;
 	a.find_len = JSTR_DIFF(jstr_unescape_p(FIND), FIND);
 	const char *raw_rplc;
-	/* If argv[2] starts with '-', it's a flag, not REPLACE.  Allow grep/confirm
-	 * modes to omit the REPLACE argument. */
-	unsigned int i;
-	if (argv[2] && argv[2][0] == '-') {
-		a.rplc = "";
-		a.rplc_len = 0;
-		raw_rplc = "";
-		i = 2;
-	} else {
-		a.rplc = (const char *)RPLC;
-		raw_rplc = (const char *)RPLC;
-		a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
-		i = 3;
-	}
+	a.rplc = (const char *)RPLC;
+	raw_rplc = (const char *)RPLC;
+	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
+	unsigned int i = 3;
 	init_defaults();
 	G.confirm_pass = 1;
 	int end_of_flags = 0;

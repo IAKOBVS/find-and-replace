@@ -29,6 +29,7 @@ jstr_ret_ty grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf,
  * printing. FNAME/FNAME_LEN identify the source file. */
 void grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf,
                        const char *R fname, size_t fname_len,
-                       const char *R find, size_t find_len);
+                       const char *R find, size_t find_len,
+                       unsigned int file_idx);
 
 #endif /* PROCESS_H */

@@ -14,22 +14,15 @@ static jstr_ret_ty
 print_line_prefix(const char *R fname, size_t fname_len, size_t line)
 {
 	if (jstr_likely(fname != NULL)) {
-		if (jstr_unlikely(jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout)) != S_LEN(COLOR_RED))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
+		(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+		(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
+		(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+		(void)jstr_io_fputc(':', stdout);
 	}
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout)) != S_LEN(COLOR_GREEN))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
 	print_size_t(line);
-	if (jstr_unlikely(jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout)) != S_LEN(COLOR_RESET))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_unlikely(jstr_io_fputc(':', stdout) == EOF))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
+	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fputc(':', stdout);
 	return JSTR_RET_SUCC;
 }
 
@@ -71,13 +64,9 @@ grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fn
 			if (!(G.mode & MODE_QUIET)) {
 				print_line_prefix(fname, fname_len, line);
 				(void)jstr_io_fwrite(p, 1, moff, stdout);
-				(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 				(void)jstr_io_fwrite(p + moff, 1, mlen, stdout);
-				(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				if (jstr_unlikely(jstr_io_fwrite(p + moff + mlen, 1, line_len - moff - mlen, stdout) != line_len - moff - mlen))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
-				if (jstr_unlikely(jstr_io_fputc('\n', stdout) == EOF))
-					JSTR_RETURN_ERR(JSTR_RET_ERR);
+				(void)jstr_io_fwrite(p + moff + mlen, 1, line_len - moff - mlen, stdout);
+				(void)jstr_io_fputc('\n', stdout);
 			}
 		}
 		if (nl == NULL)
@@ -91,7 +80,7 @@ grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fn
 void
 grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
                   size_t fname_len, const char *R find,
-                  size_t find_len)
+                  size_t find_len, unsigned int file_idx)
 {
 	const char *d = buf->data;
 	const size_t n = buf->size;
@@ -132,6 +121,7 @@ grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R
 			G.grep_lines.data[G.grep_lines.size].content_len = line_len;
 			G.grep_lines.data[G.grep_lines.size].match_off = moff;
 			G.grep_lines.data[G.grep_lines.size].match_len = mlen;
+			G.grep_lines.data[G.grep_lines.size].file_idx = file_idx;
 			++G.grep_lines.size;
 		}
 		if (nl == NULL)

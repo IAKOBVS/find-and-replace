@@ -20,6 +20,10 @@ static struct termios orig_termios;
 static int term_initialized = 0;
 static const char *env_cols;
 static const char *env_lines;
+/* Cached terminal dimensions, invalidated by SIGWINCH. */
+static volatile sig_atomic_t term_size_dirty = 1;
+static unsigned short cached_cols;
+static unsigned short cached_rows;
 
 /* Terminal size fallbacks for when ioctl(TIOCGWINSZ) and the LINES/COLUMNS
  * environment variables are all unavailable (non-tty, redirected output). */
@@ -54,6 +58,13 @@ handle_signal(int sig)
 	(void)sig;
 	restore_terminal();
 	_exit(EXIT_FAILURE);
+}
+
+static void
+handle_sigwinch(int sig)
+{
+	(void)sig;
+	term_size_dirty = 1;
 }
 
 static int
@@ -162,6 +173,7 @@ setup_terminal(void)
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 	signal(SIGQUIT, handle_signal);
+	signal(SIGWINCH, handle_sigwinch);
 }
 
 /* Append one match range to the dynamically grown matches array. */
@@ -334,21 +346,28 @@ match_line_end(const char *R data, size_t size, size_t start, size_t end)
 static unsigned short
 get_terminal_cols(void)
 {
+	if (!term_size_dirty && cached_cols > 0)
+		return cached_cols;
 	struct winsize w;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
-		return w.ws_col;
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
-		return w.ws_col;
-	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
-		return w.ws_col;
-	if (env_cols == NULL)
-		env_cols = getenv("COLUMNS");
-	if (env_cols != NULL) {
-		int c = jstr_atoi(env_cols);
-		if (c > 0)
-			return (unsigned short)c;
+		cached_cols = w.ws_col;
+	else if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
+		cached_cols = w.ws_col;
+	else if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
+		cached_cols = w.ws_col;
+	else {
+		if (env_cols == NULL)
+			env_cols = getenv("COLUMNS");
+		if (env_cols != NULL) {
+			int c = jstr_atoi(env_cols);
+			if (c > 0)
+				cached_cols = (unsigned short)c;
+		}
+		if (cached_cols == 0)
+			cached_cols = TERM_COLS_FALLBACK;
 	}
-	return TERM_COLS_FALLBACK; /* standard default fallback */
+	term_size_dirty = 0;
+	return cached_cols;
 }
 
 static unsigned short
@@ -871,21 +890,28 @@ parse_interactive_flags(const char *flags, size_t len)
 static unsigned short
 get_terminal_rows(void)
 {
+	if (!term_size_dirty && cached_rows > 0)
+		return cached_rows;
 	struct winsize w;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
-		return w.ws_row;
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
-		return w.ws_row;
-	if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
-		return w.ws_row;
-	if (env_lines == NULL)
-		env_lines = getenv("LINES");
-	if (env_lines != NULL) {
-		int l = jstr_atoi(env_lines);
-		if (l > 0)
-			return (unsigned short)l;
+		cached_rows = w.ws_row;
+	else if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
+		cached_rows = w.ws_row;
+	else if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
+		cached_rows = w.ws_row;
+	else {
+		if (env_lines == NULL)
+			env_lines = getenv("LINES");
+		if (env_lines != NULL) {
+			int l = jstr_atoi(env_lines);
+			if (l > 0)
+				cached_rows = (unsigned short)l;
+		}
+		if (cached_rows == 0)
+			cached_rows = TERM_ROWS_FALLBACK;
 	}
-	return TERM_ROWS_FALLBACK; /* standard default fallback */
+	term_size_dirty = 0;
+	return cached_rows;
 }
 
 typedef struct {
@@ -1117,18 +1143,24 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 		return 0;
 	if (is_selected)
 		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+	if (!is_selected) {
+		(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+	}
 	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	if (!is_selected) {
+		(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	}
 	(void)jstr_io_fputc(':', stdout);
-	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+	if (!is_selected) {
+		(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+	}
 	print_size_t(gl->line_num);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	if (!is_selected) {
+		(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	}
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(gl->content, 1, gl->match_off, stdout);
-	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	(void)jstr_io_fwrite(gl->content + gl->match_off, 1, gl->match_len, stdout);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 	const size_t after_off = gl->match_off + gl->match_len;
 	const size_t after_len = gl->content_len - after_off;
 	if (term_initialized) {
@@ -1164,16 +1196,35 @@ grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
 			G.have_exclude = 0;
 		}
 	}
+	const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
+	const size_t find_len = find_buf->size;
+	/* Recompile the find pattern from the current field contents. */
+	if (G.mode & MODE_USE_REGEX) {
+		if (G.mode & MODE_COMPILED) {
+			jstr_re_free(&G.regex);
+			G.mode &= ~MODE_COMPILED;
+		}
+		const int ret = jstr_re_comp(&G.regex, ptn, G.cflags);
+		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+			/* Invalid regex: clear results and bail. */
+			G.grep_lines.size = 0;
+			G.total_lines = 0;
+			return;
+		}
+		G.compiled_regex = 1;
+		G.compiled_cflags = G.cflags;
+		G.mode |= MODE_COMPILED;
+	} else {
+		jstr_memmem_comp(t, ptn, find_len);
+	}
 	G.grep_lines.size = 0;
 	G.scroll_offset = 0;
 	G.selected_line = 0;
-	const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-	const size_t find_len = find_buf->size;
 	for (unsigned int k = 0; k < G.files.size; ++k) {
 		file_ty *file = &G.files.data[k];
 		if (!interactive_file_pass(file, files_buf))
 			continue;
-		grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
+		grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len, k);
 	}
 	G.total_lines = G.grep_lines.size;
 	if (G.selected_line >= G.total_lines && G.total_lines > 0)
@@ -1264,18 +1315,23 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
 			print_size_t(G.grep_lines.size);
 			(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
-			/* Count unique files. */
+			/* Count unique files using a bitset indexed by file_idx. */
 			size_t files_matched = 0;
-			for (unsigned int k = 0; k < G.files.size; ++k) {
-				int found = 0;
+			unsigned char small_seen[1024];
+			unsigned char *seen = G.files.size <= sizeof(small_seen) ? small_seen : (unsigned char *)calloc(G.files.size, 1);
+			if (jstr_unlikely(!seen))
+				files_matched = G.files.size;
+			else {
+				memset(seen, 0, G.files.size);
 				for (size_t j = 0; j < G.grep_lines.size; ++j) {
-					if (G.grep_lines.data[j].fname == G.files.data[k].fname) {
-						found = 1;
-						break;
+					unsigned int idx = G.grep_lines.data[j].file_idx;
+					if (idx < G.files.size && !seen[idx]) {
+						seen[idx] = 1;
+						files_matched++;
 					}
 				}
-				if (found)
-					files_matched++;
+				if (seen != small_seen)
+					free(seen);
 			}
 			print_size_t(files_matched);
 			(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
@@ -1305,7 +1361,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			term_move_cursor(active_line, active_col);
 			term_show_cursor();
 
-			(void)jstr_unlikely(jstr_io_fflush(stdout) == EOF);
+			(void)jstr_io_fflush(stdout);
 			needs_redraw = 0;
 		}
 
@@ -1493,8 +1549,6 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 		if (needs_redraw) {
 			if (jstr_unlikely(!io_ok()))
 				break;
-			jstr_unescape_copy(&find_plain, find_buf);
-			jstr_unescape_copy(&rplc_plain, rplc_buf);
 			if (first_draw) {
 				term_clear_and_home();
 				first_draw = 0;
@@ -1504,6 +1558,11 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 
 			if (needs_recompile) {
+				/* Rebuild unescaped copies only when FIND/REPLACE content
+				 * changed — navigation redraws reuse the previous copies. */
+				jstr_unescape_copy(&find_plain, find_buf);
+				jstr_unescape_copy(&rplc_plain, rplc_buf);
+
 				/* Parse interactive flags from flags_buf */
 				parse_interactive_flags(flags_buf->data ? flags_buf->data : "", flags_buf->size);
 
@@ -1608,7 +1667,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			term_move_cursor(active_line, active_col);
 			term_show_cursor();
 
-			(void)jstr_unlikely(jstr_io_fflush(stdout) == EOF);
+			(void)jstr_io_fflush(stdout);
 			needs_redraw = 0;
 		}
 

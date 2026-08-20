@@ -187,6 +187,103 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
 
 **Remaining uncovered** (65 lines in the 6 gcov files, mostly OS-level or dead-code paths): signal handler + terminal restore, terminal-width fallbacks (`COLUMNS` env, ioctl failure), preview width-clipping branches, giant-size guards, disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors, `-c`/`-r` + `-` conflict errors, ftw-failure exit — these require fault injection or special terminal sizes and cannot be exercised in integration tests.
 
+## Benchmarks
+
+```
+cd bench
+make              # compile all benchmarks (self-contained, no jstring dependency)
+./run.sh          # run all, or:
+./bench/run.sh grep_counter   # run one by name
+```
+
+### Benchmark files
+
+| Benchmark | Source | What it measures |
+|-----------|--------|------------------|
+| `bench_grep_counter` | `bench_grep_counter.c` | O(files × matches) nested loop vs bitset for unique-file counting |
+| `bench_match_pushback` | `bench_match_pushback.c` | Doubling realloc growth vs pre-allocation; memset cost for unused rm[] fields |
+| `bench_fwrite` | `bench_fwrite.c` | Fragmented fwrite (9 calls/line) vs buffered (1 call/line) |
+| `bench_grep_collect` | `bench_grep_collect.c` | Per-line memchr + memmem vs single-pass memmem; line extraction cost |
+| `bench_confirm_scan` | `bench_confirm_scan.c` | Fixed-string (memmem loop) vs regex (regexec) matching; per-block line counting |
+| `bench_process_buffer` | `bench_process_buffer.c` | Fixed-string vs regex replacement on 4 MB and 1 KB buffers |
+| `bench_terminal` | `bench_terminal.c` | ioctl(TIOCGWINSZ) × 3 fds vs SIGWINCH-cached value |
+| `bench_unescape` | `bench_unescape.c` | Full copy+unescape on every redraw vs dirty-flag skip |
+
+### Results
+
+See `bench/RESULTS.md` for raw timings and `md/benchmarks.md` for full
+analysis with estimated-vs-measured comparison. Summary:
+
+| Optimization | Estimated | Measured |
+|-------------|-----------|----------|
+| Grep file counter | 90-99% | **99.98%** (4,187×) |
+| Terminal ioctl caching | 1-3% | **99.98%** per redraw |
+| Buffered fwrite | 20-40% | **50%** (2×) |
+| Unescape dirty flag | 5-10% | **100%** (no change), **86%** (every 10th) |
+| match_pushback pre-alloc | 5-15% | **18%** (N=4096) |
+| Regex per-line → batch | 30-60% | **-86%** (slower; per-line faster) |
+| memset partial only | 2-5% | **~0%** (negligible in L1) |
+
+### Benchmarking conventions
+
+When analyzing potential optimizations in `md/OPTIMIZATIONS.md`:
+
+1. **Always write a benchmark** in `bench/` that isolates the hot path
+   before implementing the optimization. The benchmark must test both
+   the current approach and the proposed approach.
+
+2. **Estimate the improvement** in `md/OPTIMIZATIONS.md` with a
+   percentage range (e.g., "20-40%") before measuring.
+
+3. **Run the benchmark** and record raw timings in `bench/RESULTS.md`.
+
+4. **Compare estimated vs measured** in `md/benchmarks.md`. If the
+   measured improvement differs from the estimate by more than 2× in
+   either direction, update the analysis with the reason (e.g., "CPU
+   branch predictor favors per-line pattern", "L1 cache makes memset
+   free").
+
+5. **Do not implement optimizations that are overestimated.** If the
+   benchmark shows the current code is already fast (e.g., memset of
+   160 bytes is ~0.000 ms), skip the optimization and note it in
+   `md/benchmarks.md` as "overestimated; not worth implementing".
+
+### Testing conventions for optimizations
+
+Every optimization must have **both** a benchmark (performance) and
+**correctness tests** (behavioral equivalence):
+
+1. **Write a regression test first.** Before changing any code, add a
+   test that exercises the exact code path being optimized. The test
+   must pass on the **current** (unoptimized) code. This establishes a
+   correctness baseline.
+
+2. **Run the full test suite** to confirm the regression test passes
+   and no pre-existing tests break. Only then begin the optimization.
+
+3. **Verify the regression test still passes** after the optimization.
+   If the optimization changes observable behavior (e.g., different
+   output ordering, different error messages), update the test
+   expectations — but only if the new behavior is equally correct.
+
+4. **Add edge-case tests for the optimization itself.** If the
+   optimization introduces a new code path (e.g., a dirty flag that
+   skips processing), add tests that exercise both the fast path
+   (flag set) and the slow path (flag cleared). Examples:
+   - `t_confirm_interactive_escape_find` exercises the unescape
+     dirty-flag path when FIND is edited
+   - `t_grep_interactive_file_cache` exercises the file-caching
+     path that the O(files × matches) counter operates on
+
+5. **Document the test in the commit message** or `AGENTS.md` bug/test
+   table. Every optimization that touches a code path with existing
+   tests should list which test files were updated and why.
+
+6. **Fuzz the optimized code path.** Run `./test N` (with N ≥ 100)
+   after the optimization to catch regressions that deterministic
+   tests miss. The fuzz tests exercise random flag combinations and
+   inputs that stress both old and new paths.
+
 ### Bugs found and fixed (31 total)
 
 1. **`jstr_io_writefilefd_len` newline condition inverted** — `jstring/include/io.h:161` in writev path: `(s[sz - 1] == '\n') ? 1 : 0` causes a double `\n` when content already ends with newline (which `process_buffer` always ensures). Fixed to `(s[sz - 1] != '\n') ? 1 : 0` in both `include/io.h` and `build/include/jstr/io.h`. The tool now uses the jstring write functions directly with correct single-trailing-newline output in all modes.

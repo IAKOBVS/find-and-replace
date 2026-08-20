@@ -310,22 +310,23 @@ t_grep_match_highlight() {
 	td=$1
 	printf 'hello world\nfoo bar\nhello again\n' > "$td/f"
 	raw=$("$PROG" hello X --grep "$td/f" 2>/dev/null)
-	# Each line should have red around "hello" specifically:
-	#   ...31mhello...0m...
-	if printf '%s\n' "$raw" | grep -qP '\x1b\[31mhello\x1b\[0m'; then
+	# Filename should be red, match should have no color wrapping.
+	if printf '%s\n' "$raw" | grep -qP '\x1b\[31m[^:]+\x1b\[0m:.*hello' && \
+	   ! printf '%s\n' "$raw" | grep -qP '\x1b\[31mhello\x1b\[0m'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: raw=[$(printf '%s' "$raw" | cat -v)]" > "$td/result"
 	fi
 }
 
-# Regression: grep regex match highlight should cover only the regex match.
+# Regression: grep regex match should not be wrapped in color codes.
 t_grep_regex_highlight() {
 	td=$1
 	printf 'hello world\nfoo bar\nhello again\n' > "$td/f"
 	raw=$("$PROG" 'hel+' X -E --grep "$td/f" 2>/dev/null)
-	# "hel+" matches "hell" (4 chars), not "hello" (5 chars)
-	if printf '%s\n' "$raw" | grep -qP '\x1b\[31mhell\x1b\[0m'; then
+	# "hel+" matches "hell" (4 chars), no color around it.
+	if printf '%s\n' "$raw" | grep -qP '\x1b\[31m[^:]+\x1b\[0m:.*hell' && \
+	   ! printf '%s\n' "$raw" | grep -qP '\x1b\[31mhell\x1b\[0m'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: raw=[$(printf '%s' "$raw" | cat -v)]" > "$td/result"

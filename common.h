@@ -75,6 +75,7 @@ typedef struct grep_line_ty {
 	size_t content_len;
 	size_t match_off;
 	size_t match_len;
+	unsigned int file_idx;
 } grep_line_ty;
 
 typedef struct grep_lines_ty {

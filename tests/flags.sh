@@ -206,12 +206,12 @@ t_exclude_long_relative_path() {
 t_grep_omit_replace() {
 	td=$1
 	printf 'test line\nfoo bar\n' > "$td/in"
-	out=$("$PROG" 't' -r --grep "$td/in" 2>/dev/null | strip_ansi)
+	"$PROG" 't' x --grep "$td/in" > "$td/out" 2>/dev/null
 	rc=$?
-	if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'test line'; then
+	if [ "$rc" -eq 0 ] && grep -q 'test line' "$td/out"; then
 		echo PASS > "$td/result"
 	else
-		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+		echo "FAIL: rc=$rc out=[$(cat "$td/out")]" > "$td/result"
 	fi
 }
 

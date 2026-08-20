@@ -208,6 +208,7 @@ cleanup()
 	jstr_free_j(&G.interactive_include_buf);
 	jstr_free_j(&G.interactive_exclude_buf);
 	jstr_free_j(&G.interactive_backup_buf);
+	free(G.grep_seen);
 #endif
 }
 

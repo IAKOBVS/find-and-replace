@@ -441,6 +441,124 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
 	*col_ptr = col;
 }
 
+/* Print CONTENT (len bytes) to stdout, wrapping every occurrence of FIND
+ * (find_len bytes) in bold.  When find is NULL or find_len is 0, prints
+ * content verbatim.  Handles both fixed-string (memmem) and regex
+ * (jstr_re_search_len) modes.  When cols is > 0, clips output to fit the
+ * terminal width starting at *col_ptr. */
+static void
+print_content_highlighted(const char *R content, size_t len,
+                          const char *R find, size_t find_len,
+                          unsigned short cols, unsigned short *col_ptr)
+{
+	size_t pos = 0;
+	unsigned short col = col_ptr ? *col_ptr : 0;
+	unsigned short limit = (cols > 1) ? (unsigned short)(cols - 1) : 0;
+
+	if (find == NULL || find_len == 0) {
+		if (col_ptr == NULL || cols == 0) {
+			(void)jstr_io_fwrite(content, 1, len, stdout);
+			return;
+		}
+		for (size_t i = 0; i < len && col < limit; ++i) {
+			char c = content[i];
+			if (c == '\t') {
+				unsigned short next_tab = (unsigned short)((col + 8) & ~7);
+				while (col < next_tab && col < limit) {
+					(void)jstr_io_putchar(' ');
+					col++;
+				}
+			} else {
+				(void)jstr_io_putchar(c);
+				col++;
+			}
+		}
+		*col_ptr = col;
+		return;
+	}
+	while (pos < len) {
+		size_t moff = 0;
+		size_t mlen = 0;
+		int found = 0;
+		if (G.mode & MODE_USE_REGEX) {
+			regmatch_t rm = { 0 };
+			if (jstr_re_search_len(&G.regex, content + pos, len - pos, &rm, 0) == JSTR_RE_RET_NOERROR) {
+				moff = (size_t)rm.rm_so;
+				mlen = (size_t)(rm.rm_eo - rm.rm_so);
+				found = (mlen > 0);
+			}
+		} else {
+			const char *hit = (const char *)memmem(content + pos, len - pos, find, find_len);
+			if (hit != NULL) {
+				moff = (size_t)(hit - (content + pos));
+				mlen = find_len;
+				found = 1;
+			}
+		}
+		if (!found || mlen == 0)
+			break;
+		/* Print text before the match. */
+		if (col_ptr != NULL && cols > 0) {
+			for (size_t i = 0; i < moff && col < limit; ++i) {
+				char c = content[pos + i];
+				if (c == '\t') {
+					unsigned short next_tab = (unsigned short)((col + 8) & ~7);
+					while (col < next_tab && col < limit) {
+						(void)jstr_io_putchar(' ');
+						col++;
+					}
+				} else {
+					(void)jstr_io_putchar(c);
+					col++;
+				}
+			}
+		} else {
+			(void)jstr_io_fwrite(content + pos, 1, moff, stdout);
+		}
+		(void)jstr_io_fwrite(COLOR_BOLD, 1, S_LEN(COLOR_BOLD), stdout);
+		if (col_ptr != NULL && cols > 0) {
+			for (size_t i = 0; i < mlen && col < limit; ++i) {
+				char c = content[pos + moff + i];
+				if (c == '\t') {
+					unsigned short next_tab = (unsigned short)((col + 8) & ~7);
+					while (col < next_tab && col < limit) {
+						(void)jstr_io_putchar(' ');
+						col++;
+					}
+				} else {
+					(void)jstr_io_putchar(c);
+					col++;
+				}
+			}
+		} else {
+			(void)jstr_io_fwrite(content + pos + moff, 1, mlen, stdout);
+		}
+		(void)jstr_io_fwrite(COLOR_BOLD_OFF, 1, S_LEN(COLOR_BOLD_OFF), stdout);
+		pos += moff + mlen;
+	}
+	if (pos < len) {
+		if (col_ptr != NULL && cols > 0) {
+			for (size_t i = 0; i < len - pos && col < limit; ++i) {
+				char c = content[pos + i];
+				if (c == '\t') {
+					unsigned short next_tab = (unsigned short)((col + 8) & ~7);
+					while (col < next_tab && col < limit) {
+						(void)jstr_io_putchar(' ');
+						col++;
+					}
+				} else {
+					(void)jstr_io_putchar(c);
+					col++;
+				}
+			}
+		} else {
+			(void)jstr_io_fwrite(content + pos, 1, len - pos, stdout);
+		}
+	}
+	if (col_ptr != NULL)
+		*col_ptr = col;
+}
+
 /* Print one side of a -c preview change: each line of DATA is printed on its
  * own line as "FNAME:LINE:PREFIX<content>", colored with COLOR. DATA covers
  * the block from the start of the first changed line up to (but not
@@ -452,7 +570,8 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
  * counts lines. */
 static void
 print_diff_lines(const char *R data, size_t len, char prefix, const char *color, unsigned int color_len,
-                    const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
+                    const char *R fname, size_t fname_len, size_t start_line, int trailing_nl,
+                    const char *R find, size_t find_len)
 {
 	if (jstr_unlikely(!io_ok()))
 		return;
@@ -487,12 +606,12 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		print_line_prefix(fname, fname_len, line++, prefix);
 		if (term_initialized) {
 			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
-			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
+			print_content_highlighted(p, (size_t)(nl - p), find, find_len, cols, &col);
 		} else {
-			(void)jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
+			print_content_highlighted(p, (size_t)(nl - p), find, find_len, 0, NULL);
 		}
 		if (has_scroll && G.preview_lines_printed == G.selected_line)
-			(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
+			(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 		if (term_initialized)
 			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		(void)jstr_io_putchar('\n');
@@ -515,12 +634,12 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			print_line_prefix(fname, fname_len, line, prefix);
 			if (term_initialized) {
 				unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
-				print_diff_line_chars(p, (size_t)(end - p), cols, &col);
+				print_content_highlighted(p, (size_t)(end - p), find, find_len, cols, &col);
 			} else {
-				(void)jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
+				print_content_highlighted(p, (size_t)(end - p), find, find_len, 0, NULL);
 			}
 			if (has_scroll && G.preview_lines_printed == G.selected_line)
-				(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
+				(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 			(void)jstr_io_putchar('\n');
@@ -541,7 +660,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
 			print_line_prefix(fname, fname_len, line, prefix);
 			if (has_scroll && G.preview_lines_printed == G.selected_line)
-				(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
+				(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 			(void)jstr_io_putchar('\n');
@@ -730,8 +849,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, '-', S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
+			print_diff_lines(buf->data + block_start, old_len, '-', S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0, find, find_len);
+			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl, NULL, 0);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
 			i = j + 1;
 		}
@@ -1160,7 +1279,9 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 	}
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(gl->content, 1, gl->match_off, stdout);
+	(void)jstr_io_fwrite(COLOR_BOLD, 1, S_LEN(COLOR_BOLD), stdout);
 	(void)jstr_io_fwrite(gl->content + gl->match_off, 1, gl->match_len, stdout);
+	(void)jstr_io_fwrite(COLOR_BOLD_OFF, 1, S_LEN(COLOR_BOLD_OFF), stdout);
 	const size_t after_off = gl->match_off + gl->match_len;
 	const size_t after_len = gl->content_len - after_off;
 	if (term_initialized) {
@@ -1170,7 +1291,7 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 		(void)jstr_io_fwrite(gl->content + after_off, 1, after_len, stdout);
 	}
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
+		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 	if (term_initialized)
 		(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 	(void)jstr_io_putchar('\n');
@@ -1315,23 +1436,26 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
 			print_size_t(G.grep_lines.size);
 			(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
-			/* Count unique files using a bitset indexed by file_idx. */
+			/* Count unique files using a cached bitset indexed by file_idx. */
 			size_t files_matched = 0;
-			unsigned char small_seen[1024];
-			unsigned char *seen = G.files.size <= sizeof(small_seen) ? small_seen : (unsigned char *)calloc(G.files.size, 1);
-			if (jstr_unlikely(!seen))
-				files_matched = G.files.size;
-			else {
-				memset(seen, 0, G.files.size);
+			if (jstr_unlikely(G.files.size == 0)) {
+				files_matched = 0;
+			} else {
+				if (G.files.size > G.grep_seen_cap) {
+					size_t new_cap = G.grep_seen_cap ? G.grep_seen_cap : 1024;
+					while (new_cap < G.files.size)
+						new_cap *= 2;
+					G.grep_seen = (unsigned char *)realloc(G.grep_seen, new_cap);
+					G.grep_seen_cap = new_cap;
+				}
+				memset(G.grep_seen, 0, G.files.size);
 				for (size_t j = 0; j < G.grep_lines.size; ++j) {
 					unsigned int idx = G.grep_lines.data[j].file_idx;
-					if (idx < G.files.size && !seen[idx]) {
-						seen[idx] = 1;
+					if (idx < G.files.size && !G.grep_seen[idx]) {
+						G.grep_seen[idx] = 1;
 						files_matched++;
 					}
 				}
-				if (seen != small_seen)
-					free(seen);
 			}
 			print_size_t(files_matched);
 			(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);

@@ -16,9 +16,9 @@ if [ "$COVERAGE" = "1" ]; then
 	CFLAGS="-O0 --coverage"
 	LFLAGS="--coverage"
 fi
-# Headers and library come from the pinned lib/jstring checkout.
-JSTR_INC="-I $DIR/lib/jstring/build/include"
-JSTR_LIB="-L $DIR/lib/jstring/build/lib"
+# Headers and library from the system install (/usr/local).
+JSTR_INC=""
+JSTR_LIB=""
 export DIR OUTDIR JSTR_INC CFLAGS
 
 # Compile each translation unit in parallel (xargs -P, capped at nproc), then link.

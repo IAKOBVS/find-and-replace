@@ -64,7 +64,9 @@ grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fn
 			if (!(G.mode & MODE_QUIET)) {
 				print_line_prefix(fname, fname_len, line);
 				(void)jstr_io_fwrite(p, 1, moff, stdout);
+				(void)jstr_io_fwrite(COLOR_BOLD, 1, S_LEN(COLOR_BOLD), stdout);
 				(void)jstr_io_fwrite(p + moff, 1, mlen, stdout);
+				(void)jstr_io_fwrite(COLOR_BOLD_OFF, 1, S_LEN(COLOR_BOLD_OFF), stdout);
 				(void)jstr_io_fwrite(p + moff + mlen, 1, line_len - moff - mlen, stdout);
 				(void)jstr_io_fputc('\n', stdout);
 			}

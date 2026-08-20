@@ -9,6 +9,8 @@
 /* ANSI escape codes used to highlight the -c confirm mode preview. */
 #define COLOR_RED               "\x1b[31m"
 #define COLOR_GREEN             "\x1b[32m"
+#define COLOR_BOLD              "\x1b[1m"
+#define COLOR_BOLD_OFF          "\x1b[22m"
 #define COLOR_RESET             "\x1b[0m"
 #define ANSI_ALT_SCREEN_ENABLE  "\x1b[?1049h"
 #define ANSI_ALT_SCREEN_DISABLE "\x1b[?1049l"

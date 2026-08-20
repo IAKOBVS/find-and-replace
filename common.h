@@ -162,6 +162,10 @@ typedef struct global_ty {
 	size_t total_lines;
 	/* Grep TUI match collection (no budget limit). */
 	grep_lines_ty grep_lines;
+	/* Cached bitset for counting unique files in the grep stats line.
+	 * Grows as needed but never shrinks; freed only under DO_FREE. */
+	unsigned char *grep_seen;
+	size_t grep_seen_cap;
 	/* Cold configuration, read only during startup and traversal. */
 	const char *include_pat;
 	const char *exclude_pat;

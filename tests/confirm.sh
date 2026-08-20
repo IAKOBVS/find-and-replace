@@ -1,7 +1,7 @@
 #!/bin/sh
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-PDRV="$PROG_DIR/tests/pty_drive.py"
+PDRV="$PROG_DIR/tests/pty_drive"
 
 # pdrive [--out FILE] [--rc FILE] [--noready] [--phase HEX[@MS] ...] [--tail TEXT] -- [tool args...]
 # Runs the tool under a pty, feeding --phase hex bytes (default 100ms sleep
@@ -19,7 +19,7 @@ pdrive() {
 	if [ "$use_ready" -eq 1 ]; then
 		set -- --ready '-- [INSERT] --' "$@"
 	fi
-	python3 "$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
+	"$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
 }
 
 t_confirm_yes() {
@@ -35,6 +35,17 @@ t_confirm_colored_default() {
 	case "$out" in
 		*"$red"*"$green"*) echo PASS > "$td/result" ;;
 		*) echo "FAIL: -c output has no red/green color codes (colors should be unconditional)" > "$td/result" ;;
+	esac
+}
+
+# Regression: confirm preview should highlight the find pattern in bold.
+t_confirm_preview_match_highlight() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	out=$("$PROG" hello bye -c -i "$td/f" < /dev/null 2>/dev/null)
+	bold=$(printf '\033[1m'); bold_off=$(printf '\033[22m')
+	case "$out" in
+		*"-$bold""hello$bold_off"*) echo PASS > "$td/result" ;;
+		*) echo "FAIL: -c preview missing bold find pattern" > "$td/result" ;;
 	esac
 }
 
@@ -273,8 +284,9 @@ t_confirm_interactive_escape_live_preview() {
 	td=$1; printf 'a\tb\n' > "$td/f"
 	tab=$(printf '\t')
 	# The live preview must match the tab even though the field holds raw \t.
+	# The match is now wrapped in bold: a\x1b[1m\t\x1b[22mb
 	pdrive --tail '\x15' --tail '\\t' --tail '\r' --tail 'n\n' -- hello world -c -i "$td/f"
-	if grep -q "f:1:-a${tab}b" "$td/out" && grep -q 'f:1:+aworldb' "$td/out"; then
+	if grep -qP "f:1:-a\x1b\[1m${tab}\x1b\[22mb" "$td/out" && grep -q 'f:1:+aworldb' "$td/out"; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: live preview did not show tab match. out=[$(cat "$td/out")]" > "$td/result"
@@ -336,7 +348,8 @@ t_confirm_interactive_no_pre_tui_dump() {
 		{ buf = buf $0 "\n" }
 		END {
 			o = index(buf, esc "[?1049h")
-			p = index(buf, "f:1:-hello")
+			# Match preview line with possible bold escapes around find text.
+			p = index(buf, "f:1:-")
 			exit (o > 0 && p > o ? 0 : 1)
 		}
 	' "$td/out"; then
@@ -969,10 +982,30 @@ t_confirm_interactive_empty_find_then_type() {
 	# Start with empty find, type "h" via --tail then "ello" via --phase hex, quit.
 	pdrive --tail 'h' --phase 65 --phase 6c --phase 6c --phase 6f --phase 04 \
 		-- '' '' -c -i "$td/f"
-	if grep -q -- '-hello world' "$td/out" && grep -q '+ello world' "$td/out"; then
+	# The match "hello" is now wrapped in bold.
+	if grep -qP '\-\x1b\[1mhello\x1b\[22m world' "$td/out" && grep -q '+ello world' "$td/out"; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: empty find then typing 'hello' did not show preview matches" > "$td/result"
+	fi
+}
+
+# Regression: selected line in confirm TUI must have \x1b[7m (reverse on) and
+# \x1b[27m (reverse off, 5 bytes not 4).  Ctrl-J moves to second line.
+t_confirm_interactive_selection_highlight() {
+	td=$1
+	# Need enough lines that the -g preview overflows max_preview_lines (13 on
+	# a 24-row terminal), so has_scroll triggers and \x1b[7m/\x1b[27m appear.
+	i=1; while [ "$i" -le 20 ]; do printf 'aaa\n' >> "$td/f"; i=$((i+1)); done
+pdrive --winsize 24x80 --phase 0a --phase 04 -- a X -g -c -i "$td/f"
+	raw=$(cat "$td/out" 2>/dev/null)
+	reverse_on=$(printf '\x1b[7m')
+	reverse_off=$(printf '\x1b[27m')
+	if printf '%s' "$raw" | grep -qF "$reverse_on" && \
+	   printf '%s' "$raw" | grep -qF "$reverse_off"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: missing reverse video escapes in raw output" > "$td/result"
 	fi
 }
 
@@ -1026,6 +1059,7 @@ t_confirm_interactive_scroll_past_visend() {
 TESTS="
 t_confirm_yes
 t_confirm_colored_default
+t_confirm_preview_match_highlight
 t_confirm_abort
 t_confirm_no_inplace_err
 t_confirm_stdin_err
@@ -1111,6 +1145,7 @@ t_confirm_interactive_empty_find_then_type
 t_confirm_interactive_ctrl_j_scroll
 t_confirm_interactive_ctrl_k_scroll
 t_confirm_interactive_scroll_past_visend
+t_confirm_interactive_selection_highlight
 "
 
 run_suite "confirm tests" "$TESTS"

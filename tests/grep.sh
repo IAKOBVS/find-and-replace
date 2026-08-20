@@ -1,7 +1,7 @@
 #!/bin/sh
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-PDRV="$PROG_DIR/tests/pty_drive.py"
+PDRV="$PROG_DIR/tests/pty_drive"
 
 # pdrive [--out FILE] [--rc FILE] [--noready] [--phase HEX[@MS] ...] [--tail TEXT] -- [tool args...]
 pdrive() {
@@ -15,7 +15,7 @@ pdrive() {
 	if [ "$use_ready" -eq 1 ]; then
 		set -- --ready '-- [INSERT] --' "$@"
 	fi
-	python3 "$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
+	"$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
 }
 
 strip_ansi() {
@@ -192,6 +192,23 @@ pdrive --phase 0a --phase 0d --tail '' -- 'a' x --grep "$td/f"
 	fi
 }
 
+# Regression: selected line in grep TUI must have \x1b[7m (reverse on) and
+# \x1b[27m (reverse off, 5 bytes not 4).  Ctrl-J moves to second match.
+t_grep_interactive_selection_highlight() {
+	td=$1
+	printf 'aaa\nbbb\nccc\n' > "$td/f"
+pdrive --phase 0a --phase 0d --tail '' -- 'a' x --grep "$td/f"
+	raw=$(cat "$td/out" 2>/dev/null)
+	reverse_on=$(printf '\x1b[7m')
+	reverse_off=$(printf '\x1b[27m')
+	if printf '%s' "$raw" | grep -qF "$reverse_on" && \
+	   printf '%s' "$raw" | grep -qF "$reverse_off"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: missing reverse video escapes in raw output" > "$td/result"
+	fi
+}
+
 t_grep_interactive_exclude() {
 	td=$1
 	printf 'alpha\nbeta\ngamma\n' > "$td/f1"
@@ -310,23 +327,21 @@ t_grep_match_highlight() {
 	td=$1
 	printf 'hello world\nfoo bar\nhello again\n' > "$td/f"
 	raw=$("$PROG" hello X --grep "$td/f" 2>/dev/null)
-	# Filename should be red, match should have no color wrapping.
-	if printf '%s\n' "$raw" | grep -qP '\x1b\[31m[^:]+\x1b\[0m:.*hello' && \
-	   ! printf '%s\n' "$raw" | grep -qP '\x1b\[31mhello\x1b\[0m'; then
+	# Filename should be red, match should be bold.
+	if printf '%s\n' "$raw" | grep -qP '\x1b\[31m[^:]+\x1b\[0m:.*\x1b\[1mhello\x1b\[22m'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: raw=[$(printf '%s' "$raw" | cat -v)]" > "$td/result"
 	fi
 }
 
-# Regression: grep regex match should not be wrapped in color codes.
+# Regression: grep regex match should be wrapped in bold.
 t_grep_regex_highlight() {
 	td=$1
 	printf 'hello world\nfoo bar\nhello again\n' > "$td/f"
 	raw=$("$PROG" 'hel+' X -E --grep "$td/f" 2>/dev/null)
-	# "hel+" matches "hell" (4 chars), no color around it.
-	if printf '%s\n' "$raw" | grep -qP '\x1b\[31m[^:]+\x1b\[0m:.*hell' && \
-	   ! printf '%s\n' "$raw" | grep -qP '\x1b\[31mhell\x1b\[0m'; then
+	# "hel+" matches "hell" (4 chars), bold wrapping.
+	if printf '%s\n' "$raw" | grep -qP '\x1b\[31m[^:]+\x1b\[0m:.*\x1b\[1mhell\x1b\[22m'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: raw=[$(printf '%s' "$raw" | cat -v)]" > "$td/result"
@@ -353,6 +368,7 @@ t_grep_exclude_cli
 t_grep_nonexistent_file
 t_grep_interactive_basic
 t_grep_interactive_scroll
+t_grep_interactive_selection_highlight
 t_grep_interactive_exclude
 t_grep_interactive_ctrl_d
 t_grep_interactive_multiline

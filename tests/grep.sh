@@ -199,8 +199,8 @@ t_grep_interactive_selection_highlight() {
 	printf 'aaa\nbbb\nccc\n' > "$td/f"
 pdrive --phase 0a --phase 0d --tail '' -- 'a' x --grep "$td/f"
 	raw=$(cat "$td/out" 2>/dev/null)
-	reverse_on=$(printf '\x1b[7m')
-	reverse_off=$(printf '\x1b[27m')
+	reverse_on=$(printf '\033[7m')
+	reverse_off=$(printf '\033[27m')
 	if printf '%s' "$raw" | grep -qF "$reverse_on" && \
 	   printf '%s' "$raw" | grep -qF "$reverse_off"; then
 		echo PASS > "$td/result"

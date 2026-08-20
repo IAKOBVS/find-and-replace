@@ -16,10 +16,17 @@ if [ "$COVERAGE" = "1" ]; then
 	CFLAGS="-O0 --coverage"
 	LFLAGS="--coverage"
 fi
-# Headers and library from the system install (/usr/local).
-JSTR_INC=""
-JSTR_LIB=""
-export DIR OUTDIR JSTR_INC CFLAGS
+if [ -d "$DIR/lib/jstring/build/include" ]; then
+	JSTR_INC="-I$DIR/lib/jstring/build/include"
+	JSTR_LIB="-L$DIR/lib/jstring/build/lib -Wl,-rpath,$DIR/lib/jstring/build/lib"
+elif [ -d "$DIR/lib/jstring/include" ]; then
+	JSTR_INC="-I$DIR/lib/jstring/include"
+	JSTR_LIB="-L$DIR/lib/jstring -Wl,-rpath,$DIR/lib/jstring"
+else
+	JSTR_INC=""
+	JSTR_LIB=""
+fi
+export DIR OUTDIR JSTR_INC JSTR_LIB CFLAGS
 
 # Compile each translation unit in parallel (xargs -P, capped at nproc), then link.
 #shellcheck disable=SC2046

@@ -581,7 +581,6 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	const char *nl;
 	unsigned short cols = 0;
 	const size_t vis_end = G.scroll_offset + G.max_preview_lines;
-	const int has_scroll = term_initialized && (G.scroll_offset > 0 || G.total_lines > G.max_preview_lines);
 	if (term_initialized)
 		cols = get_terminal_cols();
 	int render = 1;
@@ -596,12 +595,12 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			p = nl + 1;
 			continue;
 		}
-		if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
+		if (term_initialized && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 			p = nl + 1;
 			continue;
 		}
-		if (has_scroll && G.preview_lines_printed == G.selected_line)
+		if (term_initialized && G.preview_lines_printed == G.selected_line)
 			(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
 		print_line_prefix(fname, fname_len, line++, prefix);
 		if (term_initialized) {
@@ -610,7 +609,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		} else {
 			print_content_highlighted(p, (size_t)(nl - p), find, find_len, 0, NULL);
 		}
-		if (has_scroll && G.preview_lines_printed == G.selected_line)
+		if (term_initialized && G.preview_lines_printed == G.selected_line)
 			(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 		if (term_initialized)
 			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
@@ -626,10 +625,10 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		}
 		if (!render) {
 			G.preview_lines_printed++;
-		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
+		} else if (term_initialized && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (term_initialized && G.preview_lines_printed == G.selected_line)
 				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
 			print_line_prefix(fname, fname_len, line, prefix);
 			if (term_initialized) {
@@ -638,7 +637,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			} else {
 				print_content_highlighted(p, (size_t)(end - p), find, find_len, 0, NULL);
 			}
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (term_initialized && G.preview_lines_printed == G.selected_line)
 				(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
@@ -653,13 +652,13 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		}
 		if (!render) {
 			G.preview_lines_printed++;
-		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
+		} else if (term_initialized && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (term_initialized && G.preview_lines_printed == G.selected_line)
 				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
 			print_line_prefix(fname, fname_len, line, prefix);
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (term_initialized && G.preview_lines_printed == G.selected_line)
 				(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);

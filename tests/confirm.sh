@@ -994,13 +994,11 @@ t_confirm_interactive_empty_find_then_type() {
 # \x1b[27m (reverse off, 5 bytes not 4).  Ctrl-J moves to second line.
 t_confirm_interactive_selection_highlight() {
 	td=$1
-	# Need enough lines that the -g preview overflows max_preview_lines (13 on
-	# a 24-row terminal), so has_scroll triggers and \x1b[7m/\x1b[27m appear.
 	i=1; while [ "$i" -le 20 ]; do printf 'aaa\n' >> "$td/f"; i=$((i+1)); done
 pdrive --winsize 24x80 --phase 0a --phase 04 -- a X -g -c -i "$td/f"
 	raw=$(cat "$td/out" 2>/dev/null)
-	reverse_on=$(printf '\x1b[7m')
-	reverse_off=$(printf '\x1b[27m')
+	reverse_on=$(printf '\033[7m')
+	reverse_off=$(printf '\033[27m')
 	if printf '%s' "$raw" | grep -qF "$reverse_on" && \
 	   printf '%s' "$raw" | grep -qF "$reverse_off"; then
 		echo PASS > "$td/result"

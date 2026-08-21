@@ -37,6 +37,17 @@
 #define DIE()               DIE_IF(1)
 #define R                   JSTR_RESTRICT
 
+typedef struct range_ty {
+	size_t start;
+	size_t end;
+} range_ty;
+
+typedef struct ranges_ty {
+	size_t cap;
+	size_t size;
+	range_ty *data;
+} ranges_ty;
+
 /* Mode bits tracked in G.mode: where output goes and what FIND means. */
 typedef enum {
 	MODE_PRINT_STDOUT = 1 << 0,
@@ -172,6 +183,10 @@ typedef struct global_ty {
 	jstr_re_ty regex;
 	jstr_re_ty include_re;
 	jstr_re_ty exclude_re;
+	ranges_ty old_ranges;
+	ranges_ty new_ranges;
+	jstr_ty find_plain;
+	jstr_ty rplc_plain;
 } global_ty;
 
 extern global_ty G;

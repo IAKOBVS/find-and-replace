@@ -212,6 +212,10 @@ cleanup()
 	jstr_free_j(&G.interactive_include_buf);
 	jstr_free_j(&G.interactive_exclude_buf);
 	jstr_free_j(&G.interactive_backup_buf);
+	jstr_free_j(&G.find_plain);
+	jstr_free_j(&G.rplc_plain);
+	free(G.new_ranges.data);
+	free(G.old_ranges.data);
 #endif
 }
 

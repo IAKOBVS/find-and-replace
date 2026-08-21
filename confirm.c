@@ -36,6 +36,7 @@ static const char *env_lines;
 #define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
 /* Read buffer size for /proc/meminfo (a few KiB is far beyond the file size). */
 #define MEMINFO_BUF_SIZE (4096 + 1)
+#define RANGES_CAP_MIN 1
 
 static void
 restore_terminal(void)
@@ -381,11 +382,6 @@ print_size_t(size_t val)
 	(void)jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
 }
 
-typedef struct range_ty {
-	size_t start;
-	size_t end;
-} range_ty;
-
 /* Print the "FNAME:LINE:" prefix of one -c preview line. */
 static void
 print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_selected)
@@ -700,6 +696,23 @@ confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, cons
 	}
 }
 
+static jstr_ret_ty
+ranges_reserve(ranges_ty *ranges, size_t required_size)
+{
+	if (ranges->cap < required_size) {
+		if (ranges->cap == 0)
+			ranges->cap = RANGES_CAP_MIN;
+		while (ranges->cap < required_size)
+			ranges->cap *= 2;
+		range_ty *const new_data = (range_ty *)realloc(ranges->data, ranges->cap * sizeof(range_ty));
+		if (jstr_unlikely(new_data == NULL))
+			return JSTR_RET_ERR;
+		ranges->data = new_data;
+	}
+	ranges->size = required_size;
+	return JSTR_RET_SUCC;
+}
+
 jstr_ret_ty
 confirm_scan_file(const jstr_twoway_ty *R t,
                      const jstr_ty *R buf,
@@ -749,24 +762,20 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			 * tracking match ranges for old block and replacement ranges for new block. */
 			jstr_empty_j(&G.new_buf);
 			size_t num_block_matches = j - i + 1;
-			range_ty *old_ranges = (range_ty *)malloc(num_block_matches * sizeof(range_ty));
-			DIE_IF(!old_ranges, "%s", "Out of memory allocating ranges.\n");
-			range_ty *new_ranges = (range_ty *)malloc(num_block_matches * sizeof(range_ty));
-			if (!new_ranges) {
-				free(old_ranges);
-				DIE_IF(1, "%s", "Out of memory allocating ranges.\n");
-			}
-
+			G.old_ranges.size = 0;
+			G.new_ranges.size = 0;
+			ranges_reserve(&G.old_ranges, num_block_matches);
+			ranges_reserve(&G.new_ranges, num_block_matches);
 			size_t p = block_start;
 			for (size_t k = i; k <= j; ++k) {
 				size_t idx = k - i;
-				old_ranges[idx].start = G.matches.data[k].start - block_start;
-				old_ranges[idx].end = G.matches.data[k].end - block_start;
+				G.old_ranges.data[idx].start = G.matches.data[k].start - block_start;
+				G.old_ranges.data[idx].end = G.matches.data[k].end - block_start;
 
 				if (G.matches.data[k].start > p)
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, buf->data + p, G.matches.data[k].start - p)), "%s", "Out of memory.\n");
 
-				new_ranges[idx].start = G.new_buf.size;
+				G.new_ranges.data[idx].start = G.new_buf.size;
 
 				if (G.mode & MODE_USE_REGEX && backref) {
 					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
@@ -780,7 +789,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, rplc, rplc_len)), "%s", "Out of memory.\n");
 				}
 
-				new_ranges[idx].end = G.new_buf.size;
+				G.new_ranges.data[idx].end = G.new_buf.size;
 				p = G.matches.data[k].end;
 			}
 			if (block_end > p)
@@ -809,10 +818,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, old_ranges, num_block_matches, S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, new_ranges, num_block_matches, S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
-			free(old_ranges);
-			free(new_ranges);
+			print_diff_lines(buf->data + block_start, old_len, G.old_ranges.data, num_block_matches, S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
+			print_diff_lines(G.new_buf.data, G.new_buf.size, G.new_ranges.data, num_block_matches, S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
 			i = j + 1;
 		}
@@ -1554,15 +1561,15 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 	/* Unescaped copies of FIND/REPLACE for the live compile and preview so the
 	 * interactive fields behave like the CLI args. */
-	jstr_ty find_plain = JSTR_INIT;
-	jstr_ty rplc_plain = JSTR_INIT;
+	G.find_plain.size = 0;
+	G.rplc_plain.size = 0;
 
 	for (;;) {
 		if (needs_redraw) {
 			if (jstr_unlikely(!io_ok()))
 				break;
-			jstr_unescape_copy(&find_plain, find_buf);
-			jstr_unescape_copy(&rplc_plain, rplc_buf);
+			jstr_unescape_copy(&G.find_plain, find_buf);
+			jstr_unescape_copy(&G.rplc_plain, rplc_buf);
 			if (first_draw) {
 				term_clear_and_home();
 				first_draw = 0;
@@ -1577,8 +1584,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 				err_buf[0] = '\0';
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
-				const char *ptn = (find_plain.size > 0 && find_plain.data) ? find_plain.data : "";
-				comp_ret = far_compile(t, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, 1, err_buf, sizeof(err_buf));
+				const char *ptn = (G.find_plain.size > 0 && G.find_plain.data) ? G.find_plain.data : "";
+				comp_ret = far_compile(t, ptn, G.find_plain.size, G.rplc_plain.data ? G.rplc_plain.data : "", G.rplc_plain.size, 1, err_buf, sizeof(err_buf));
 				if (comp_ret == JSTR_RET_SUCC)
 					comp_ret = interactive_compile_include_exclude(include_buf->data ? include_buf->data : "", include_buf->size, exclude_buf->data ? exclude_buf->data : "", exclude_buf->size, err_buf, sizeof(err_buf));
 				is_valid = (comp_ret == JSTR_RET_SUCC);
@@ -1627,8 +1634,8 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					if (!interactive_file_pass(file, files_buf))
 						continue;
 					size_t file_matches = 0;
-					const char *ptn = (find_plain.size > 0 && find_plain.data) ? find_plain.data : "";
-					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, &file_matches);
+					const char *ptn = (G.find_plain.size > 0 && G.find_plain.data) ? G.find_plain.data : "";
+					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, G.find_plain.size, G.rplc_plain.data ? G.rplc_plain.data : "", G.rplc_plain.size, &file_matches);
 					if (file_matches > 0) {
 						total_matches += file_matches;
 						files_matched++;
@@ -1812,9 +1819,5 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 done:
 	restore_terminal();
-#if DO_FREE /* Buffer reused across redraws; freeing is optional pre-exit. */
-	jstr_free_j(&find_plain);
-	jstr_free_j(&rplc_plain);
-#endif
 	return JSTR_RET_SUCC;
 }

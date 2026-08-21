@@ -585,21 +585,13 @@ main(int argc, char **argv)
 	/* If argv[2] starts with '-', it's a flag, not REPLACE.  Allow grep/confirm
 	 * modes to omit the REPLACE argument. */
 	unsigned int i;
-	if (argv[2] && argv[2][0] == '-') {
-		a.rplc = "";
-		a.rplc_len = 0;
-		raw_rplc = "";
-		i = 2;
-	} else {
-		a.rplc = (const char *)RPLC;
-		raw_rplc = (const char *)RPLC;
-		a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
-		i = 3;
-	}
+	a.rplc = (const char *)RPLC;
+	raw_rplc = (const char *)RPLC;
+	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	init_defaults();
 	G.confirm_pass = 1;
 	int end_of_flags = 0;
-	for (; ARG; ++i) {
+	for (i = 3; ARG; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {

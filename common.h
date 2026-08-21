@@ -65,6 +65,17 @@ typedef struct matches_ty {
 	match_ty *data;
 } matches_ty;
 
+typedef struct range_ty {
+	size_t start;
+	size_t end;
+} range_ty;
+
+typedef struct ranges_ty {
+	size_t cap;
+	size_t size;
+	range_ty *data;
+} ranges_ty;
+
 /* A single matching line collected for the grep TUI. Pointers into file
  * content buffers are stable across the scan (files are cached in G.files). */
 typedef struct grep_line_ty {
@@ -133,6 +144,8 @@ typedef struct global_ty {
 	/* Frequently-touched growable state, grouped so the match list and the
 	 * preview buffers' headers sit on the same cache lines while scanning. */
 	matches_ty matches;
+	ranges_ty old_ranges;
+	ranges_ty new_ranges;
 	jstr_ty rplc_buf;
 	/* Cached output of the previous -c preview hunk; emptied per block but
 	 * the allocation is reused across files so capacity persists. */

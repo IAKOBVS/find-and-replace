@@ -10,6 +10,8 @@
 #define COLOR_RED               "\x1b[31m"
 #define COLOR_GREEN             "\x1b[32m"
 #define COLOR_RESET             "\x1b[0m"
+#define COLOR_NEGATIVE          "\x1b[7m"
+#define COLOR_POSITIVE          "\x1b[27m"
 #define ANSI_ALT_SCREEN_ENABLE  "\x1b[?1049h"
 #define ANSI_ALT_SCREEN_DISABLE "\x1b[?1049l"
 #define ANSI_CLEAR_SCREEN       "\x1b[2J"

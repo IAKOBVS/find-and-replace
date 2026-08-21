@@ -581,7 +581,7 @@ main(int argc, char **argv)
 	/* If argv[2] starts with '-', it's a flag, not REPLACE.  Allow grep/confirm
 	 * modes to omit the REPLACE argument. */
 	unsigned int i;
-	if (argv[2] && argv[2][0] == '-') {
+	if (argv[2] && argv[2][0] == '-' && argv[2][1] != '\0') {
 		a.rplc = "";
 		a.rplc_len = 0;
 		raw_rplc = "";

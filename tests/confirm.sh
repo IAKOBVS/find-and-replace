@@ -65,7 +65,7 @@ t_confirm_multiline_regex() {
 	td=$1; printf 'hello\nworld\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" 'hello\nworld' hi -c -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q -- '-hello' && printf '%s' "$clean_out" | grep -q -- '+hi' && ! printf '%s' "$clean_out" | grep -q '^@@' && ! printf '%s' "$clean_out" | grep -q '^---' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'hi' ] && printf '%s' "$clean_out" | grep -q -- ':1:hello' && printf '%s' "$clean_out" | grep -q -- ':1:hi' && ! printf '%s' "$clean_out" | grep -q '^@@' && ! printf '%s' "$clean_out" | grep -q '^---' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_multi_same_line() {
@@ -73,7 +73,7 @@ t_confirm_multi_same_line() {
 	out=$(printf 'y\n' | "$PROG" la lu -c -i -g "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	[ "$(cat "$td/f")" = 'lu lu
-lu lu' ] && [ "$(printf '%s\n' "$clean_out" | grep -c -- '-la la')" -eq 2 ] && [ "$(printf '%s\n' "$clean_out" | grep -c -- '+lu lu')" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
+lu lu' ] && [ "$(printf '%s\n' "$clean_out" | grep -c -- ':la la')" -eq 2 ] && [ "$(printf '%s\n' "$clean_out" | grep -c -- ':lu lu')" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$out]" > "$td/result"
 }
 
 t_confirm_recursive() {
@@ -105,7 +105,7 @@ t_confirm_regex_preview_dot_star_g() {
 	out=$(printf 'y\n' | "$PROG" ".*" "world" -gc -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	expected_file=$(printf 'world\n')
-	[ "$(cat "$td/f")" = "$expected_file" ] && printf '%s' "$clean_out" | grep -q -- '-hello' && printf '%s' "$clean_out" | grep -q -- '+world' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = "$expected_file" ] && printf '%s' "$clean_out" | grep -q -- ':1:hello' && printf '%s' "$clean_out" | grep -q -- ':1:world' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_skip_newline() {
@@ -114,14 +114,14 @@ t_confirm_regex_preview_skip_newline() {
 	clean_out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	# Under latest jstring, ".* b" replaced with "b" (with REG_NEWLINE) produces "b\nb\n"
 	[ "$(cat "$td/f")" = 'b
-b' ] && printf '%s' "$clean_out" | grep -q -- '- b' && printf '%s' "$clean_out" | grep -q -- '+b' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+b' ] && printf '%s' "$clean_out" | grep -q -- ':1: b' && printf '%s' "$clean_out" | grep -q -- ':1:b' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_regex_preview_backref() {
 	td=$1; printf 'hello\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" "(h)ello" '\\1world' -gc -i -E "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s\n' "$clean_out" | grep -q -- '-hello' && printf '%s\n' "$clean_out" | grep -q -- '+hworld' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'hworld' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:hello' && printf '%s\n' "$clean_out" | grep -q -- ':1:hworld' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_line_numbers_shift() {
@@ -129,7 +129,7 @@ t_confirm_preview_line_numbers_shift() {
 	out=$(printf 'y\n' | "$PROG" hello 'one\ntwo' -c -i -g "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	good=1
-	for want in ':2:-hello' ':2:+one' ':3:+two' ':4:-hello' ':5:+one' ':6:+two'; do
+	for want in ':2:hello' ':2:one' ':3:two' ':4:hello' ':5:one' ':6:two'; do
 		printf '%s\n' "$clean_out" | grep -q -- "$want" || good=0
 	done
 	exp='a
@@ -146,14 +146,14 @@ t_confirm_preview_no_trailing_newline() {
 	td=$1; printf 'no newline' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" no yes -c -i "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(cat "$td/f")" = 'yes newline' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-no newline' && printf '%s\n' "$clean_out" | grep -q -- ':1:+yes newline' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = 'yes newline' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:no newline' && printf '%s\n' "$clean_out" | grep -q -- ':1:yes newline' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_delete_line() {
 	td=$1; printf 'DELETE\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" DELETE '' -c -i "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	[ "$(wc -c < "$td/f")" -eq 1 ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-DELETE' && printf '%s\n' "$clean_out" | grep -q -- ':1:+$' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(wc -c < "$td/f")" -eq 1 ] && printf '%s\n' "$clean_out" | grep -q -- ':1:DELETE' && printf '%s\n' "$clean_out" | grep -q -- ':1:$' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_empty_line_insert() {
@@ -163,7 +163,7 @@ t_confirm_preview_empty_line_insert() {
 	exp='a
 X
 b'
-	[ "$(cat "$td/f")" = "$exp" ] && printf '%s\n' "$clean_out" | grep -q -- ':2:-$' && printf '%s\n' "$clean_out" | grep -q -- ':2:+X' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
+	[ "$(cat "$td/f")" = "$exp" ] && printf '%s\n' "$clean_out" | grep -q -- ':2:$' && printf '%s\n' "$clean_out" | grep -q -- ':2:X' && echo PASS > "$td/result" || echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
 }
 
 t_confirm_preview_many_blocks() {
@@ -175,10 +175,10 @@ t_confirm_preview_many_blocks() {
 	done
 	out=$(printf 'y\n' | "$PROG" X Y -c -i -g "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	n=$(printf '%s\n' "$clean_out" | grep -c -- ':-X$')
+	n=$(printf '%s\n' "$clean_out" | grep -c -- ':X$')
 	yg=$(tr -cd 'Y' < "$td/f" | wc -c)
 	xg=$(tr -cd 'X' < "$td/f" | wc -c)
-	[ "$n" -eq 50 ] && [ "$yg" -eq 50 ] && [ "$xg" -eq 0 ] && printf '%s\n' "$clean_out" | grep -q -- ':100:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:-X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:+Y' && echo PASS > "$td/result" || echo "FAIL: n=$n yg=$yg xg=$xg out=[$(printf '%s\n' "$clean_out" | head -3)]" > "$td/result"
+	[ "$n" -eq 50 ] && [ "$yg" -eq 50 ] && [ "$xg" -eq 0 ] && printf '%s\n' "$clean_out" | grep -q -- ':100:X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:X' && printf '%s\n' "$clean_out" | grep -q -- ':5000:Y' && echo PASS > "$td/result" || echo "FAIL: n=$n yg=$yg xg=$xg out=[$(printf '%s\n' "$clean_out" | head -3)]" > "$td/result"
 }
 
 t_confirm_interactive_garbage_preview_cleared() {
@@ -191,7 +191,7 @@ t_confirm_interactive_garbage_preview_cleared() {
 	# In the final redraw frame (after Find: line 1), verify clear-down (\x1b[J)
 	# appears right after the preview lines and before the control header positioning (\x1b[16;1H).
 	last_frame=$(awk 'BEGIN{RS="\x1b\\[H"} {last=$0} END{print last}' "$td/out")
-	if printf '%s' "$last_frame" | grep -q 'Find:    line 1' && printf '%s' "$last_frame" | grep -q -z "f:1:+.*${esc}\\[J.*${esc}\\[16;1H"; then
+	if printf '%s' "$last_frame" | grep -q 'Find:    line 1' && printf '%s' "$last_frame" | grep -q -z "f:1:.*${esc}\\[J.*${esc}\\[16;1H"; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: clear-down sequence missing between preview and controls in frame: [$last_frame]" > "$td/result"
@@ -274,7 +274,8 @@ t_confirm_interactive_escape_live_preview() {
 	tab=$(printf '\t')
 	# The live preview must match the tab even though the field holds raw \t.
 	pdrive --tail '\x15' --tail '\\t' --tail '\r' --tail 'n\n' -- hello world -c -i "$td/f"
-	if grep -q "f:1:-a${tab}b" "$td/out" && grep -q 'f:1:+aworldb' "$td/out"; then
+	clean_out=$(sed 's/\x1b\[[0-9;]*m//g' "$td/out")
+	if printf '%s\n' "$clean_out" | grep -q "f:1:a${tab}b" && printf '%s\n' "$clean_out" | grep -q 'f:1:aworldb'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: live preview did not show tab match. out=[$(cat "$td/out")]" > "$td/result"
@@ -332,14 +333,15 @@ t_confirm_interactive_no_pre_tui_dump() {
 	# startup with -g on a large tree). The alt-screen enter \x1b[?1049h is
 	# the first thing the TUI emits, so any preview line before it is a dump.
 	pdrive --tail '\x03' -- hello replacement -c -i "$td/f"
-	if awk -v esc="$esc" -v out="$td/out" '
+	clean_out=$(sed 's/\x1b\[[0-9;]*m//g' "$td/out")
+	if printf '%s\n' "$clean_out" | awk -v esc="$esc" '
 		{ buf = buf $0 "\n" }
 		END {
 			o = index(buf, esc "[?1049h")
-			p = index(buf, "f:1:-hello")
+			p = index(buf, "f:1:hello")
 			exit (o > 0 && p > o ? 0 : 1)
 		}
-	' "$td/out"; then
+	'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: preview leaked before TUI. out=[$(cat "$td/out")]" > "$td/result"
@@ -368,7 +370,7 @@ t_confirm_interactive_tab_expansion() {
 	# Drop everything after the alt-screen teardown so the non-TUI post-session
 	# preview (which echoes the file's raw tab) does not pollute the check.
 	tui_render=$(printf '%s\n' "$clean_tui" | sed -E 's/\x1b\[\?1049l.*//')
-	if printf '%s\n' "$tui_render" | grep -q ':-   hello world' && ! printf '%s\n' "$tui_render" | grep -Fq "$tab"; then
+	if printf '%s\n' "$tui_render" | grep -q ':    hello world' && ! printf '%s\n' "$tui_render" | grep -Fq "$tab"; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: tab expansion failed. tui=[$tui_render]" > "$td/result"
@@ -380,7 +382,7 @@ t_confirm_interactive_width_clipping() {
 	dd if=/dev/zero bs=150 count=1 2>/dev/null | tr '\0' 'a' > "$td/f"
 	printf '\n' >> "$td/f"
 	pdrive --winsize 24x80 --tail '\r' --tail 'n\n' -- a b -c -i "$td/f"
-	tui_out=$(grep '_interactive_width_clipping/f:1:-' "$td/out" | grep '\[K' | head -1)
+	tui_out=$(grep '_interactive_width_clipping/f:1:' "$td/out" | grep '\[K' | head -1)
 	clean_line=$(printf '%s\n' "$tui_out" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\r//g')
 	if [ -n "$clean_line" ] && [ "${#clean_line}" -le 79 ]; then
 		echo PASS > "$td/result"
@@ -719,7 +721,7 @@ t_vim_match_line_end() {
 	out=$(printf 'y\n' | "$PROG" 'a\nb' 'X' -c -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 	if [ "$(cat "$td/f")" = 'X
-c' ] && printf '%s\n' "$clean_out" | grep -q -- '-a' && printf '%s\n' "$clean_out" | grep -q -- '-b' && printf '%s\n' "$clean_out" | grep -q -- '+X' && ! printf '%s\n' "$clean_out" | grep -q -- '-c'; then
+c' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:a' && printf '%s\n' "$clean_out" | grep -q -- ':2:b' && printf '%s\n' "$clean_out" | grep -q -- ':1:X' && ! printf '%s\n' "$clean_out" | grep -q -- ':3:c'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
@@ -730,7 +732,7 @@ t_confirm_regex_scan_empty() {
 	td=$1; printf '\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" '^$' X -c -i -R -g "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	if [ "$(cat "$td/f")" = 'X' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:-$' && printf '%s\n' "$clean_out" | grep -q -- ':1:+X'; then
+	if [ "$(cat "$td/f")" = 'X' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:$' && printf '%s\n' "$clean_out" | grep -q -- ':1:X'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
@@ -787,7 +789,7 @@ t_confirm_match_consumes_newline() {
 	td=$1; printf 'a\nb\n' > "$td/f"
 	out=$(printf 'y\n' | "$PROG" 'a\n' 'X' -c -i -R "$td/f" 2>/dev/null)
 	clean_out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
-	if [ "$(cat "$td/f")" = 'Xb' ] && printf '%s\n' "$clean_out" | grep -q -- '-a' && printf '%s\n' "$clean_out" | grep -q -- '+X'; then
+	if [ "$(cat "$td/f")" = 'Xb' ] && printf '%s\n' "$clean_out" | grep -q -- ':1:a' && printf '%s\n' "$clean_out" | grep -q -- ':1:X'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: file=[$(cat "$td/f")] out=[$clean_out]" > "$td/result"
@@ -969,7 +971,8 @@ t_confirm_interactive_empty_find_then_type() {
 	# Start with empty find, type "h" via --tail then "ello" via --phase hex, quit.
 	pdrive --tail 'h' --phase 65 --phase 6c --phase 6c --phase 6f --phase 04 \
 		-- '' '' -c -i "$td/f"
-	if grep -q -- '-hello world' "$td/out" && grep -q '+ello world' "$td/out"; then
+	clean_out=$(sed 's/\x1b\[[0-9;]*m//g' "$td/out")
+	if printf '%s\n' "$clean_out" | grep -q -- 'f:1:hello world'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: empty find then typing 'hello' did not show preview matches" > "$td/result"

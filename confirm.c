@@ -381,21 +381,37 @@ print_size_t(size_t val)
 	(void)jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
 }
 
-/* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
+#define RANGES_CAP_MIN 16
+
 static void
-print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix, int is_selected)
+ranges_reserve(ranges_ty *ranges, size_t required_size)
+{
+	if (ranges->cap < required_size) {
+		if (ranges->cap == 0)
+			ranges->cap = RANGES_CAP_MIN;
+		while (ranges->cap < required_size)
+			ranges->cap *= 2;
+		range_ty *const new_data = (range_ty *)realloc(ranges->data, ranges->cap * sizeof(range_ty));
+		DIE_IF(!new_data, "%s", "Out of memory allocating ranges.\n");
+		ranges->data = new_data;
+	}
+	ranges->size = required_size;
+}
+
+/* Print the "FNAME:LINE:" prefix of one -c preview line. */
+static void
+print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_selected)
 {
 	if (jstr_unlikely(!io_ok()))
 		return;
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
+		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
 	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
+		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
 	(void)jstr_io_putchar(':');
 	print_size_t(line);
 	(void)jstr_io_putchar(':');
-	(void)jstr_io_putchar(prefix);
 }
 
 /* Print S of LEN bytes, expanding tab characters to 8-column stops and
@@ -427,16 +443,14 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
 }
 
 /* Print one side of a -c preview change: each line of DATA is printed on its
- * own line as "FNAME:LINE:PREFIX<content>", colored with COLOR. DATA covers
- * the block from the start of the first changed line up to (but not
- * including) the '\n' that terminates the last changed line; START_LINE is
- * the line number of the first emitted line (the original file's number for
- * the '-' side, the new file's number for the '+' side). TRAILING_NL is set
- * when that terminating '\n' exists, so a DATA that itself ends in '\n' (or
- * is empty) still renders the empty line that follows it, matching how diff
- * counts lines. */
+ * own line as "FNAME:LINE:<content>", colored with COLOR, with ranges in
+ * RANGES highlighted in COLOR_RESET. DATA covers the block from the start of
+ * the first changed line up to (but not including) the '\n' that terminates
+ * the last changed line; START_LINE is the line number of the first emitted line.
+ * TRAILING_NL is set when that terminating '\n' exists. */
 static void
-print_diff_lines(const char *R data, size_t len, char prefix, const char *color, unsigned int color_len,
+print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t num_ranges,
+                    const char *color, unsigned int color_len,
                     const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
 {
 	if (jstr_unlikely(!io_ok()))
@@ -451,7 +465,8 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 	if (term_initialized)
 		cols = get_terminal_cols();
 	int render = 1;
-	(void)jstr_io_fwrite(color, 1, color_len, stdout);
+	size_t r_idx = 0;
+
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
 		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end) {
 			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
@@ -467,13 +482,53 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			p = nl + 1;
 			continue;
 		}
-		print_line_prefix(fname, fname_len, line++, prefix, G.preview_lines_printed == G.selected_line);
-		if (term_initialized) {
-			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
-			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
-		} else {
-			(void)jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
+
+		print_line_prefix(fname, fname_len, line++, G.preview_lines_printed == G.selected_line);
+
+		unsigned short col = 0;
+		if (term_initialized)
+			col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 2);
+
+		size_t line_start_off = (size_t)JSTR_PTR_DIFF(p, data);
+		size_t line_end_off = (size_t)JSTR_PTR_DIFF(nl, data);
+		size_t curr = line_start_off;
+		int in_highlight = 0;
+
+		while (curr < line_end_off) {
+			while (r_idx < num_ranges && ranges[r_idx].end <= curr)
+				r_idx++;
+
+			size_t next_boundary = line_end_off;
+			int want_highlight = 0;
+
+			if (r_idx < num_ranges && ranges[r_idx].start < line_end_off) {
+				if (ranges[r_idx].start > curr) {
+					next_boundary = ranges[r_idx].start;
+					want_highlight = 0;
+				} else {
+					next_boundary = (ranges[r_idx].end < line_end_off) ? ranges[r_idx].end : line_end_off;
+					want_highlight = (ranges[r_idx].end > ranges[r_idx].start);
+				}
+			}
+
+			if (want_highlight != in_highlight) {
+				if (want_highlight)
+					(void)jstr_io_fwrite(color, 1, color_len, stdout);
+				else
+					(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				in_highlight = want_highlight;
+			}
+
+			size_t seg_len = next_boundary - curr;
+			if (term_initialized)
+				print_diff_line_chars(data + curr, seg_len, cols, &col);
+			else
+				(void)jstr_io_fwrite(data + curr, 1, seg_len, stdout);
+
+			curr = next_boundary;
 		}
+
+		(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 		if (term_initialized)
 			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		(void)jstr_io_putchar('\n');
@@ -481,6 +536,7 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			G.preview_lines_printed++;
 		p = nl + 1;
 	}
+
 	if (p < end) {
 		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end) {
 			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
@@ -491,17 +547,52 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			if (0)
-				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-			print_line_prefix(fname, fname_len, line, prefix, G.preview_lines_printed == G.selected_line);
-			if (term_initialized) {
-				unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
-				print_diff_line_chars(p, (size_t)(end - p), cols, &col);
-			} else {
-				(void)jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
+			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line);
+
+			unsigned short col = 0;
+			if (term_initialized)
+				col = (unsigned short)(fname_len + get_size_t_width(line) + 2);
+
+			size_t line_start_off = (size_t)JSTR_PTR_DIFF(p, data);
+			size_t line_end_off = (size_t)JSTR_PTR_DIFF(end, data);
+			size_t curr = line_start_off;
+			int in_highlight = 0;
+
+			while (curr < line_end_off) {
+				while (r_idx < num_ranges && ranges[r_idx].end <= curr)
+					r_idx++;
+
+				size_t next_boundary = line_end_off;
+				int want_highlight = 0;
+
+				if (r_idx < num_ranges && ranges[r_idx].start < line_end_off) {
+					if (ranges[r_idx].start > curr) {
+						next_boundary = ranges[r_idx].start;
+						want_highlight = 0;
+					} else {
+						next_boundary = (ranges[r_idx].end < line_end_off) ? ranges[r_idx].end : line_end_off;
+						want_highlight = (ranges[r_idx].end > ranges[r_idx].start);
+					}
+				}
+
+				if (want_highlight != in_highlight) {
+					if (want_highlight)
+						(void)jstr_io_fwrite(color, 1, color_len, stdout);
+					else
+						(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+					in_highlight = want_highlight;
+				}
+
+				size_t seg_len = next_boundary - curr;
+				if (term_initialized)
+					print_diff_line_chars(data + curr, seg_len, cols, &col);
+				else
+					(void)jstr_io_fwrite(data + curr, 1, seg_len, stdout);
+
+				curr = next_boundary;
 			}
-			if (0)
-				(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
+
+			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 			(void)jstr_io_putchar('\n');
@@ -518,11 +609,8 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			if (0)
-				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-			print_line_prefix(fname, fname_len, line, prefix, G.preview_lines_printed == G.selected_line);
-			if (0)
-				(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
+			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line);
+			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 			(void)jstr_io_putchar('\n');
@@ -666,12 +754,24 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			const size_t block_start = line_get_start(buf->data, buf->size, G.matches.data[i].start);
 			const size_t block_end = match_line_end(buf->data, buf->size, G.matches.data[j].start, G.matches.data[j].end);
 			const size_t line = line_counter_get(&lc, G.matches.data[i].start);
-			/* Build the replacement content for this block into NEW_BUF. */
+			/* Build the replacement content for this block into NEW_BUF,
+			 * tracking match ranges for old block and replacement ranges for new block. */
 			jstr_empty_j(&G.new_buf);
+			size_t num_block_matches = j - i + 1;
+			ranges_reserve(&G.old_ranges, num_block_matches);
+			ranges_reserve(&G.new_ranges, num_block_matches);
+
 			size_t p = block_start;
 			for (size_t k = i; k <= j; ++k) {
+				size_t idx = k - i;
+				G.old_ranges.data[idx].start = G.matches.data[k].start - block_start;
+				G.old_ranges.data[idx].end = G.matches.data[k].end - block_start;
+
 				if (G.matches.data[k].start > p)
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, buf->data + p, G.matches.data[k].start - p)), "%s", "Out of memory.\n");
+
+				G.new_ranges.data[idx].start = G.new_buf.size;
+
 				if (G.mode & MODE_USE_REGEX && backref) {
 					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
 					jstr_empty_j(&G.rplc_buf);
@@ -683,6 +783,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				} else {
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, rplc, rplc_len)), "%s", "Out of memory.\n");
 				}
+
+				G.new_ranges.data[idx].end = G.new_buf.size;
 				p = G.matches.data[k].end;
 			}
 			if (block_end > p)
@@ -711,8 +813,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, '-', S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, '+', S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
+			print_diff_lines(buf->data + block_start, old_len, G.old_ranges.data, num_block_matches, S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
+			print_diff_lines(G.new_buf.data, G.new_buf.size, G.new_ranges.data, num_block_matches, S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
 			i = j + 1;
 		}
@@ -1082,10 +1184,10 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 		return 0;
 	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
+		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
 	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
+		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
 	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);

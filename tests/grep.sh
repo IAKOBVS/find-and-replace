@@ -332,6 +332,27 @@ t_grep_regex_highlight() {
 	fi
 }
 
+# Regression: grep_rescan never recompiled the twoway searcher when the find
+# string changed in the TUI.  Typing enough chars to cross the twoway
+# threshold (>2 chars) caused a segfault from stale shift tables.
+t_grep_interactive_rescan_recompile() {
+	td=$1
+	printf 'there is no point\nfoo bar\n' > "$td/f"
+	# Start with find='t', type 'here is no point' (hex) to make it
+	# 'there is no point', then Ctrl-D to exit.  Before the fix the
+	# child dies from SIGSEGV.
+	# 68657265206973206e6f20706f696e74 = 'here is no point'
+	# 04 = Ctrl-D
+pdrive --phase 68657265206973206e6f20706f696e74 --phase 04 --tail '' -- t x --grep "$td/f"
+	rc=$(cat "$td/rc")
+	case "$rc" in
+		sig:*)
+			echo "FAIL: child crashed ($rc)" > "$td/result" ;;
+		*)
+			echo PASS > "$td/result" ;;
+	esac
+}
+
 TESTS="
 t_grep_stdin
 t_grep_no_match

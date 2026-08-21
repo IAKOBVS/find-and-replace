@@ -108,21 +108,24 @@ err_exit_code()
  * state. Recompiles when the regex mode/cflags change between files; the
  * MODE_COMPILED bit alone cannot guard that, since -R/-E/-F may appear
  * anywhere on the command line, even after a file argument. */
-static jstr_ret_ty
-compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len)
+jstr_ret_ty
+far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size)
 {
 	const int want_regex = (G.mode & MODE_USE_REGEX) != 0;
-	if (!(G.mode & MODE_COMPILED) || want_regex != G.compiled_regex || (want_regex && G.cflags != G.compiled_cflags)) {
+	if (force_recompile || !(G.mode & MODE_COMPILED) || want_regex != G.compiled_regex || (want_regex && G.cflags != G.compiled_cflags)) {
 		if (G.mode & MODE_COMPILED) {
 			if (G.compiled_regex)
 				jstr_re_free(&G.regex);
 			G.mode &= ~MODE_COMPILED;
 		}
 		if (want_regex) {
-			const int ret = jstr_re_comp(&G.regex, find, G.cflags);
-			if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
-				jstr_re_err(ret, &G.regex, "regex compilation failed for pattern \"%s\".\n", find);
-				exit(err_exit_code());
+			if (find_len > 0) {
+				const int ret = jstr_re_comp(&G.regex, find, G.cflags);
+				if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+					if (err_buf && err_size > 0)
+						regerror(ret, &G.regex.reg, err_buf, err_size);
+					return JSTR_RET_ERR;
+				}
 			}
 			/* Validate backreferences */
 			size_t max_backref = 0;
@@ -135,8 +138,9 @@ compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R 
 				}
 			}
 			if (jstr_unlikely(max_backref > G.regex.reg.re_nsub)) {
-				fprintf(stderr, "find-and-replace error: Replace backreference \\%zu exceeds find capture groups (%zu)\n", max_backref, G.regex.reg.re_nsub);
-				exit(err_exit_code());
+				if (err_buf && err_size > 0)
+					snprintf(err_buf, err_size, "Replace backreference \\%zu exceeds find capture groups (%zu)", max_backref, G.regex.reg.re_nsub);
+				return JSTR_RET_ERR;
 			}
 		} else {
 			jstr_memmem_comp(t, find, find_len);
@@ -320,7 +324,17 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 	return 1;
 }
 
-/* Process a lone "-" stdin placeholder. */
+static void
+compile_or_die(jstr_twoway_ty *t, const char *find, size_t find_len, const char *rplc, size_t rplc_len)
+{
+	char err_buf[256];
+	if (far_compile(t, find, find_len, rplc, rplc_len, 0, err_buf, sizeof(err_buf)) != JSTR_RET_SUCC) {
+		fprintf(stderr, "find-and-replace error: %s\n", err_buf);
+		exit(err_exit_code());
+	}
+}
+
+/* Process the stdin target (a single '-' placeholder or missing target). */
 static jstr_ret_ty
 process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 {
@@ -339,7 +353,7 @@ process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 		return JSTR_RET_SUCC;
 	}
 	DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-	DIE_IF(jstr_chk(compile(t, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "");
+	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 	if (G.mode & MODE_GREP)
 		DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 	else
@@ -357,7 +371,7 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t)
 		fprintf(stderr, "find-and-replace: stat(%s) failed.\n", arg);
 		exit(err_exit_code());
 	}
-	DIE_IF(jstr_chk(compile(t, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "");
+	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 	if (IS_REG(st.st_mode)) {
 		const size_t fname_len = strlen(arg);
 		if (!G.have_exclude) {
@@ -526,7 +540,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 		}
 	} else {
 		DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-		DIE_IF(jstr_chk(compile(t, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "");
+		compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 		if (G.mode & MODE_GREP)
 			DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 		else

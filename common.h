@@ -176,4 +176,6 @@ typedef struct global_ty {
 
 extern global_ty G;
 
+jstr_ret_ty far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size);
+
 #endif /* COMMON_H */

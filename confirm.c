@@ -383,11 +383,15 @@ print_size_t(size_t val)
 
 /* Print the "FNAME:LINE:PREFIX" prefix of one -c preview line. */
 static void
-print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix)
+print_line_prefix(const char *R fname, size_t fname_len, size_t line, char prefix, int is_selected)
 {
 	if (jstr_unlikely(!io_ok()))
 		return;
+	if (is_selected)
+		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
 	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
+	if (is_selected)
+		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 	(void)jstr_io_putchar(':');
 	print_size_t(line);
 	(void)jstr_io_putchar(':');
@@ -463,17 +467,13 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 			p = nl + 1;
 			continue;
 		}
-		if (has_scroll && G.preview_lines_printed == G.selected_line)
-			(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-		print_line_prefix(fname, fname_len, line++, prefix);
+		print_line_prefix(fname, fname_len, line++, prefix, G.preview_lines_printed == G.selected_line);
 		if (term_initialized) {
 			unsigned short col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 3);
 			print_diff_line_chars(p, (size_t)(nl - p), cols, &col);
 		} else {
 			(void)jstr_io_fwrite(p, 1, (size_t)(nl - p), stdout);
 		}
-		if (has_scroll && G.preview_lines_printed == G.selected_line)
-			(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
 		if (term_initialized)
 			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 		(void)jstr_io_putchar('\n');
@@ -491,16 +491,16 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (0)
 				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-			print_line_prefix(fname, fname_len, line, prefix);
+			print_line_prefix(fname, fname_len, line, prefix, G.preview_lines_printed == G.selected_line);
 			if (term_initialized) {
 				unsigned short col = (unsigned short)(fname_len + get_size_t_width(line) + 3);
 				print_diff_line_chars(p, (size_t)(end - p), cols, &col);
 			} else {
 				(void)jstr_io_fwrite(p, 1, (size_t)(end - p), stdout);
 			}
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (0)
 				(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
@@ -518,10 +518,10 @@ print_diff_lines(const char *R data, size_t len, char prefix, const char *color,
 		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			if (0)
 				(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-			print_line_prefix(fname, fname_len, line, prefix);
-			if (has_scroll && G.preview_lines_printed == G.selected_line)
+			print_line_prefix(fname, fname_len, line, prefix, G.preview_lines_printed == G.selected_line);
+			if (0)
 				(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
 			if (term_initialized)
 				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
@@ -721,42 +721,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	return JSTR_RET_SUCC;
 }
 
-static jstr_ret_ty
-interactive_compile(jstr_twoway_ty *t, const char *find, size_t find_len, const char *rplc, size_t rplc_len, char *err_buf, size_t err_size)
-{
-	if (G.mode & MODE_USE_REGEX) {
-		if (G.mode & MODE_COMPILED) {
-			jstr_re_free(&G.regex);
-			G.mode &= ~MODE_COMPILED;
-		}
-		const int ret = jstr_re_comp(&G.regex, find, G.cflags);
-		if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
-			regerror(ret, &G.regex.reg, err_buf, err_size);
-			return JSTR_RET_ERR;
-		}
-		G.compiled_regex = 1;
-		G.compiled_cflags = G.cflags;
-		G.mode |= MODE_COMPILED;
 
-		/* Validate backreferences */
-		size_t max_backref = 0;
-		for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
-			if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
-				size_t num = rplc[idx+1] - '0';
-				if (num > max_backref)
-					max_backref = num;
-				++idx;
-			}
-		}
-		if (max_backref > G.regex.reg.re_nsub) {
-			snprintf(err_buf, err_size, "Replace backreference \\%zu exceeds find capture groups (%zu)", max_backref, G.regex.reg.re_nsub);
-			return JSTR_RET_ERR;
-		}
-	} else {
-		jstr_memmem_comp(t, find, find_len);
-	}
-	return JSTR_RET_SUCC;
-}
 
 /* Compile the interactive Include/Exclude fields into the global regexes.
  * An empty pattern clears the filter. On invalid regex, report it and return
@@ -1115,10 +1080,12 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 {
 	if (jstr_unlikely(!io_ok()))
 		return 0;
+	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	if (is_selected)
 		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
-	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
+	if (is_selected)
+		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
 	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
@@ -1137,8 +1104,6 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 	} else {
 		(void)jstr_io_fwrite(gl->content + after_off, 1, after_len, stdout);
 	}
-	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[27m", 1, 4, stdout);
 	if (term_initialized)
 		(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
 	(void)jstr_io_putchar('\n');
@@ -1169,11 +1134,14 @@ grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
 	G.selected_line = 0;
 	const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
 	const size_t find_len = find_buf->size;
-	for (unsigned int k = 0; k < G.files.size; ++k) {
-		file_ty *file = &G.files.data[k];
-		if (!interactive_file_pass(file, files_buf))
-			continue;
-		grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
+	far_compile(t, ptn, find_len, "", 0, 1, NULL, 0);
+	if (!(G.mode & MODE_USE_REGEX) || (G.mode & MODE_COMPILED)) {
+		for (unsigned int k = 0; k < G.files.size; ++k) {
+			file_ty *file = &G.files.data[k];
+			if (!interactive_file_pass(file, files_buf))
+				continue;
+			grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
+		}
 	}
 	G.total_lines = G.grep_lines.size;
 	if (G.selected_line >= G.total_lines && G.total_lines > 0)
@@ -1510,7 +1478,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				err_buf[0] = '\0';
 				jstr_ret_ty comp_ret = JSTR_RET_SUCC;
 				const char *ptn = (find_plain.size > 0 && find_plain.data) ? find_plain.data : "";
-				comp_ret = interactive_compile(t, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, err_buf, sizeof(err_buf));
+				comp_ret = far_compile(t, ptn, find_plain.size, rplc_plain.data ? rplc_plain.data : "", rplc_plain.size, 1, err_buf, sizeof(err_buf));
 				if (comp_ret == JSTR_RET_SUCC)
 					comp_ret = interactive_compile_include_exclude(include_buf->data ? include_buf->data : "", include_buf->size, exclude_buf->data ? exclude_buf->data : "", exclude_buf->size, err_buf, sizeof(err_buf));
 				is_valid = (comp_ret == JSTR_RET_SUCC);

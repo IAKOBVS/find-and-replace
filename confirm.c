@@ -393,10 +393,10 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_sel
 	if (jstr_unlikely(!io_ok()))
 		return;
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
+		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
 	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
+		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
 	(void)jstr_io_putchar(':');
 	print_size_t(line);
 	(void)jstr_io_putchar(':');
@@ -1182,10 +1182,10 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 		return 0;
 	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[7m", 1, 4, stdout);
+		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
 	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
 	if (is_selected)
-		(void)jstr_io_fwrite("\x1b[27m", 1, 5, stdout);
+		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
 	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);

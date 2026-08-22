@@ -181,11 +181,24 @@ pdrive --noready --phase 0d --tail '' -- hello x --grep "$td/f"
 t_grep_interactive_scroll() {
 	td=$1
 	printf 'aaa\nbbb\nccc\n' > "$td/f"
-	# Start grep TUI, Ctrl-J to scroll down (select second match), Enter
-pdrive --phase 0a --phase 0d --tail '' -- 'a' x --grep "$td/f"
+	# Start grep TUI, Alt-J to scroll down (select second match), Enter
+pdrive --phase 1b6a --phase 0d --tail '' -- 'a' x --grep "$td/f"
 	out=$(strip_ansi < "$td/out")
 	# The output should contain at least one of the match lines
 	if printf '%s\n' "$out" | grep -qF ':'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
+}
+
+t_grep_interactive_ctrl_j_k_nav() {
+	td=$1
+	printf 'hello\nworld\n' > "$td/f"
+	# Start grep TUI, Ctrl-J moves down to Files field, Ctrl-K moves back up to Find field, Enter
+pdrive --phase 0a --phase 0b@150 --phase 0d --tail '' -- hello x --grep "$td/f"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF '1:hello'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: out=[$out]" > "$td/result"
@@ -373,6 +386,7 @@ t_grep_exclude_cli
 t_grep_nonexistent_file
 t_grep_interactive_basic
 t_grep_interactive_scroll
+t_grep_interactive_ctrl_j_k_nav
 t_grep_interactive_exclude
 t_grep_interactive_ctrl_d
 t_grep_interactive_multiline

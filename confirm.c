@@ -1071,8 +1071,22 @@ confirm_read_key(char *out_char)
 		char seq[2];
 		int n1 = read(STDIN_FILENO, &seq[0], 1);
 		int n2 = 0;
-		if (n1 > 0)
-			n2 = read(STDIN_FILENO, &seq[1], 1);
+		if (n1 > 0) {
+			if (seq[0] == 'j' || seq[0] == 'J') {
+				raw.c_cc[VMIN] = 1;
+				raw.c_cc[VTIME] = 0;
+				tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+				return KEY_ALT_J;
+			}
+			if (seq[0] == 'k' || seq[0] == 'K') {
+				raw.c_cc[VMIN] = 1;
+				raw.c_cc[VTIME] = 0;
+				tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+				return KEY_ALT_K;
+			}
+			if (seq[0] == '[')
+				n2 = read(STDIN_FILENO, &seq[1], 1);
+		}
 
 		/* Restore blocking read */
 		raw.c_cc[VMIN] = 1;
@@ -1410,7 +1424,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			}
 			break;
 
-		case KEY_CTRL_J:
+		case KEY_ALT_J:
 			if (G.total_lines > 0 && G.selected_line + 1 < G.total_lines) {
 				G.selected_line++;
 				if (G.selected_line >= G.scroll_offset + G.max_preview_lines)
@@ -1419,13 +1433,14 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			}
 			break;
 
+		case KEY_CTRL_J:
 		case KEY_DOWN:
 		case KEY_TAB:
 			active_field = (active_field + 1) % GREP_FIELD_COUNT;
 			needs_redraw = 1;
 			break;
 
-		case KEY_CTRL_K:
+		case KEY_ALT_K:
 			if (G.selected_line > 0) {
 				G.selected_line--;
 				if (G.selected_line < G.scroll_offset)
@@ -1434,6 +1449,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			}
 			break;
 
+		case KEY_CTRL_K:
 		case KEY_UP:
 		case KEY_SHIFT_TAB:
 			active_field = (active_field + GREP_FIELD_COUNT - 1) % GREP_FIELD_COUNT;
@@ -1700,7 +1716,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				goto done;
 			break;
 
-		case KEY_CTRL_J:
+		case KEY_ALT_J:
 			if (G.total_lines > 0 && G.selected_line + 1 < G.total_lines) {
 				G.selected_line++;
 				if (G.selected_line >= G.scroll_offset + G.max_preview_lines)
@@ -1709,13 +1725,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 			break;
 
+		case KEY_CTRL_J:
 		case KEY_DOWN:
 		case KEY_TAB:
 			active_field = (active_field + 1) % FIELD_COUNT;
 			needs_redraw = 1;
 			break;
 
-		case KEY_CTRL_K:
+		case KEY_ALT_K:
 			if (G.selected_line > 0) {
 				G.selected_line--;
 				if (G.selected_line < G.scroll_offset)
@@ -1724,6 +1741,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 			}
 			break;
 
+		case KEY_CTRL_K:
 		case KEY_UP:
 		case KEY_SHIFT_TAB:
 			active_field = (active_field + FIELD_COUNT - 1) % FIELD_COUNT;

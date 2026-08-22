@@ -711,8 +711,8 @@ pdrive --phase 1b --phase 30@150 --phase 1b5b337e@150 --phase 0d --tail 'y\n' --
 
 t_interactive_ctrl_j_k() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	# Tab down (Replace), Tab down (Flags), Shift-Tab up (Replace), type zz
-pdrive --phase 09 --phase 09@150 --phase 1b5b5a@150 --phase 7a@150 --phase 7a@150 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f"
+	# Ctrl-J down (Replace), Ctrl-J down (Flags), Ctrl-K up (Replace), type zz
+pdrive --phase 0a --phase 0a@150 --phase 0b@150 --phase 7a@150 --phase 7a@150 --phase 0d --tail 'y\n' -- 'hello' 'replacement' -c -i "$td/f"
 	[ "$(cat "$td/f")" = 'replacementzz world' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
 }
 
@@ -878,7 +878,7 @@ t_confirm_interactive_files_filter() {
 
 t_confirm_interactive_enter_invalid() {
 	td=$1; printf 'hello world\n' > "$td/f"
-	pdrive --phase 0d --phase 04@150 -- '[' HI -c -i -R "$td/f"
+	pdrive --noready --phase 0d --phase 04@150 -- '[' HI -c -i -R "$td/f"
 	if [ "$(cat "$td/rc")" = 1 ] && [ "$(cat "$td/f")" = 'hello world' ]; then
 		echo PASS > "$td/result"
 	else
@@ -979,10 +979,10 @@ t_confirm_interactive_empty_find_then_type() {
 	fi
 }
 
-t_confirm_interactive_ctrl_j_scroll() {
+t_confirm_interactive_alt_j_scroll() {
 	td=$1; printf 'aaa\nbbb\nccc\nddd\neee\n' > "$td/f"
-	# Ctrl-J scrolls the selection down; assert TUI doesn't crash and Enter works
-pdrive --phase 0a --phase 0a --phase 0d --tail 'y\n' -- a X -g -c -i "$td/f"
+	# Alt-J scrolls the selection down; assert TUI doesn't crash and Enter works
+pdrive --phase 1b6a --phase 1b6a --phase 0d --tail 'y\n' -- a X -g -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'XXX
 bbb
 ccc
@@ -994,10 +994,10 @@ eee' ]; then
 	fi
 }
 
-t_confirm_interactive_ctrl_k_scroll() {
+t_confirm_interactive_alt_k_scroll() {
 	td=$1; printf 'aaa\nbbb\nccc\n' > "$td/f"
-	# Ctrl-J down twice, Ctrl-K back up once, Enter, y
-pdrive --phase 0a --phase 0a --phase 0b --phase 0d --tail 'y\n' -- a X -g -c -i "$td/f"
+	# Alt-J down twice, Alt-K back up once, Enter, y
+pdrive --phase 1b6a --phase 1b6a --phase 1b6b --phase 0d --tail 'y\n' -- a X -g -c -i "$td/f"
 	if [ "$(cat "$td/f")" = 'XXX
 bbb
 ccc' ]; then
@@ -1007,16 +1007,16 @@ ccc' ]; then
 	fi
 }
 
-# Regression: Ctrl-J in the confirm TUI stopped scrolling when G.total_lines
+# Regression: Alt-J in the confirm TUI stopped scrolling when G.total_lines
 # was capped at vis_end (print_diff_lines returned early).  With 20 lines
 # and -g, there are 20 diff blocks (40 diff lines); vis_end=13 on a 24-row
-# terminal.  Ctrl-J 15 times must still work (total_lines=40), and Enter
+# terminal.  Alt-J 15 times must still work (total_lines=40), and Enter
 # must apply the replacement to all lines.
 t_confirm_interactive_scroll_past_visend() {
 	td=$1
 	i=1; while [ "$i" -le 20 ]; do printf 'aaa\n'; i=$((i+1)); done > "$td/f"
 	phases=""
-	i=1; while [ "$i" -le 15 ]; do phases="$phases --phase 0a@50"; i=$((i+1)); done
+	i=1; while [ "$i" -le 15 ]; do phases="$phases --phase 1b6a@50"; i=$((i+1)); done
 	pdrive --winsize 24x80 $phases --phase 0d --tail 'y\n' -- a X -g -c -i "$td/f"
 	expected=$(i=1; while [ "$i" -le 20 ]; do printf 'XXX\n'; i=$((i+1)); done)
 	if [ "$(cat "$td/f")" = "$expected" ]; then
@@ -1111,8 +1111,8 @@ t_vim_ddollar_clamp
 t_vim_D_clamp
 t_vim_h_and_default
 t_confirm_interactive_empty_find_then_type
-t_confirm_interactive_ctrl_j_scroll
-t_confirm_interactive_ctrl_k_scroll
+t_confirm_interactive_alt_j_scroll
+t_confirm_interactive_alt_k_scroll
 t_confirm_interactive_scroll_past_visend
 "
 

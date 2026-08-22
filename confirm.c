@@ -1062,8 +1062,9 @@ confirm_read_key(char *out_char)
 
 	if (c == 27) {
 		/* Check if this is Shift-Tab or Arrow keys escape sequence */
-		struct termios raw;
-		tcgetattr(STDIN_FILENO, &raw);
+		struct termios save_raw, raw;
+		tcgetattr(STDIN_FILENO, &save_raw);
+		raw = save_raw;
 		raw.c_cc[VMIN] = 0;
 		raw.c_cc[VTIME] = 1; /* 100ms timeout */
 		tcsetattr(STDIN_FILENO, TCSANOW, &raw);
@@ -1073,15 +1074,11 @@ confirm_read_key(char *out_char)
 		int n2 = 0;
 		if (n1 > 0) {
 			if (seq[0] == 'j' || seq[0] == 'J') {
-				raw.c_cc[VMIN] = 1;
-				raw.c_cc[VTIME] = 0;
-				tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+				tcsetattr(STDIN_FILENO, TCSANOW, &save_raw);
 				return KEY_ALT_J;
 			}
 			if (seq[0] == 'k' || seq[0] == 'K') {
-				raw.c_cc[VMIN] = 1;
-				raw.c_cc[VTIME] = 0;
-				tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+				tcsetattr(STDIN_FILENO, TCSANOW, &save_raw);
 				return KEY_ALT_K;
 			}
 			if (seq[0] == '[')
@@ -1089,9 +1086,7 @@ confirm_read_key(char *out_char)
 		}
 
 		/* Restore blocking read */
-		raw.c_cc[VMIN] = 1;
-		raw.c_cc[VTIME] = 0;
-		tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+		tcsetattr(STDIN_FILENO, TCSANOW, &save_raw);
 
 		if (n1 > 0 && n2 > 0) {
 			if (seq[0] == '[' && seq[1] == 'Z')

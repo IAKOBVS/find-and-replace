@@ -54,6 +54,8 @@ typedef enum {
 	KEY_CTRL_D,
 	KEY_CTRL_J,
 	KEY_CTRL_K,
+	KEY_ALT_J,
+	KEY_ALT_K,
 	KEY_CTRL_U,
 	KEY_CHAR
 } confirm_key_ty;

@@ -38,4 +38,6 @@ for src in $SRCS; do
 done
 #shellcheck disable=SC2086
 cc $OBJS -o "$OUTDIR/$PROG" $JSTR_LIB -ljstr $LFLAGS || exit 1
-echo "cc $SRCS -o $OUTDIR/$PROG $CFLAGS -ljstr $LFLAGS (parallel xargs -P $NP)"
+set -- $SRCS
+echo "compiled $# units in parallel (cc -c via xargs -P $NP): $SRCS"
+echo "linked -> $OUTDIR/$PROG"

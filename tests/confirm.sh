@@ -38,6 +38,24 @@ t_confirm_colored_default() {
 	esac
 }
 
+t_confirm_match_colored_line_plain() {
+	# Style inversion: the preview line BODY is plain (uncolored) and only
+	# the matched substring carries the side's color (- red / + green).
+	# The FNAME:LINE: prefix stays wrapped in the side's color like before,
+	# closed by COLOR_RESET before the body starts.
+	td=$1; printf 'XhelloX world\n' > "$td/f"
+	raw=$("$PROG" hello bye -c -i "$td/f" < /dev/null 2>/dev/null)
+	if printf '%s\n' "$raw" | grep -qP 'X\x1b\[31mhello\x1b\[0mX world' && \
+	   printf '%s\n' "$raw" | grep -qP 'X\x1b\[32mbye\x1b\[0mX world' && \
+	   printf '%s\n' "$raw" | grep -qP '\x1b\[31m(\x1b\[7m)?[^\x1b]*f\x1b\[27m\x1b\[0m:\x1b\[31m1\x1b\[0m:X' && \
+	   printf '%s\n' "$raw" | grep -qP '\x1b\[32m(\x1b\[7m)?[^\x1b]*f\x1b\[27m\x1b\[0m:\x1b\[32m1\x1b\[0m:X' && \
+	   ! printf '%s\n' "$raw" | grep -qP '\x1b\[0mhello'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: expected colored prefix + plain body with colored match, got [$raw]" > "$td/result"
+	fi
+}
+
 t_confirm_abort() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	rc=0; printf 'n\n' | "$PROG" hello bye -c -i "$td/f" >/dev/null 2>"$td/err" || rc=$?
@@ -191,7 +209,11 @@ t_confirm_interactive_garbage_preview_cleared() {
 	# In the final redraw frame (after Find: line 1), verify clear-down (\x1b[J)
 	# appears right after the preview lines and before the control header positioning (\x1b[16;1H).
 	last_frame=$(awk 'BEGIN{RS="\x1b\\[H"} {last=$0} END{print last}' "$td/out")
-	if printf '%s' "$last_frame" | grep -q 'Find:    line 1' && printf '%s' "$last_frame" | grep -q -z "f:1:.*${esc}\\[J.*${esc}\\[16;1H"; then
+	# Prefix elements carry per-part colors now, so compare the frame with
+	# ANSI stripped; the clear-down -> control-header ORDER is checked raw.
+	if printf '%s' "$last_frame" | grep -q 'Find:    line 1' && \
+	   printf '%s' "$last_frame" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -q 'f:1:' && \
+	   printf '%s' "$last_frame" | grep -q -z "${esc}\\[J.*${esc}\\[16;1H"; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: clear-down sequence missing between preview and controls in frame: [$last_frame]" > "$td/result"
@@ -382,7 +404,9 @@ t_confirm_interactive_width_clipping() {
 	dd if=/dev/zero bs=150 count=1 2>/dev/null | tr '\0' 'a' > "$td/f"
 	printf '\n' >> "$td/f"
 	pdrive --winsize 24x80 --tail '\r' --tail 'n\n' -- a b -c -i "$td/f"
-	tui_out=$(grep '_interactive_width_clipping/f:1:' "$td/out" | grep '\[K' | head -1)
+	# The prefix is split into colored parts (fname/number), so match the
+	# file name alone and measure the ANSI-stripped rendered line length.
+	tui_out=$(grep 'width_clipping/f' "$td/out" | grep '\[K' | head -1)
 	clean_line=$(printf '%s\n' "$tui_out" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\r//g')
 	if [ -n "$clean_line" ] && [ "${#clean_line}" -le 79 ]; then
 		echo PASS > "$td/result"
@@ -1029,6 +1053,7 @@ t_confirm_interactive_scroll_past_visend() {
 TESTS="
 t_confirm_yes
 t_confirm_colored_default
+t_confirm_match_colored_line_plain
 t_confirm_abort
 t_confirm_no_inplace_err
 t_confirm_stdin_err

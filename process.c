@@ -14,14 +14,14 @@ static jstr_ret_ty
 print_line_prefix(const char *R fname, size_t fname_len, size_t line)
 {
 	if (jstr_likely(fname != NULL)) {
-		(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+		(void)jstr_io_fwrite(TUI_GREP_FILENAME, 1, S_LEN(TUI_GREP_FILENAME), stdout);
 		(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
-		(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+		(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 		(void)jstr_io_fputc(':', stdout);
 	}
-	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_LINENUMBER, 1, S_LEN(TUI_GREP_LINENUMBER), stdout);
 	print_size_t(line);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	return JSTR_RET_SUCC;
 }
@@ -64,9 +64,9 @@ grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fn
 			if (!(G.mode & MODE_QUIET)) {
 				print_line_prefix(fname, fname_len, line);
 				(void)jstr_io_fwrite(p, 1, moff, stdout);
-				(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+				(void)jstr_io_fwrite(TUI_GREP_MATCHED, 1, S_LEN(TUI_GREP_MATCHED), stdout);
 				(void)jstr_io_fwrite(p + moff, 1, mlen, stdout);
-				(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+				(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 				(void)jstr_io_fwrite(p + moff + mlen, 1, line_len - moff - mlen, stdout);
 				(void)jstr_io_fputc('\n', stdout);
 			}

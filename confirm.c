@@ -123,7 +123,7 @@ term_move_cursor(size_t line, size_t col)
 {
 	if (jstr_unlikely(!io_ok()))
 		return;
-	(void)jstr_io_fwrite("\x1b[", 1, S_LEN("\x1b["), stdout);
+	(void)jstr_io_fwrite(ANSI_CSI, 1, S_LEN(ANSI_CSI), stdout);
 	print_size_t(line);
 	(void)jstr_io_putchar(';');
 	print_size_t(col);
@@ -382,19 +382,27 @@ print_size_t(size_t val)
 	(void)jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
 }
 
-/* Print the "FNAME:LINE:" prefix of one -c preview line. */
+/* Print the "FNAME:LINE:" prefix of one -c preview line. FNAME_COLOR tints
+ * the file name (wrapped in inverse video when IS_SELECTED); LINE_COLOR tints
+ * the line number; colons are unmatched. */
 static void
-print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_selected)
+print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_selected,
+                  const char *fname_color, unsigned int fname_color_len,
+                  const char *line_color, unsigned int line_color_len)
 {
 	if (jstr_unlikely(!io_ok()))
 		return;
+	(void)jstr_io_fwrite(fname_color, 1, fname_color_len, stdout);
 	if (is_selected)
 		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
 	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
 	if (is_selected)
 		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
+	(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
 	(void)jstr_io_putchar(':');
+	(void)jstr_io_fwrite(line_color, 1, line_color_len, stdout);
 	print_size_t(line);
+	(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
 	(void)jstr_io_putchar(':');
 }
 
@@ -427,14 +435,17 @@ print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned s
 }
 
 /* Print one side of a -c preview change: each line of DATA is printed on its
- * own line as "FNAME:LINE:<content>", colored with COLOR, with ranges in
- * RANGES highlighted in COLOR_RESET. DATA covers the block from the start of
+ * own line as "FNAME:LINE:<content>"; FNAME_COLOR tints the file name,
+ * LINE_COLOR the line number, and MATCH_COLOR the matched ranges in RANGES;
+ * everything else is unmatched. DATA covers the block from the start of
  * the first changed line up to (but not including) the '\n' that terminates
  * the last changed line; START_LINE is the line number of the first emitted line.
  * TRAILING_NL is set when that terminating '\n' exists. */
 static void
 print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t num_ranges,
-                    const char *color, unsigned int color_len,
+                    const char *fname_color, unsigned int fname_color_len,
+                    const char *line_color, unsigned int line_color_len,
+                    const char *match_color, unsigned int match_color_len,
                     const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
 {
 	if (jstr_unlikely(!io_ok()))
@@ -452,10 +463,8 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 	size_t r_idx = 0;
 
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
-		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end) {
-			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
 			render = 0;
-		}
 		if (!render) {
 			G.preview_lines_printed++;
 			p = nl + 1;
@@ -467,8 +476,7 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 			continue;
 		}
 
-		(void)jstr_io_fwrite(color, 1, color_len, stdout);
-		print_line_prefix(fname, fname_len, line++, G.preview_lines_printed == G.selected_line);
+		print_line_prefix(fname, fname_len, line++, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
 
 		unsigned short col = 0;
 		if (term_initialized)
@@ -498,9 +506,9 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 
 			if (want_highlight != in_highlight) {
 				if (want_highlight)
-					(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+					(void)jstr_io_fwrite(match_color, 1, match_color_len, stdout);
 				else
-					(void)jstr_io_fwrite(color, 1, color_len, stdout);
+					(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
 				in_highlight = want_highlight;
 			}
 
@@ -513,9 +521,10 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 			curr = next_boundary;
 		}
 
-		(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+		if (in_highlight)
+			(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
 		if (term_initialized)
-			(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+			(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
 		(void)jstr_io_putchar('\n');
 		if (term_initialized)
 			G.preview_lines_printed++;
@@ -523,17 +532,14 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 	}
 
 	if (p < end) {
-		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end) {
-			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
 			render = 0;
-		}
 		if (!render) {
 			G.preview_lines_printed++;
 		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			(void)jstr_io_fwrite(color, 1, color_len, stdout);
-			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line);
+			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
 
 			unsigned short col = 0;
 			if (term_initialized)
@@ -563,9 +569,9 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 
 				if (want_highlight != in_highlight) {
 					if (want_highlight)
-						(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+						(void)jstr_io_fwrite(match_color, 1, match_color_len, stdout);
 					else
-						(void)jstr_io_fwrite(color, 1, color_len, stdout);
+						(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
 					in_highlight = want_highlight;
 				}
 
@@ -578,34 +584,30 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 				curr = next_boundary;
 			}
 
-			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			if (in_highlight)
+				(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
 			if (term_initialized)
-				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+				(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
 			(void)jstr_io_putchar('\n');
 			if (term_initialized)
 				G.preview_lines_printed++;
 		}
 	} else if (trailing_nl) {
-		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end) {
-			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
 			render = 0;
-		}
 		if (!render) {
 			G.preview_lines_printed++;
 		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
 			G.preview_lines_printed++;
 		} else {
-			(void)jstr_io_fwrite(color, 1, color_len, stdout);
-			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line);
-			(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
 			if (term_initialized)
-				(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+				(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
 			(void)jstr_io_putchar('\n');
 			if (term_initialized)
 				G.preview_lines_printed++;
 		}
 	}
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
 }
 
 static void
@@ -818,8 +820,8 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
 			if (new_line < 1)
 				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, G.old_ranges.data, num_block_matches, S_LITERAL(COLOR_RED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, G.new_ranges.data, num_block_matches, S_LITERAL(COLOR_GREEN), fname, fname_len, (size_t)new_line, trailing_nl);
+			print_diff_lines(buf->data + block_start, old_len, G.old_ranges.data, num_block_matches, S_LITERAL(TUI_CONFIRM_FILENAME_REMOVED), S_LITERAL(TUI_CONFIRM_LINENUMBER_REMOVED), S_LITERAL(TUI_CONFIRM_MATCHED_REMOVED), fname, fname_len, line, old_len == 0);
+			print_diff_lines(G.new_buf.data, G.new_buf.size, G.new_ranges.data, num_block_matches, S_LITERAL(TUI_CONFIRM_FILENAME_ADDED), S_LITERAL(TUI_CONFIRM_LINENUMBER_ADDED), S_LITERAL(TUI_CONFIRM_MATCHED_ADDED), fname, fname_len, (size_t)new_line, trailing_nl);
 			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
 			i = j + 1;
 		}
@@ -1201,22 +1203,22 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 {
 	if (jstr_unlikely(!io_ok()))
 		return 0;
-	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_FILENAME, 1, S_LEN(TUI_GREP_FILENAME), stdout);
 	if (is_selected)
 		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
 	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
 	if (is_selected)
 		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 	(void)jstr_io_fputc(':', stdout);
-	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_LINENUMBER, 1, S_LEN(TUI_GREP_LINENUMBER), stdout);
 	print_size_t(gl->line_num);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(gl->content, 1, gl->match_off, stdout);
-	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_MATCHED, 1, S_LEN(TUI_GREP_MATCHED), stdout);
 	(void)jstr_io_fwrite(gl->content + gl->match_off, 1, gl->match_len, stdout);
-	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 	const size_t after_off = gl->match_off + gl->match_len;
 	const size_t after_len = gl->content_len - after_off;
 	if (term_initialized) {
@@ -1226,7 +1228,7 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 		(void)jstr_io_fwrite(gl->content + after_off, 1, after_len, stdout);
 	}
 	if (term_initialized)
-		(void)jstr_io_fwrite("\x1b[K", 1, S_LEN("\x1b[K"), stdout);
+		(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
 	(void)jstr_io_putchar('\n');
 	return 1;
 }

@@ -4,6 +4,8 @@
 #include "files.h"
 #include "process.h"
 #include "confirm.h"
+#include "pipeline.h"
+#include "async.h"
 
 #define IS_REG(x) S_ISREG(x)
 #define IS_DIR(x) S_ISDIR(x)
@@ -19,6 +21,17 @@
 #define _(x) x
 
 global_ty G = { .mode = MODE_PRINT_STDOUT };
+
+/* Streaming grep session for tty --grep (pipeline.h); started when the
+ * first recursive dir arg is seen, consumed by the TUI, stopped at exit. */
+static grep_stream_ty *grep_stream;
+
+static void
+grep_stream_atexit_stop(void)
+{
+	grep_stream_stop(grep_stream);
+	grep_stream = NULL;
+}
 
 /* clang-format off */
 
@@ -42,6 +55,10 @@ static const char *usage =
 	_("    backup suffix before confirming.\n")
 	_("  -r\n")
 	_("    Recurse on the directories in FILES.\n")
+	_("  -j N, --jobs N\n")
+	_("    Use N worker threads to process files while a separate thread\n")
+	_("    traverses directories in recursive mode. Output order is\n")
+	_("    preserved. Defaults to the number of online CPUs.\n")
 	_("  --include REGEX\n")
 	_("    Only process files whose basename matches REGEX when -r is used.\n")
 	_("    The pattern is a POSIX regex (BRE by default; -E/-I apply).\n")
@@ -112,9 +129,9 @@ jstr_ret_ty
 far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size)
 {
 	const int want_regex = (G.mode & MODE_USE_REGEX) != 0;
-	if (force_recompile || !(G.mode & MODE_COMPILED) || want_regex != G.compiled_regex || (want_regex && G.cflags != G.compiled_cflags)) {
+	if (force_recompile || !(G.mode & MODE_COMPILED) || want_regex != ((G.gflags & F_COMPILED_RE) != 0) || (want_regex && G.cflags != G.compiled_cflags)) {
 		if (G.mode & MODE_COMPILED) {
-			if (G.compiled_regex)
+			if (G.gflags & F_COMPILED_RE)
 				jstr_re_free(&G.regex);
 			G.mode &= ~MODE_COMPILED;
 		}
@@ -145,7 +162,7 @@ far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char
 		} else {
 			jstr_memmem_comp(t, find, find_len);
 		}
-		G.compiled_regex = want_regex;
+		G.gflags = (G.gflags & ~F_COMPILED_RE) | (want_regex ? F_COMPILED_RE : 0u);
 		G.compiled_cflags = G.cflags;
 		G.mode |= MODE_COMPILED;
 	}
@@ -164,6 +181,19 @@ init_defaults()
 	G.eflags = 0;
 }
 
+/* Default pipeline worker count: one thread per online CPU. */
+static size_t
+default_jobs()
+{
+	long n = sysconf(_SC_NPROCESSORS_ONLN);
+	if (n < 1)
+		return 1;
+	n *= 2;
+	if (n > FAR_JOBS_MAX)
+		return FAR_JOBS_MAX;
+	return (size_t)n;
+}
+
 /* Return 1 if FILE passes the -c confirm filters: the interactive Files
  * substring filter, the --include regex and the --exclude regex (both
  * compiled into the global state by the flag parser or the confirm TUI). */
@@ -178,10 +208,10 @@ file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
 	const char *base = jstr_memrchr(file->fname, SEP, file->fname_len);
 	base = (base != NULL && *(base + 1)) ? base + 1 : file->fname;
 	const size_t base_len = (size_t)(file->fname + file->fname_len - base);
-	if (G.have_include)
+	if (G.gflags & F_HAVE_INCLUDE)
 		if (jstr_re_match_len(&G.include_re, base, base_len, 0) != JSTR_RE_RET_NOERROR)
 			return 0;
-	if (G.have_exclude)
+	if (G.gflags & F_HAVE_EXCLUDE)
 		if (jstr_re_match_len(&G.exclude_re, base, base_len, 0) == JSTR_RE_RET_NOERROR)
 			return 0;
 	return 1;
@@ -198,9 +228,9 @@ cleanup()
 	free(G.files.data);
 	free(G.matches.data);
 	jstr_re_free(&G.regex);
-	if (G.have_include)
+	if (G.gflags & F_HAVE_INCLUDE)
 		jstr_re_free(&G.include_re);
-	if (G.have_exclude)
+	if (G.gflags & F_HAVE_EXCLUDE)
 		jstr_re_free(&G.exclude_re);
 	jstr_free_j(&G.rplc_buf);
 	jstr_free_j(&G.new_buf);
@@ -217,6 +247,19 @@ cleanup()
 	free(G.new_ranges.data);
 	free(G.old_ranges.data);
 #endif
+}
+
+/* Parse and validate a -j/--jobs value (worker thread count). */
+static void
+set_jobs_or_die(const char *val)
+{
+	char *end = NULL;
+	const long n = strtol(val, &end, 10);
+	if (end == val || *end != '\0' || n < 1 || n > FAR_JOBS_MAX) {
+		fprintf(stderr, "find-and-replace: invalid -j/--jobs value '%s' (expected 1..%d).\n", val, FAR_JOBS_MAX);
+		exit(err_exit_code());
+	}
+	G.jobs = (size_t)n;
 }
 
 /* Handle single-character combined flags (e.g., -EI, -gR). */
@@ -257,6 +300,13 @@ parse_single_flags(const char *arg)
 		case 'l':
 			G.mode |= MODE_PRINT_CHANGES;
 			break;
+		case 'j':
+			if (argp[1] == '\0') {
+				fprintf(stderr, "find-and-replace: invalid flag '-j' (missing worker count, e.g. -j4). See usage below:\n\n%s", usage);
+				exit(err_exit_code());
+			}
+			set_jobs_or_die(argp + 1);
+			return;
 		case 'q':
 			G.mode |= MODE_QUIET;
 			break;
@@ -291,7 +341,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 			jstr_re_err(re_ret, &G.include_re, "--include pattern \"%s\" is not a valid regex.\n", argv[*i_ptr]);
 			exit(err_exit_code());
 		}
-		G.have_include = 1;
+		G.gflags |= F_HAVE_INCLUDE;
 		return 1;
 	}
 	if (!strcmp(arg + 2, "exclude")) {
@@ -304,7 +354,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 			jstr_re_err(re_ret, &G.exclude_re, "--exclude pattern \"%s\" is not a valid regex.\n", argv[*i_ptr]);
 			exit(err_exit_code());
 		}
-		G.have_exclude = 1;
+		G.gflags |= F_HAVE_EXCLUDE;
 		return 1;
 	}
 	if (arg[2] == '\0') {
@@ -314,11 +364,18 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 	if (!strcmp(arg + 2, "grep")) {
 		G.mode |= MODE_GREP;
 		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))
-			G.grep_collect = 1;
+			G.gflags |= F_GREP_COLLECT;
 		return 1;
 	}
 	if (!strcmp(arg + 2, "quiet")) {
 		G.mode |= MODE_QUIET;
+		return 1;
+	}
+	if (!strcmp(arg + 2, "jobs")) {
+		(*i_ptr)++;
+		if (jstr_nullchk(argv[*i_ptr]))
+			jstr_errdie("%s: %s", argv[0], "no argument after --jobs flag.\n");
+		set_jobs_or_die(argv[*i_ptr]);
 		return 1;
 	}
 	if (!strcmp(arg + 2, "version")) {
@@ -361,7 +418,7 @@ process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 	if (G.mode & MODE_GREP)
 		DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 	else
-		DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
+		DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len, NULL)), "%s", "Failed processing stdin.\n");
 	return JSTR_RET_SUCC;
 }
 
@@ -378,7 +435,7 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t)
 	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 	if (IS_REG(st.st_mode)) {
 		const size_t fname_len = strlen(arg);
-		if (!G.have_exclude) {
+		if (!(G.gflags & F_HAVE_EXCLUDE)) {
 process_file_label:
 			if (jstr_chk(process_file(t, &G.content_buf, arg, fname_len, &st, a->find, a->find_len, a->rplc, a->rplc_len))) {
 				fprintf(stderr, "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", arg, a->find, a->rplc);
@@ -394,8 +451,34 @@ process_file_label:
 	} else if (IS_DIR(st.st_mode)) {
 		if (G.mode & MODE_USE_RECURSIVE) {
 			a->buf = &G.content_buf;
-			if (jstr_chk(jstr_io_ftw(arg, callback_file, a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (G.have_include || G.have_exclude) ? matcher : NULL, NULL))) {
-				fprintf(stderr, "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", arg, G.have_include ? "1" : "0");
+			/* tty interactive editors collect through the threaded pipeline
+			 * too (readers fill the file cache while the traversal thread
+			 * walks); the CLI dry-run keeps the strict sequential scan +
+			 * preview; everything else runs the full processing pipeline. */
+			const int tty = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+			int fatal = 0;
+			jstr_ret_ty ftw_ret;
+			if (G.gflags & F_GREP_COLLECT) {
+				/* Streaming search: the TUI opens immediately and results
+				 * stream in while readers scan-at-load; nothing is cached. */
+				if (grep_stream == NULL)
+					grep_stream = grep_stream_start(arg, G.jobs, a->find, a->find_len);
+				else
+					grep_stream_add_dir(grep_stream, arg);
+				return;
+			}
+			if (tty && ((G.mode & MODE_CONFIRM) || (G.gflags & F_GREP_COLLECT)))
+				ftw_ret = pipeline_collect_dir(arg, a, G.jobs);
+			else if (G.mode & MODE_CONFIRM)
+				ftw_ret = jstr_io_ftw(arg, callback_file, a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, ((G.gflags & (F_HAVE_INCLUDE | F_HAVE_EXCLUDE))) ? matcher : NULL, NULL);
+			else
+				ftw_ret = pipeline_run_dir(arg, a, G.jobs, &fatal);
+			if (jstr_chk(ftw_ret)) {
+				fprintf(stderr, "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", arg, (G.gflags & F_HAVE_INCLUDE) ? "1" : "0");
+				exit(err_exit_code());
+			}
+			if (fatal) {
+				cleanup();
 				exit(err_exit_code());
 			}
 		}
@@ -475,22 +558,21 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 			G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
 		}
 
-		G.matches_found = 0;
-		G.preview_full = 0;
+		G.gflags &= ~(F_MATCHES_FOUND | F_PREVIEW_FULL);
 		for (i = 0; i < G.files.size; ++i) {
 			file_ty *file = &G.files.data[i];
 			if (!file_filter_pass(file, &G.interactive_files_buf))
 				continue;
 			size_t file_matches = 0;
 			confirm_scan_file(t, &file->content, file->fname, file->fname_len, a->find, a->find_len, a->rplc, a->rplc_len, &file_matches);
-			if (G.preview_full)
+			if (G.gflags & F_PREVIEW_FULL)
 				break;
 		}
-		if (G.preview_full)
+		if (G.gflags & F_PREVIEW_FULL)
 			(void)jstr_unlikely(jstr_io_fwrite("... (some previews omitted)\n", 1, S_LEN("... (some previews omitted)\n"), stdout) != S_LEN("... (some previews omitted)\n"));
 	}
 
-	if (G.matches_found) {
+	if (G.gflags & F_MATCHES_FOUND) {
 		if (jstr_unlikely(jstr_io_fwrite(CONFIRM_PROMPT, 1, S_LEN(CONFIRM_PROMPT), stdout) != S_LEN(CONFIRM_PROMPT))) {
 			fprintf(stderr, "find-and-replace: write error on prompt.\n");
 			cleanup();
@@ -506,8 +588,8 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 			cleanup();
 			exit(EXIT_FAILURE);
 		}
-		G.confirm_pass = 0;
-		G.matches_found = 0;
+		G.gflags &= ~F_CONFIRM_PASS;
+		G.gflags &= ~F_MATCHES_FOUND;
 		struct stat st_file;
 		for (i = 0; i < G.files.size; ++i) {
 			file_ty *file = &G.files.data[i];
@@ -520,7 +602,7 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 				DIE_IF(jstr_chk(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size)), "%s", "Can't read a file->\n");
 			}
 			st_file.st_mode = file->st_mode;
-			if (jstr_chk(process_buffer(t, rbuf, file->fname, file->fname_len, &st_file, a->find, a->find_len, a->rplc, a->rplc_len)))
+			if (jstr_chk(process_buffer(t, rbuf, file->fname, file->fname_len, &st_file, a->find, a->find_len, a->rplc, a->rplc_len, NULL)))
 				jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a->find, a->rplc);
 		}
 	}
@@ -540,7 +622,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 			if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
 				return JSTR_RET_ERR;
 		} else {
-			G.grep_matched = 1;
+			G.gflags |= F_GREP_MATCHED;
 		}
 	} else {
 		DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
@@ -548,7 +630,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 		if (G.mode & MODE_GREP)
 			DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
 		else
-			DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
+			DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len, NULL)), "%s", "Failed processing stdin.\n");
 	}
 	return JSTR_RET_SUCC;
 }
@@ -575,6 +657,12 @@ main(int argc, char **argv)
 		fprintf(fp, "%s", usage);
 		return ret;
 	}
+	/* Persistent worker pool for the whole process lifetime: traversal,
+	 * processing and TUI rescans all submit onto it (async.h). */
+	DIE_IF(async_pool_start(default_jobs()) != 0, "%s", "Can't start the worker thread pool.\n");
+	atexit(async_pool_stop);
+	atexit(grep_stream_atexit_stop);
+
 	args_ty a = { 0 };
 	jstr_twoway_ty t;
 	a.t = &t;
@@ -589,9 +677,19 @@ main(int argc, char **argv)
 	raw_rplc = (const char *)RPLC;
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	init_defaults();
-	G.confirm_pass = 1;
+	G.jobs = default_jobs();
+	G.gflags |= F_CONFIRM_PASS;
 	int end_of_flags = 0;
-	for (i = 3; ARG; ++i) {
+	/* --grep needs no REPLACE: allow `prog FIND --grep ...` by treating an
+	 * exact argv[2] == "--grep" as the start of the flag/file arguments. */
+	unsigned int arg_start = 3;
+	if (!strcmp(argv[2], "--grep")) {
+		a.rplc = "";
+		raw_rplc = "";
+		a.rplc_len = 0;
+		arg_start = 2;
+	}
+	for (i = arg_start; ARG; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
@@ -613,7 +711,7 @@ main(int argc, char **argv)
 		G.mode |= MODE_HAVE_FILES;
 		if (a.find_len == 0) {
 			if (G.mode & MODE_GREP)
-				G.grep_matched = 1;
+				G.gflags |= F_GREP_MATCHED;
 			if (!(G.mode & (MODE_CONFIRM | MODE_GREP)))
 				continue;
 		}
@@ -630,7 +728,7 @@ main(int argc, char **argv)
 		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i or -c.\n");
 		exit(err_exit_code());
 	}
-	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
+	if ((G.gflags & F_CONFIRM_PASS) && (G.mode & MODE_CONFIRM)) {
 		run_confirm_mode(&a, &t, raw_find, raw_rplc, argv);
 	} else {
 		if (!(G.mode & MODE_HAVE_FILES)) {
@@ -646,7 +744,7 @@ main(int argc, char **argv)
 		return err_exit_code();
 	}
 	if (G.mode & MODE_GREP) {
-		if (G.grep_collect && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
+		if ((G.gflags & F_GREP_COLLECT) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
 			jstr_empty_j(&G.interactive_find_buf);
 			jstr_empty_j(&G.interactive_files_buf);
 			jstr_empty_j(&G.interactive_include_buf);
@@ -656,10 +754,16 @@ main(int argc, char **argv)
 				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat))), "%s", "Out of memory.\n");
 			if (G.exclude_pat)
 				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_exclude_buf, G.exclude_pat, strlen(G.exclude_pat))), "%s", "Out of memory.\n");
-			grep_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf);
+			grep_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf, grep_stream);
+		}
+		if (grep_stream != NULL) {
+			if (grep_stream_matches(grep_stream) > 0)
+				G.gflags |= F_GREP_MATCHED;
+			grep_stream_stop(grep_stream);
+			grep_stream = NULL;
 		}
 		cleanup();
-		return G.grep_matched ? EXIT_SUCCESS : EXIT_FAILURE;
+		return (G.gflags & F_GREP_MATCHED) ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
 	cleanup();
 	return EXIT_SUCCESS;

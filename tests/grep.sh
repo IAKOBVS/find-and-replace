@@ -1,21 +1,23 @@
 #!/bin/sh
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-PDRV="$PROG_DIR/tests/pty_drive.py"
+PDRIVE="$PROG_DIR/tests/pty_drive"
 
 # pdrive [--out FILE] [--rc FILE] [--noready] [--phase HEX[@MS] ...] [--tail TEXT] -- [tool args...]
+# C driver: waits for READY when given. A stray --ready/--noready token is an
+# unknown opt and is ignored by the C parser, so call sites can stay as-is;
+# we only re-add the default marker when the caller did not manage readiness.
 pdrive() {
-	use_ready=1
+	have_marker=0
 	for a in "$@"; do
 		case "$a" in
-			--ready) use_ready=0 ;;
-			--noready) use_ready=0 ;;
+			--ready|--noready|--ready=*) have_marker=1 ;;
 		esac
 	done
-	if [ "$use_ready" -eq 1 ]; then
+	if [ "$have_marker" -eq 0 ]; then
 		set -- --ready '-- [INSERT] --' "$@"
 	fi
-	python3 "$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
+	"$PDRIVE" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
 }
 
 strip_ansi() {

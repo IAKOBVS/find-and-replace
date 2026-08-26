@@ -1,15 +1,16 @@
 # find-and-replace
 
 Multi-file C CLI tool (common header `common.h` + `main.c`, `files.c`,
-`process.c`, `confirm.c`, ~1100 lines) for fixed-string or regex
+`process.c`, `confirm.c`, `pipeline.c`) for fixed-string or regex
 find-and-replace on files, with optional recursion, regex filtering of
-basenames via `--include`/`--exclude`, and in-place editing with backups.
+basenames via `--include`/`--exclude`, in-place editing with backups, and a
+threaded recursive pipeline (traversal thread + worker pool).
 
 ## Setup & build
 
 ```
 sudo ./setup   # clones lib/jstring from github.com/IAKOBVS/jstring, compiles + tests it
-./compile      # parallel-compiles the 4 translation units, links against lib/jstring/build/lib/libjstr.so
+./compile      # parallel-compiles the 7 translation units (with -pthread), links against lib/jstring/build/lib/libjstr.so
 sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 ```
 
@@ -17,20 +18,23 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 - `COVERAGE=1 ./compile` builds with `--coverage` flags for `gcov` analysis
 - `./update` runs `git restore && ./update` inside `lib/jstring` (update jstring dependency)
 - `./generate-readme` rebuilds `README.md` from `.README.md` + usage strings in `main.c`
-- `./coverage` builds with coverage, runs all tests, and runs `gcov` on all 4 units
+- `./coverage` builds with coverage, runs all tests, and runs `gcov` on all units
 
 ## Source layout
 
 | File | Purpose |
 |---|---|
-| `common.h` | Includes, shared macros (`DIE_IF`, `S_LEN`, `R`, MODE_* bits), core types (`mode_ty`, `match_ty`, `matches_ty`, `file_ty`, `files_ty`, `global_ty`), `extern global_ty G` |
-| `files.h` | `args_ty`, `matcher_args_ty`, `FILE_CACHE_MAX`/`FILES_CAP_MIN`, prototypes for `xstat`, `file_exists`, `callback_file`, `matcher`, `file_pushback` |
-| `process.h` | Prototypes for `process_buffer`, `process_file` |
+| `common.h` | Includes, shared macros (`DIE_IF`, `S_LEN`, `R`, MODE_* bits), core types (`mode_ty`, `match_ty`, `matches_ty`, `file_ty`, `files_ty`, `proc_err_ty`, `global_ty`), `extern global_ty G` |
+| `async.h`/`async.c` | Concurrency substrate — the only TU touching pthreads: bounded FIFO channel (`async_chan_new/send/recv/close/free`) + fixed-size thread pool (`async_pool_start/size/wait`) |
+| `files.h` | `args_ty`, `FILE_CACHE_MAX`/`FILES_CAP_MIN`, prototypes for `xstat`, `file_exists`, `callback_file`, `matcher`, `file_pushback` |
+| `process.h` | Prototypes for `process_buffer`, `process_file`, `pipeline_process_file`, `report_changed_file`, grep scanners; `PIPELINE_F_*` flags |
 | `confirm.h` | Colors/prompt macros, `MATCHES_CAP_MIN`, prototype for `confirm_scan_file` |
-| `main.c` | `main`, flag/file-argument parsing, `usage`, `compile`, `init_defaults`, `cleanup`; defines `G` |
+| `pipeline.h` | `pipeline_run_dir()` — threaded recursive pipeline (traversal thread + workers + ordered emitter) |
+| `main.c` | `main`, flag/file-argument parsing (`-j/--jobs`), `usage`, `compile`, `init_defaults`, `cleanup`; defines `G` |
 | `files.c` | `xstat`, `file_exists`, ftw callbacks (`callback_file`, `matcher`), `ft_ty` |
-| `process.c` | `process_buffer`, `process_file` |
+| `process.c` | `process_buffer`, `process_file`, `replace_engine`, `pipeline_process_file`, grep scan/collect |
 | `confirm.c` | `-c` scan/preview: `confirm_scan_file`, `match_pushback`, `file_pushback`, line helpers, printers |
+| `pipeline.c` | Job structs, `traverse_callback`/`producer_main`, `worker_main`, ordered emitter loop — pure async-substrate client (no pthreads) |
 
 Related functions share a namespace prefix (`process_*`, `match_*`, `line_*`,
 `print_*`, `file_*`, `confirm_*`); types keep their original names (`mode_ty`,
@@ -58,11 +62,18 @@ TUs are non-static; their prototypes live in the module headers
   jstring `./test` run, before linking the tool.
 - **`sudo ./install` in `lib/jstring` is optional**: the tool compiles against
   the pinned `lib/jstring/build/{include,lib}`, so `/usr/local` copies may be stale.
+- **Threads**: recursive directory processing runs through a producer/consumer
+  pipeline (`pipeline.c`): one traversal thread walks via `jstr_io_ftw`, N
+  worker threads process files, and the main thread emits all output strictly
+  in traversal order (byte-identical to a sequential run). Workers never touch
+  stdio or `exit()` — fatal errors render into `proc_err_ty` and the emitter
+  reports them. `-j/--jobs` sets the worker count (default nproc). Confirm
+  mode and the grep TUI keep the sequential walk. Build/link needs `-pthread`.
 
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (14 suites, 308 tests)
+./compile && tests/run.sh   # all deterministic suites (15 suites)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 ./tests/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
@@ -87,6 +98,7 @@ TUs are non-static; their prototypes live in the module headers
 | Confirm | `tests/confirm.sh` | 87 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
 | Grep | `tests/grep.sh` | 28 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
 | Unit | `tests/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
+| Threading | `tests/threading.sh` | 15 | Threaded pipeline: `-j/--jobs` parsing, `-j1`/`-j8` correctness, stdout ordering identical to sequential across job counts, grep recursion threaded, error accumulation, backup collision message/rc preserved, 300-file stress, deep tree, backrefs |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
@@ -962,6 +974,207 @@ omitted marker, exercising both fixed-string and regex scan paths) and
 `t_confirm_interactive_no_pre_tui_dump` (asserts no preview line precedes the
 alt-screen enter `\x1b[?1049h`, byte-ordered via awk `index()`). confirm 80→82→86,
 total **308**.
+
+## Session 14: threaded recursive pipeline (traversal thread + worker pool)
+
+Recursive directory processing (`-r` on a dir, non-interactive modes) now runs
+through a producer/consumer pipeline in the new `pipeline.c`/`pipeline.h`:
+
+- **Threads**: one traversal thread runs `jstr_io_ftw` and enqueues each
+  regular file into a bounded ring (64 slots, strict FIFO — slot is
+  `enqueued % PIPELINE_RING_MAX`, producer waits until that exact slot
+  drained); N worker threads (`-j/--jobs`, default nproc, clamped 1..64)
+  read/replace/write files with private buffers recycled through a free list;
+  the main thread is the **emitter**, releasing all output strictly in
+  traversal order so stdout/stderr bytes match a sequential run exactly.
+- **Worker safety**: workers never touch stdio and never call `exit()`.
+  `process_buffer` gained a trailing `proc_err_ty *pe` param (NULL keeps the
+  historic die-on-the-spot behavior for stdin/CLI-file/pass-2 callers);
+  `write_inplace_backup/temp` render fatal messages (backup collision, temp
+  file failures, OOM) into it and return ERR. The emitter prints captured
+  messages in order, sets `fatal`, stops immediately (mirroring sequential
+  immediate-exit), and main exits with `err_exit_code()` before the
+  err_count report. Counted per-file failures (unreadable file etc.)
+  accumulate into `args_ty.err_count` exactly like `callback_file` did.
+- **Engine split**: `replace_engine()` extracted from `process_buffer`
+  (regex/fixed replacement + newline fixup); `pipeline_process_file()`
+  (exported from process.c) implements the worker-side flow (short-circuit,
+  reserve/read/binary-skip, grep scan to buffer via new `grep_scan_to_buf`,
+  in-place write or stdout payload handoff via buffer swap). The shared
+  line matcher was factored into `grep_match_at` (used by `grep_scan_file`,
+  `grep_collect_file`, `grep_scan_to_buf`). `report_changed_file` moved to
+  the emitter.
+- **Scope**: only `-r` + directory args thread off. Confirm mode and the
+  grep TUI (tty collect) keep the sequential ftw; stdin and CLI file args
+  are untouched. `-j1` still pipelines (one worker).
+- **Bug found under load (TDD stress)**: the first ring design let the
+  producer fill ANY empty slot while the emitter indexed `ring[emitted % CAP]`
+  assuming slot==seq mapping — under contention the mapping drifted and the
+  emitter could wait forever on a slot holding a later job after all workers
+  exited. Reproduced with ~20 concurrent instances (6/20 hung), traced via a
+  temporary `PIPELINE_TRACE` build, fixed by making the ring strict FIFO
+  (producer writes only to its own cursor slot). Verified with 168 concurrent
+  300-file pipeline runs, 0 hangs.
+
+### Verification
+
+- `tests/threading.sh` (new suite, 15 tests): flag parsing (`-j4`, `--jobs 3`,
+  `-j0`/`-jx`/missing-arg rejected), in-place correctness at `-j1`/`-j4`,
+  stdout recursion byte-identical between `-j8`, sequential and across runs,
+  threaded grep rc/output, error accumulation with chmod-000 mid-tree, backup
+  collision message + untouched original under `-j4`, 300-file stress, deep
+  tree, regex backrefs.
+- Full run: **15 suites green** (323 deterministic tests), fuzz 250 iterations
+  0 crashes; `./coverage` works with `pipeline.c` added to its SRCS.
+- README regenerated (`./generate-readme`) for the `-j/--jobs` usage block.
+
+## Session 15: pipeline rewritten on the async substrate (channels + pool)
+
+`pipeline.c` no longer touches pthreads directly: `async.c`/`async.h` were
+rewritten from an unused TUI-scan sketch into the project's concurrency
+substrate — the only TU allowed to call pthreads:
+
+- **`async_chan_*`**: bounded FIFO of `void *`; send blocks while full, recv
+  blocks while empty; close wakes everyone (senders fail, receivers drain
+  then get NULL). **`async_pool_start/size/wait`**: fixed-size pool running
+  one function per thread.
+- **Architecture** (unchanged semantics): main thread = UI/emitter (owns all
+  stdio, emits strictly in traversal order via a seq-keyed hold buffer); one
+  traversal thread (`producer_main`, ftw → enqueue); N processing threads
+  (`worker_main`). Channels: `work_ch` (depth 64) → workers; results →
+  `done_ch`; buffer shells recycle through `buf_ch` (128 shells, two per
+  in-flight job). Producer closes `work_ch` after ftw; each worker sends a
+  NULL sentinel before exiting; the emitter stops at nwork sentinels with an
+  empty hold buffer. Fatal jobs make the emitter close `work_ch` early and
+  suppress remaining output.
+- **Two deadlocks found & fixed under stress (192 concurrent runs green)**:
+  1. Every job was enqueued with `seq = 0` — after the first emit the cursor
+     advanced past the rest and they sat held forever.
+  2. Workers took a job BEFORE waiting for buffer shells: a worker could
+     hold the exact job the emitter's cursor needed while all 128 shells
+     were attached to out-of-order held results (hold-and-wait cycle).
+     Fixed by acquiring the shell pair first, so waiting happens empty-
+     handed; shutdown pushes both shells back on the NULL job.
+
+## Session 16: tty collect threaded; TUI opens instantly on huge trees
+
+The interactive editors (tty `-c` pass-1 and tty `--grep`) no longer walk the
+tree sequentially: `pipeline_collect_dir()` runs the same async pipeline in
+collect mode — traversal thread + N reader threads load files, and the UI
+thread caches them into `G.files` via `file_pushback` strictly in traversal
+order (binary files skipped, unreadable counted into err_count). 10k files
+open the TUI in ~0.3s. New helpers: `pipeline_read_file()` (read + binary
+sniff, tri-state) in process.c; `PIPELINE_F_SKIP` job flag. CLI dry-run
+(`-c` without a tty) keeps the strict sequential scan+preview. Tests:
+`t_grep_tui_threaded_collect`, `t_confirm_tui_threaded_collect` (pty-driven,
+17 threading tests total). Bugs found while wiring: the collect branch lost
+its buffer swap (empty contents cached — TUI showed 0 matches) and an earlier
+debug-strip had silently eaten `replace_engine`'s fixed-string call.
+
+## Session 17: grep TUI un-frozen on huge caches (O(matches) stats, whole-buffer scan)
+
+Two independent hotspots made the grep TUI appear to hang on large trees
+(1.8GB / 1600 files / 54.8M matching lines: ~108s to first render, minutes
+per redraw):
+
+1. **Per-line matcher calls**: the rescan looped over every line calling
+   `jstr_memmem_exec` once per line (~85M calls). Replaced with
+   `grep_iter_fixed()` (process.c): one whole-buffer Two-Way pass, line
+   boundaries derived per hit, hits spanning a newline rejected (preserving
+   per-line grep semantics), line counter rolled incrementally. Rescan went
+   107s -> 1.5s. `grep_scan_file`, `grep_collect_file` and
+   `grep_scan_to_buf` all consume the iterator via small callbacks; regex
+   mode keeps the per-line loop (`grep_match_at`) for anchor semantics.
+2. **Quadratic unique-file count in the stats line**: files x matches double
+   loop (1600 x 54.8M = ~88 billion pointer compares per redraw). Match
+   records are appended file-by-file, so a single pass counting fname-pointer
+   run boundaries is exact and O(matches).
+
+Also fixed en route: `grep_scan_to_buf`'s no-match exit code (any_matched was
+set from !err, breaking --grep rc=1) — caught by
+`t_grep_recursive_threaded_nomatch`. Verification: pty-driven huge-tree
+lifecycle (collect + render + Ctrl-D quit) 108s -> **2.6s**; full 15 suites +
+fuzz green; pipeline stress clean. Debugging notes: `clock()` traces print
+CPU time (misleading with threads); pty_drive's timeout path leaves children
+alive — kill strays before benchmarking.
+
+## Session 18: process-lifetime thread pool; parallel TUI rescans; regression fixes
+
+- **Persistent pool**: `async.c` gained a task-based pool
+  (`async_pool_start/size/submit/barrier/stop`): N threads loop forever on an
+  internal task channel; `async_pool_barrier()` waits for pending==0. Main()
+  starts it once (`default_jobs()` workers) with `atexit(async_pool_stop)`,
+  so top/htop shows a stable thread count for the whole process instead of
+  transitory spawn/join per run. Pipeline runs and grep rescans submit onto
+  it; submissions fall back to inline execution if the pool is absent.
+- **Traversal thread**: the pipeline's producer must run CONCURRENTLY with
+  the workers (they block until it feeds them), so queueing it as a pool
+  task deadlocked when jobs+1 > pool size (-j8 on a 6-core box). It now gets
+  its own joinable thread via `async_thread_run/join`.
+- **Parallel grep rescan**: `grep_rescan` splits the file cache into
+  contiguous chunks, scans them on pool workers into private lists
+  (`grep_collect_file_into`, no global state), and merges in file order --
+  byte-identical output, all cores used. Regex mode stays sequential.
+- **Regression caught by review**: a debug-restore had rolled main.c back to
+  the pre-collect routing (tty TUIs walked sequentially again -- the "only
+  one thread" report). Restored: tty CONFIRM/grep-collect ->
+  `pipeline_collect_dir`; CLI dry-run -> sequential ftw; else processing
+  pipeline.
+- Verified: 12/12 concurrent 300-file pipelines, 15 suites + fuzz green,
+  NLWP stable at nproc during idle TUI, collect+render on 1.8GB/1600 files
+  ~1s.
+
+## Session 19: global bool state packed into one bitmask byte
+
+The eight int-as-bool fields of `global_ty` (`compiled_regex`,
+`matches_found`, `grep_matched`, `confirm_pass`, `grep_collect`,
+`have_include`, `have_exclude`, `preview_full`) became one
+`unsigned char gflags` with `F_*` bit macros (common.h). The struct is a
+singleton so bytes saved are trivial; the win is cache-line density on the
+hot global during scanning. `compiled_cflags` stays an int. Deliberately NOT
+converted: `pipeline.c` job_ty's err/state/flags (a few bytes against a
+4 KiB inline path per slot) and `proc_err_ty.set` (trailing a 4 KiB buffer).
+All 15 suites + fuzz + concurrent-pipeline stress green.
+
+## Parallelism model (normative)
+
+Three fixed roles for the whole process lifetime; every mode maps onto one
+of two data-flow shapes.
+
+**Roles**
+- **UI thread** (main): sole owner of stdout/stderr/the terminal; never
+  blocks on file I/O; wakes on a ~150ms poll tick to adopt finished work.
+- **Traversal thread** (one, dedicated `async_thread_run`): walks dirs and
+  enqueues paths. Must run concurrently with workers -- they block on its
+  FIFO feed, so it can never be a pool task (measured deadlock, -j > nproc).
+- **Worker pool** (nproc by default, `-j` overrides): persistent task
+  executors started once in main with atexit stop. All heavy work submits
+  here: read+scan tasks, chunked rescans.
+
+**Shapes**
+- **Pipeline** (ordered output required; non-tty `-r` replace/grep/collect):
+  work_ch(depth 64) -> workers -> done_ch -> orderer/emitter releases results
+  strictly in traversal order. Backpressure bounds memory.
+- **Stream** (live display; tty `--grep`): same trio plus generation epochs.
+  Readers scan-at-load and emit capped match records (line bytes copied into
+  per-file arenas; contents are NOT cached). The orderer publishes ordered
+  batches; the UI adopts on ticks. FIND/filter edits bump the generation --
+  stale in-flight jobs are discarded without I/O and the tree is re-walked
+  (search never modifies files). Exact totals are kept even when records hit
+  retention caps (100k/file, arena cap, 2M adopted).
+
+**Mode mapping**
+| mode | shape |
+|---|---|
+| non-tty `-r` (replace / grep print / CLI dry-run collect) | pipeline |
+| tty `--grep`, fixed-string AND regex | stream |
+| tty `-c` | pipeline-collect (blocking; needs contents for pass-2 edits) |
+
+**Known extension**: parallelism granularity is per-file; a single giant
+file scans on one core. Byte-range chunking of big files (overlap by
+find_len-1 + line-number fixup at boundaries) is the designed next step if
+large single files matter. Pool sizing note: nproc suits CPU-bound scans;
+cold-cache I/O may benefit from -j up to 2x cores.
 
 ## Test-Driven Development (TDD) Guidelines
 

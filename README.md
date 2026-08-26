@@ -34,6 +34,10 @@ Options:
     backup suffix before confirming.
   -r
     Recurse on the directories in FILES.
+  -j N, --jobs N
+    Use N worker threads to process files while a separate thread
+    traverses directories in recursive mode. Output order is
+    preserved. Defaults to the number of online CPUs.
   --include REGEX
     Only process files whose basename matches REGEX when -r is used.
     The pattern is a POSIX regex (BRE by default; -E/-I apply).

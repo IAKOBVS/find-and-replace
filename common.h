@@ -6,7 +6,7 @@
 
 #define JSTR_PANIC                 0
 #define JSTR_USE_UNLOCKED_IO_READ  1
-#define JSTR_USE_UNLOCKED_IO_WRITE 1
+#define JSTR_USE_UNLOCKED_IO_WRITE 0
 
 /* CLI applications exit immediately after use, so buffer frees before exit are
  * pure overhead. 0 = skip freeing in cleanup() paths (leaks are reclaimed by
@@ -26,6 +26,30 @@
  * rm[] array holds 10 entries). Every nmatch argument and the tool's own
  * match_ty.rm[] must stay in sync with this. */
 #define JSTR_NMATCH_MAX 10
+
+/* Upper bound for -j/--jobs (worker threads in the recursive pipeline). */
+#define FAR_JOBS_MAX 1024
+
+/* Fatal per-file error capture for the threaded pipeline. Workers may not
+ * touch stdio streams or call exit(), so processing functions take a
+ * proc_err_ty: non-NULL means "render the fatal message here and return
+ * JSTR_RET_ERR"; NULL keeps the historic die-on-the-spot behavior. The buffer
+ * must hold the longest messages verbatim (they embed a full PATH_MAX path). */
+#define PROC_ERR_MSG_MAX (JSTR_IO_PATH_MAX + 256)
+typedef struct proc_err_ty {
+	char buf[PROC_ERR_MSG_MAX];
+	int set;
+} proc_err_ty;
+
+/* Boolean state bits for global_ty.gflags. */
+#define F_COMPILED_RE   (1u << 0) /* find matcher compiled as a regex (else Two-Way) */
+#define F_MATCHES_FOUND (1u << 1) /* -c dry-run pass produced at least one match */
+#define F_GREP_MATCHED  (1u << 2) /* --grep saw a matching line (drives exit code; -q still sets it) */
+#define F_CONFIRM_PASS  (1u << 3) /* inside the -c dry-run pass */
+#define F_GREP_COLLECT  (1u << 4) /* tty --grep caches files for the interactive TUI */
+#define F_HAVE_INCLUDE  (1u << 5) /* include filter compiled and active */
+#define F_HAVE_EXCLUDE  (1u << 6) /* exclude filter compiled and active */
+#define F_PREVIEW_FULL  (1u << 7) /* -c preview scan hit its budget ("N+ matches" stats) */
 
 /* Die-with-message helper used in every translation unit. */
 #define DIE_IF_PRINT(x, fmt, ...)                      \
@@ -121,25 +145,13 @@ typedef struct global_ty {
 	int cflags;
 	/* State under which the find matcher was last compiled, so compile()
 	 * recompiles when flags flip between files mid-command-line. */
-	int compiled_regex;
 	int compiled_cflags;
-	/* Set by the scan pass when at least one match exists; decides whether the
-	 * confirmation prompt is shown. */
-	unsigned int matches_found;
-	/* 1 when --grep found at least one matching line; decides the exit code
-	 * (0 vs 1). Set even with -q, which only silences the line output. */
-	int grep_matched;
-	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
-	 * instead of modifying files. Reset before the second (real) pass. */
-	int confirm_pass;
-	/* 1 when --grep + tty: process_file caches files instead of printing
-	 * so the grep TUI can scan them interactively. */
-	int grep_collect;
-	/* 1 when --include/--exclude were given (or edited in the confirm TUI);
-	 * guards use of the compiled include_re/exclude_re. */
-	int have_include;
-	int have_exclude;
+	/* Boolean state packed into one byte so the hot fields of the global sit
+	 * on fewer cache lines during scanning. */
+	unsigned char gflags;
 	size_t n;
+	/* Worker count for the threaded recursive pipeline (-j/--jobs). */
+	size_t jobs;
 	size_t bak_suffix_len;
 	/* Frequently-touched growable state, grouped so the match list and the
 	 * preview buffers' headers sit on the same cache lines while scanning. */
@@ -162,10 +174,6 @@ typedef struct global_ty {
 	/* Dynamic tracking of preview line usage in interactive mode */
 	size_t preview_lines_printed;
 	size_t max_preview_lines;
-	/* 1 when the -c preview scan hit its match budget and stopped early; the
-	 * TUI stats then show "N+ matches, M+ files" and scanning further files
-	 * stops. Reset by each preview consumer before it scans. */
-	int preview_full;
 	/* Scroll state for the interactive preview. */
 	size_t scroll_offset;
 	size_t selected_line;

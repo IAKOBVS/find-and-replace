@@ -66,7 +66,7 @@ JSTR_IO_FTW_FUNC(callback_file, ftw, args)
 {
 	args_ty *const a = (args_ty *)(void *)args;
 	if (jstr_chk(process_file(a->t, a->buf, ftw->dirpath, ftw->dirpath_len, ftw->st, a->find, a->find_len, a->rplc, a->rplc_len))) {
-		if (G.confirm_pass && (G.mode & MODE_CONFIRM))
+		if ((G.gflags & F_CONFIRM_PASS) && (G.mode & MODE_CONFIRM))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 		++a->err_count;
 	}
@@ -79,10 +79,10 @@ JSTR_IO_FTW_FUNC(callback_file, ftw, args)
  * or the confirm TUI, so the args pointer is unused. */
 JSTR_IO_FTW_FUNC_MATCH(matcher, fname, fname_len, args)
 {
-	if (G.have_include)
+	if (G.gflags & F_HAVE_INCLUDE)
 		if (jstr_re_match_len(&G.include_re, fname, fname_len, 0) != JSTR_RE_RET_NOERROR)
 			return 1;
-	if (G.have_exclude)
+	if (G.gflags & F_HAVE_EXCLUDE)
 		if (jstr_re_match_len(&G.exclude_re, fname, fname_len, 0) == JSTR_RE_RET_NOERROR)
 			return 1;
 	return 0;

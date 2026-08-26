@@ -28,7 +28,9 @@ wait_suites() {
 	count=0
 }
 
-for suite in basic flags regex files errors io escape empty misc edge-cases complex confirm unit grep; do
+suites="basic flags regex files errors io escape empty misc edge-cases complex confirm unit grep threading"
+nsuites=$(echo $suites | wc -w)
+for suite in $suites; do
 	"$DIR/${suite}.sh" &
 	jobs="$jobs $suite:$!"
 	count=$((count + 1))
@@ -38,5 +40,5 @@ for suite in basic flags regex files errors io escape empty misc edge-cases comp
 done
 [ "$count" -gt 0 ] && wait_suites
 
-printf '\n=== %d suites passed, %d failed ===\n' $((14 - fail)) "$fail"
+printf '\n=== %d suites passed, %d failed ===\n' $((nsuites - fail)) "$fail"
 exit $((fail > 0 ? 1 : 0))

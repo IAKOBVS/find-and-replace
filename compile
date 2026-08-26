@@ -7,15 +7,16 @@ if [ "$COVERAGE" = "1" ] && [ -z "$COVERAGE_OUTDIR" ]; then
 else
 	OUTDIR="${COVERAGE_OUTDIR:-$DIR}"
 fi
-SRCS='main.c files.c process.c confirm.c procfs.c vim.c'
+SRCS='async.c main.c files.c process.c confirm.c pipeline.c procfs.c vim.c'
 NP=$(nproc 2>/dev/null || echo 2)
 CFLAGS="-I$DIR/lib/jstring/build/include -march=native -O2 -Wpedantic -pedantic -Wall -Wextra -Wuninitialized -Wshadow -Warray-bounds -Wnull-dereference -Wformat -Wunused -Wwrite-strings"
 JSTR_LIB="-L$DIR/lib/jstring/build/lib -Wl,-rpath,$DIR/lib/jstring/build/lib"
-LFLAGS=""
+LFLAGS="-pthread"
 CC=$(readlink "$(command -v cc)")
+CFLAGS="-pthread $CFLAGS"
 if [ "$COVERAGE" = "1" ]; then
-	CFLAGS="-O0 --coverage"
-	LFLAGS="--coverage"
+	CFLAGS="-O0 --coverage -pthread"
+	LFLAGS="--coverage -pthread"
 fi
 # Headers and library come from the pinned lib/jstring checkout.
 export DIR OUTDIR INC CFLAGS

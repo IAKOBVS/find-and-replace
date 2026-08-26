@@ -4,6 +4,9 @@
 #include "confirm.h"
 #include "files.h"
 #include "process.h"
+#include "async.h"
+#include "pipeline.h"
+#include <poll.h>
 #include "vim.h"
 #include <termios.h>
 #include <signal.h>
@@ -650,7 +653,7 @@ confirm_scan_regex_matches(const jstr_ty *R buf, size_t find_len, size_t match_b
 			const size_t m_start = off + (size_t)rm[0].rm_so;
 			const size_t m_end = off + (size_t)rm[0].rm_eo;
 			if (jstr_unlikely(G.matches.size >= match_budget)) {
-				G.preview_full = 1;
+				G.gflags |= F_PREVIEW_FULL;
 				break;
 			}
 			match_pushback(&G.matches, m_start, m_end, rm);
@@ -688,7 +691,7 @@ confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, cons
 		const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
 		const size_t m_end = m_start + find_len;
 		if (jstr_unlikely(G.matches.size >= match_budget)) {
-			G.preview_full = 1;
+			G.gflags |= F_PREVIEW_FULL;
 			break;
 		}
 		match_pushback(&G.matches, m_start, m_end, NULL);
@@ -745,7 +748,7 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 	else
 		confirm_scan_fixed_matches(t, buf, find, find_len, match_budget);
 	if (G.matches.size > 0) {
-		G.matches_found = 1;
+		G.gflags |= F_MATCHES_FOUND;
 		/* Merge all matches that lie on the same line into a single block so
 		 * each changed source line is shown once. */
 		line_counter_ty lc;
@@ -841,9 +844,9 @@ interactive_compile_include_exclude(const char *include, size_t include_len,
                                     char *err_buf, size_t err_size)
 {
 	if (include_len == 0) {
-		if (G.have_include) {
+		if (G.gflags & F_HAVE_INCLUDE) {
 			jstr_re_free(&G.include_re);
-			G.have_include = 0;
+			G.gflags &= ~F_HAVE_INCLUDE;
 		}
 	} else {
 		char tmp[128];
@@ -853,12 +856,12 @@ interactive_compile_include_exclude(const char *include, size_t include_len,
 			snprintf(err_buf, err_size, "Invalid Include regex: %s", tmp);
 			return JSTR_RET_ERR;
 		}
-		G.have_include = 1;
+		G.gflags |= F_HAVE_INCLUDE;
 	}
 	if (exclude_len == 0) {
-		if (G.have_exclude) {
+		if (G.gflags & F_HAVE_EXCLUDE) {
 			jstr_re_free(&G.exclude_re);
-			G.have_exclude = 0;
+			G.gflags &= ~F_HAVE_EXCLUDE;
 		}
 	} else {
 		char tmp[128];
@@ -868,7 +871,7 @@ interactive_compile_include_exclude(const char *include, size_t include_len,
 			snprintf(err_buf, err_size, "Invalid Exclude regex: %s", tmp);
 			return JSTR_RET_ERR;
 		}
-		G.have_exclude = 1;
+		G.gflags |= F_HAVE_EXCLUDE;
 	}
 	return JSTR_RET_SUCC;
 }
@@ -886,10 +889,10 @@ interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
 	const char *base = jstr_memrchr(file->fname, '/', file->fname_len);
 	base = (base != NULL && *(base + 1)) ? base + 1 : file->fname;
 	const size_t base_len = (size_t)(file->fname + file->fname_len - base);
-	if (G.have_include)
+	if (G.gflags & F_HAVE_INCLUDE)
 		if (jstr_re_match_len(&G.include_re, base, base_len, 0) != JSTR_RE_RET_NOERROR)
 			return 0;
-	if (G.have_exclude)
+	if (G.gflags & F_HAVE_EXCLUDE)
 		if (jstr_re_match_len(&G.exclude_re, base, base_len, 0) == JSTR_RE_RET_NOERROR)
 			return 0;
 	return 1;
@@ -1123,6 +1126,20 @@ confirm_read_key(char *out_char)
 	return KEY_NONE;
 }
 
+/* Blocking read with a poll deadline: KEY_TIMEOUT when no key arrives in
+ * TIMEOUT_MS, letting streaming loops redraw on timer ticks. */
+static confirm_key_ty
+confirm_read_key_timeout(char *out_char, int timeout_ms)
+{
+	struct pollfd pfd;
+	pfd.fd = STDIN_FILENO;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	if (poll(&pfd, 1, timeout_ms) <= 0)
+		return KEY_TIMEOUT;
+	return confirm_read_key(out_char);
+}
+
 static char err_buf[256];
 static char last_err_buf[256];
 
@@ -1140,11 +1157,11 @@ render_tui_header_and_stats(size_t start_control_line, size_t total_matches, siz
 	/* Statistics line */
 	(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
 	print_size_t(total_matches);
-	if (G.preview_full)
+	if (G.gflags & F_PREVIEW_FULL)
 		(void)jstr_io_putchar('+');
 	(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
 	print_size_t(files_matched);
-	if (G.preview_full)
+	if (G.gflags & F_PREVIEW_FULL)
 		(void)jstr_io_putchar('+');
 	(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
 	term_clear_line_end();
@@ -1234,6 +1251,37 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 }
 
 /* Re-scan all cached files and collect matching lines into G.grep_lines. */
+#define GREP_PARALLEL_MIN_FILES 64
+
+/* One parallel-rescan slice of the file cache. */
+typedef struct grep_chunk_ty {
+	const jstr_twoway_ty *t;
+	file_ty *files;
+	size_t files_size;
+	size_t begin;
+	size_t end;
+	const char *find;
+	size_t find_len;
+	const jstr_ty *files_buf;
+	grep_lines_ty lines;
+	int matched;
+} grep_chunk_ty;
+
+static void
+grep_chunk_task(void *R arg)
+{
+	grep_chunk_ty *const c = (grep_chunk_ty *)arg;
+	for (size_t k = c->begin; k < c->end && k < c->files_size; ++k) {
+		file_ty *const file = &c->files[k];
+		if (!interactive_file_pass(file, c->files_buf))
+			continue;
+		const size_t before = c->lines.size;
+		grep_collect_file_into(&c->lines, c->t, &file->content, file->fname, file->fname_len, c->find, c->find_len);
+		if (c->lines.size > before)
+			c->matched = 1;
+	}
+}
+
 static void
 grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
             jstr_ty *R files_buf, jstr_ty *R include_buf, jstr_ty *R exclude_buf)
@@ -1243,13 +1291,13 @@ grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
 	const char *exc = (exclude_buf && exclude_buf->size > 0 && exclude_buf->data) ? exclude_buf->data : "";
 	if (interactive_compile_include_exclude(inc, include_buf ? include_buf->size : 0, exc, exclude_buf ? exclude_buf->size : 0, ie_err, sizeof(ie_err)) != JSTR_RET_SUCC) {
 		/* Invalid regex: skip filtering (show all files). */
-		if (G.have_include) {
+		if (G.gflags & F_HAVE_INCLUDE) {
 			jstr_re_free(&G.include_re);
-			G.have_include = 0;
+			G.gflags &= ~F_HAVE_INCLUDE;
 		}
-		if (G.have_exclude) {
+		if (G.gflags & F_HAVE_EXCLUDE) {
 			jstr_re_free(&G.exclude_re);
-			G.have_exclude = 0;
+			G.gflags &= ~F_HAVE_EXCLUDE;
 		}
 	}
 	G.grep_lines.size = 0;
@@ -1259,11 +1307,58 @@ grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
 	const size_t find_len = find_buf->size;
 	far_compile(t, ptn, find_len, "", 0, 1, NULL, 0);
 	if (!(G.mode & MODE_USE_REGEX) || (G.mode & MODE_COMPILED)) {
-		for (unsigned int k = 0; k < G.files.size; ++k) {
-			file_ty *file = &G.files.data[k];
-			if (!interactive_file_pass(file, files_buf))
-				continue;
-			grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
+		if (!(G.mode & MODE_USE_REGEX) && async_pool_size() > 1 && G.files.size >= GREP_PARALLEL_MIN_FILES) {
+			/* Parallel rescan: the cache is split into contiguous chunks,
+			 * each worker scans its slice into a private list, and the UI
+			 * thread merges them in file order -- byte-identical to the
+			 * sequential walk, using every core on large caches. */
+			size_t nchunks = async_pool_size();
+			if (nchunks > G.files.size / GREP_PARALLEL_MIN_FILES + 1)
+				nchunks = G.files.size / GREP_PARALLEL_MIN_FILES + 1;
+			grep_chunk_ty *const chunks = (grep_chunk_ty *)malloc(nchunks * sizeof(*chunks));
+			DIE_IF(chunks == NULL, "%s", "Out of memory.\n");
+			const size_t per = (G.files.size + nchunks - 1) / nchunks;
+			for (size_t c = 0; c < nchunks; ++c) {
+				chunks[c].t = t;
+				chunks[c].files = G.files.data;
+				chunks[c].files_size = G.files.size;
+				chunks[c].begin = c * per;
+				chunks[c].end = (chunks[c].begin + per < G.files.size) ? chunks[c].begin + per : G.files.size;
+				chunks[c].find = ptn;
+				chunks[c].find_len = find_len;
+				chunks[c].files_buf = files_buf;
+				chunks[c].lines.data = NULL;
+				chunks[c].lines.cap = 0;
+				chunks[c].lines.size = 0;
+				chunks[c].matched = 0;
+			}
+			for (size_t c = 0; c < nchunks; ++c)
+				async_pool_submit(grep_chunk_task, &chunks[c]);
+			async_pool_barrier();
+			for (size_t c = 0; c < nchunks; ++c) {
+				if (chunks[c].matched)
+					G.gflags |= F_GREP_MATCHED;
+				if (chunks[c].lines.size > 0) {
+					for (size_t j = 0; j < chunks[c].lines.size; ++j) {
+						if (G.grep_lines.size >= G.grep_lines.cap) {
+							G.grep_lines.cap = (G.grep_lines.cap == 0 ? 32 : G.grep_lines.cap * 2);
+							grep_line_ty *const tmp = (grep_line_ty *)realloc(G.grep_lines.data, G.grep_lines.cap * sizeof(grep_line_ty));
+							DIE_IF(!tmp, "%s", "Out of memory allocating grep results.\n");
+							G.grep_lines.data = tmp;
+						}
+						G.grep_lines.data[G.grep_lines.size++] = chunks[c].lines.data[j];
+					}
+				}
+				free(chunks[c].lines.data);
+			}
+			free(chunks);
+		} else {
+			for (unsigned int k = 0; k < G.files.size; ++k) {
+				file_ty *file = &G.files.data[k];
+				if (!interactive_file_pass(file, files_buf))
+					continue;
+				grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
+			}
 		}
 	}
 	G.total_lines = G.grep_lines.size;
@@ -1271,12 +1366,87 @@ grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
 		G.selected_line = G.total_lines - 1;
 }
 
+/* Streaming adoption: move one finished batch into the UI lists. Records
+ * are capped at GREP_STREAM_MAX_RECORDS; beyond it only the exact totals
+ * from the stream grow. Names/arena blocks referenced by adopted records
+ * are registered by the caller and freed when results are discarded. */
+#define GREP_STREAM_MAX_RECORDS 2000000u
+
+static void
+grep_stream_adopt(grep_stream_ty *R s, int *done_out,
+                  char ***reg_names, size_t *reg_names_n, size_t *reg_names_cap)
+{
+	grep_batch_ty batch;
+	int done = 0;
+	size_t got;
+	got = grep_stream_poll(s, &batch, &done);
+	if (done)
+		*done_out = 1;
+	if (got > 0) {
+		if (G.grep_lines.size < GREP_STREAM_MAX_RECORDS) {
+			const size_t room = GREP_STREAM_MAX_RECORDS - G.grep_lines.size;
+			const size_t take = (batch.n < room) ? batch.n : room;
+			if (G.grep_lines.size + take > G.grep_lines.cap) {
+				G.grep_lines.cap = (G.grep_lines.cap == 0 ? 64 : G.grep_lines.cap);
+				while (G.grep_lines.cap < G.grep_lines.size + take)
+					G.grep_lines.cap *= 2;
+				grep_line_ty *const tmp = (grep_line_ty *)realloc(G.grep_lines.data, G.grep_lines.cap * sizeof(*tmp));
+				DIE_IF(tmp == NULL, "%s", "Out of memory allocating grep results.\n");
+				G.grep_lines.data = tmp;
+			}
+			memcpy(G.grep_lines.data + G.grep_lines.size, batch.lines, take * sizeof(*batch.lines));
+			G.grep_lines.size += take;
+			G.total_lines = G.grep_lines.size;
+		}
+		for (size_t k = 0; k < batch.names_n; ++k) {
+			if (*reg_names_n == *reg_names_cap) {
+				*reg_names_cap = *reg_names_cap ? *reg_names_cap * 2 : 16;
+				char **const rn = (char **)realloc(*reg_names, *reg_names_cap * sizeof(**reg_names));
+				DIE_IF(rn == NULL, "%s", "Out of memory.\n");
+				*reg_names = rn;
+			}
+			(*reg_names)[(*reg_names_n)++] = batch.names[k];
+		}
+	} else {
+		for (size_t k = 0; k < batch.names_n; ++k)
+			free(batch.names[k]);
+	}
+	free(batch.lines);
+	(void)got;
+}
+
+static void
+grep_registries_free(char **reg_names, size_t reg_names_n)
+{
+	for (size_t k = 0; k < reg_names_n; ++k)
+		free(reg_names[k]);
+}
+
+/* Re-arm the background scan after an edit to find/filters. */
+static void
+grep_stream_reconfigure(grep_stream_ty *R s, const jstr_ty *R find_buf,
+                        const jstr_ty *R files_buf, const jstr_ty *R include_buf,
+                        const jstr_ty *R exclude_buf)
+{
+	grep_stream_configure(s,
+	                      (find_buf->size > 0) ? find_buf->data : "",
+	                      find_buf->size,
+	                      (files_buf->size > 0) ? files_buf->data : NULL,
+	                      files_buf->size,
+	                      (include_buf->size > 0) ? include_buf->data : NULL,
+	                      include_buf->size,
+	                      (exclude_buf->size > 0) ? exclude_buf->data : NULL,
+	                      exclude_buf->size,
+	                      (G.mode & MODE_USE_REGEX), G.cflags, G.eflags);
+}
+
 jstr_ret_ty
 grep_interactive_loop(jstr_twoway_ty *R t,
                        jstr_ty *R find_buf,
                        jstr_ty *R files_buf,
                        jstr_ty *R include_buf,
-                       jstr_ty *R exclude_buf)
+                       jstr_ty *R exclude_buf,
+                       grep_stream_ty *R stream)
 {
 	setup_terminal();
 	if (jstr_unlikely(!term_initialized))
@@ -1289,6 +1459,10 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 	int needs_redraw = 1;
 	int needs_rescan = 1;
 	int first_draw = 1;
+	int stream_done = !stream; /* legacy mode is born done */
+	char **gs_names = NULL;
+	size_t gs_names_n = 0;
+	size_t gs_names_cap = 0;
 	size_t active_field = 0;
 	size_t cursors[GREP_FIELD_COUNT];
 	cursors[GREP_FIELD_FIND] = find_buf->size;
@@ -1308,7 +1482,8 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			}
 
 			if (needs_rescan) {
-				grep_rescan(t, find_buf, files_buf, include_buf, exclude_buf);
+				if (stream == NULL)
+					grep_rescan(t, find_buf, files_buf, include_buf, exclude_buf);
 				needs_rescan = 0;
 			}
 
@@ -1353,23 +1528,34 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			(void)jstr_io_putchar('\n');
 
 			(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
-			print_size_t(G.grep_lines.size);
+			if (stream != NULL)
+				print_size_t((size_t)grep_stream_matches(stream));
+			else
+				print_size_t(G.grep_lines.size);
 			(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
-			/* Count unique files. */
+			/* Count unique files: match records are appended file-by-file,
+			 * so one pass over the run boundaries of the fname pointer is
+			 * O(matches); the old files-x-matches double loop was quadratic
+			 * and froze the TUI on large caches (54M matches x 1600 files).
+			 * NULL is never a valid fname, so it cannot seed a false run. */
 			size_t files_matched = 0;
-			for (unsigned int k = 0; k < G.files.size; ++k) {
-				int found = 0;
-				for (size_t j = 0; j < G.grep_lines.size; ++j) {
-					if (G.grep_lines.data[j].fname == G.files.data[k].fname) {
-						found = 1;
-						break;
-					}
+			const char *prev_fname = NULL;
+			for (size_t j = 0; j < G.grep_lines.size; ++j) {
+				if (G.grep_lines.data[j].fname != prev_fname) {
+					prev_fname = G.grep_lines.data[j].fname;
+					++files_matched;
 				}
-				if (found)
-					files_matched++;
 			}
-			print_size_t(files_matched);
-			(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
+			if (stream != NULL) {
+				print_size_t(grep_stream_files_done(stream));
+				(void)jstr_io_fwrite("/", 1, 1, stdout);
+				print_size_t(grep_stream_files_total(stream));
+				(void)jstr_io_fwrite((!grep_stream_is_done(stream)) ? " files (collecting)" : " files",
+				                     1, (!grep_stream_is_done(stream)) ? S_LEN(" files (collecting)") : S_LEN(" files"), stdout);
+			} else {
+				print_size_t(files_matched);
+				(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
+			}
 			term_clear_line_end();
 			(void)jstr_io_putchar('\n');
 
@@ -1401,9 +1587,26 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 		}
 
 		char c;
-		confirm_key_ty key = confirm_read_key(&c);
-		if (key == KEY_NONE)
-			continue;
+		confirm_key_ty key;
+		if (stream != NULL) {
+			key = confirm_read_key_timeout(&c, 150);
+			if (key == KEY_TIMEOUT) {
+				const size_t before = G.grep_lines.size;
+				grep_stream_adopt(stream, &stream_done, &gs_names, &gs_names_n, &gs_names_cap);
+				if (G.grep_lines.size != before || stream_done) {
+					if (stream_done && !needs_rescan)
+						first_draw = 0;
+					needs_redraw = 1;
+					G.selected_line = 0;
+					G.scroll_offset = 0;
+				}
+				continue;
+			}
+		} else {
+			key = confirm_read_key(&c);
+			if (key == KEY_NONE)
+				continue;
+		}
 
 		jstr_ty *active_buf = grep_field_buf(find_buf, files_buf, include_buf, exclude_buf, active_field);
 
@@ -1478,8 +1681,19 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->size--;
 				active_buf->data[active_buf->size] = '\0';
 				needs_redraw = 1;
-				if (grep_field_affects_recompile(active_field))
+				if (grep_field_affects_recompile(active_field)) {
+					if (stream != NULL) {
+						grep_registries_free(gs_names, gs_names_n);
+						gs_names_n = 0;
+						grep_stream_reconfigure(stream, find_buf, files_buf, include_buf, exclude_buf);
+						stream_done = 0;
+						G.grep_lines.size = 0;
+						G.total_lines = 0;
+						G.selected_line = 0;
+						G.scroll_offset = 0;
+					}
 					needs_rescan = 1;
+				}
 			}
 			break;
 
@@ -1503,8 +1717,19 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]--;
 				needs_redraw = 1;
-				if (grep_field_affects_recompile(active_field))
+				if (grep_field_affects_recompile(active_field)) {
+					if (stream != NULL) {
+						grep_registries_free(gs_names, gs_names_n);
+						gs_names_n = 0;
+						grep_stream_reconfigure(stream, find_buf, files_buf, include_buf, exclude_buf);
+						stream_done = 0;
+						G.grep_lines.size = 0;
+						G.total_lines = 0;
+						G.selected_line = 0;
+						G.scroll_offset = 0;
+					}
 					needs_rescan = 1;
+				}
 			}
 			break;
 
@@ -1513,8 +1738,19 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				jstr_empty_j(active_buf);
 				cursors[active_field] = 0;
 				needs_redraw = 1;
-				if (grep_field_affects_recompile(active_field))
+				if (grep_field_affects_recompile(active_field)) {
+					if (stream != NULL) {
+						grep_registries_free(gs_names, gs_names_n);
+						gs_names_n = 0;
+						grep_stream_reconfigure(stream, find_buf, files_buf, include_buf, exclude_buf);
+						stream_done = 0;
+						G.grep_lines.size = 0;
+						G.total_lines = 0;
+						G.selected_line = 0;
+						G.scroll_offset = 0;
+					}
 					needs_rescan = 1;
+				}
 			}
 			break;
 
@@ -1642,9 +1878,9 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					G.max_preview_lines = 1;
 
 				/* If compile succeeded, run previews on all cached files */
-				G.matches_found = 0;
+				G.gflags &= ~F_MATCHES_FOUND;
 				G.preview_lines_printed = 0;
-				G.preview_full = 0;
+				G.gflags &= ~F_PREVIEW_FULL;
 				for (unsigned int k = 0; k < G.files.size; ++k) {
 					file_ty *file = &G.files.data[k];
 					/* File filtering by the Files substring filter and the
@@ -1661,13 +1897,13 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				/* The match budget ran out: further files would only feed a
 				 * preview that is already full. Stop scanning so a -g global
 				 * scan on a large tree stays cheap per keystroke. */
-				if (G.preview_full)
+				if (G.gflags & F_PREVIEW_FULL)
 					break;
 				}
 				G.total_lines = G.preview_lines_printed;
 				if (G.selected_line >= G.total_lines && G.total_lines > 0)
 					G.selected_line = G.total_lines - 1;
-			if (G.preview_lines_printed >= G.max_preview_lines || G.preview_full) {
+			if (G.preview_lines_printed >= G.max_preview_lines || (G.gflags & F_PREVIEW_FULL)) {
 				(void)jstr_io_fwrite("... (some previews omitted)", 1, S_LEN("... (some previews omitted)"), stdout);
 				term_clear_line_end();
 				(void)jstr_io_putchar('\n');

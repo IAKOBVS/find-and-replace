@@ -142,14 +142,14 @@ struct async_pool_ty {
 	pthread_cond_t cv_idle;
 };
 
-static struct async_pool_ty P;
+static struct async_pool_ty P = { .mu = PTHREAD_MUTEX_INITIALIZER };
 
 static void *
 pool_worker(void *arg)
 {
-	(void)arg;
+	async_chan_ty *const tasks = (async_chan_ty *)arg;
 	for (;;) {
-		async_task_ty *task = (async_task_ty *)async_chan_recv(P.tasks);
+		async_task_ty *task = (async_task_ty *)async_chan_recv(tasks);
 		if (task == NULL)
 			break;
 		task->fn(task->arg);
@@ -195,49 +195,47 @@ int
 async_pool_start(size_t nwork)
 {
 	size_t k;
-	if (P.nwork > 0)
+	pthread_mutex_lock(&P.mu);
+	if (P.nwork > 0) {
+		pthread_mutex_unlock(&P.mu);
 		return 0;
+	}
+	pthread_mutex_unlock(&P.mu);
+
 	if (nwork == 0)
 		nwork = 1;
-	P.tasks = async_chan_new(nwork + 64);
-	if (jstr_unlikely(P.tasks == NULL))
+	async_chan_ty *const tasks = async_chan_new(nwork + 64);
+	if (jstr_unlikely(tasks == NULL))
 		return -1;
-	P.thr = (pthread_t *)malloc(nwork * sizeof(pthread_t));
-	if (jstr_unlikely(P.thr == NULL)) {
-		async_chan_free(P.tasks);
-		P.tasks = NULL;
-		return -1;
-	}
-	P.nwork = 0;
-	P.pending = 0;
-	P.stopped = 0;
-	if (jstr_unlikely(pthread_mutex_init(&P.mu, NULL) != 0)) {
-		free(P.thr);
-		P.thr = NULL;
-		async_chan_free(P.tasks);
-		P.tasks = NULL;
+	pthread_t *const thr = (pthread_t *)malloc(nwork * sizeof(pthread_t));
+	if (jstr_unlikely(thr == NULL)) {
+		async_chan_free(tasks);
 		return -1;
 	}
 	if (jstr_unlikely(pthread_cond_init(&P.cv_idle, NULL) != 0)) {
-		pthread_mutex_destroy(&P.mu);
-		free(P.thr);
-		P.thr = NULL;
-		async_chan_free(P.tasks);
-		P.tasks = NULL;
+		free(thr);
+		async_chan_free(tasks);
 		return -1;
 	}
+
+	pthread_mutex_lock(&P.mu);
+	P.tasks = tasks;
+	P.thr = thr;
+	P.nwork = 0;
+	P.pending = 0;
+	P.stopped = 0;
 	for (k = 0; k < nwork; ++k) {
-		if (pthread_create(&P.thr[k], NULL, pool_worker, NULL) != 0)
+		if (pthread_create(&P.thr[k], NULL, pool_worker, tasks) != 0)
 			break;
 		++P.nwork;
 	}
-	if (P.nwork == 0) {
+	const size_t started = P.nwork;
+	pthread_mutex_unlock(&P.mu);
+
+	if (started == 0) {
 		pthread_cond_destroy(&P.cv_idle);
-		pthread_mutex_destroy(&P.mu);
-		free(P.thr);
-		P.thr = NULL;
-		async_chan_free(P.tasks);
-		P.tasks = NULL;
+		free(thr);
+		async_chan_free(tasks);
 		return -1;
 	}
 	return 0;
@@ -246,14 +244,21 @@ async_pool_start(size_t nwork)
 size_t
 async_pool_size(void)
 {
-	return P.nwork;
+	pthread_mutex_lock(&P.mu);
+	const size_t sz = P.nwork;
+	pthread_mutex_unlock(&P.mu);
+	return sz;
 }
 
 void
 async_pool_submit(async_task_fn fn, void *arg)
 {
 	async_task_ty *task;
-	if (jstr_unlikely(P.nwork == 0 || P.stopped)) {
+	pthread_mutex_lock(&P.mu);
+	const int no_pool = (P.nwork == 0 || P.stopped);
+	pthread_mutex_unlock(&P.mu);
+
+	if (jstr_unlikely(no_pool)) {
 		/* No pool: run inline so callers stay correct without threads. */
 		fn(arg);
 		return;
@@ -294,21 +299,29 @@ void
 async_pool_stop(void)
 {
 	size_t k;
-	if (P.nwork == 0 || P.stopped)
-		return;
 	pthread_mutex_lock(&P.mu);
+	if (P.nwork == 0 || P.stopped) {
+		pthread_mutex_unlock(&P.mu);
+		return;
+	}
 	P.stopped = 1;
+	const size_t nwork = P.nwork;
+	pthread_t *const thr = P.thr;
+	async_chan_ty *const tasks = P.tasks;
 	pthread_mutex_unlock(&P.mu);
-	async_chan_close(P.tasks);
-	for (k = 0; k < P.nwork; ++k)
-		pthread_join(P.thr[k], NULL);
-	async_chan_free(P.tasks);
+
+	async_chan_close(tasks);
+	for (k = 0; k < nwork; ++k)
+		pthread_join(thr[k], NULL);
+
+	pthread_mutex_lock(&P.mu);
+	async_chan_free(tasks);
 	P.tasks = NULL;
-	free(P.thr);
+	free(thr);
 	P.thr = NULL;
 	P.nwork = 0;
 	pthread_cond_destroy(&P.cv_idle);
-	pthread_mutex_destroy(&P.mu);
+	pthread_mutex_unlock(&P.mu);
 }
 
 /* Mutex wrapper. */

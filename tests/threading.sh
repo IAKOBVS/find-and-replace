@@ -50,6 +50,19 @@ t_jobs_long_form() {
 	[ "$rc" -eq 0 ] && [ "$n" -eq 6 ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc n=$n" > "$td/result"
 }
 
+t_jobs_high_count_deadlock() {
+	td=$1; make_tree "$td/tree" 2 4
+	if command -v timeout >/dev/null 2>&1; then
+		timeout 10 "$PROG" old new -g -i -j64 -r "$td/tree" 2>/dev/null
+		rc=$?
+	else
+		"$PROG" old new -g -i -j64 -r "$td/tree" 2>/dev/null
+		rc=$?
+	fi
+	n=$(grep -r --include='*.txt' -c 'new' "$td/tree" | awk -F: '{s+=$NF} END{print s}')
+	[ "$rc" -eq 0 ] && [ "$n" -eq 16 ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc n=$n" > "$td/result"
+}
+
 t_jobs_zero_rejected() {
 	td=$1; rc=0; "$PROG" foo bar -j0 -r /dev/null > /dev/null 2>&1 || rc=$?
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -j0 should exit non-zero (rc=$rc)" > "$td/result"
@@ -226,6 +239,7 @@ TESTS="
 t_jobs_flag_basic
 t_jobs_one
 t_jobs_long_form
+t_jobs_high_count_deadlock
 t_jobs_zero_rejected
 t_jobs_nan_rejected
 t_jobs_missing_arg

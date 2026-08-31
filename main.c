@@ -264,8 +264,9 @@ set_jobs_or_die(const char *val)
 
 /* Handle single-character combined flags (e.g., -EI, -gR). */
 static void
-parse_single_flags(const char *arg)
+parse_single_flags(char **argv, unsigned int *i_ptr, char *is_flag)
 {
+	const char *arg = argv[*i_ptr];
 	for (const char *argp = arg + 1; *argp != '\0'; ++argp) {
 		switch (*argp) {
 		case 'E':
@@ -301,11 +302,17 @@ parse_single_flags(const char *arg)
 			G.mode |= MODE_PRINT_CHANGES;
 			break;
 		case 'j':
-			if (argp[1] == '\0') {
+			if (argp[1] != '\0') {
+				set_jobs_or_die(argp + 1);
+				return;
+			}
+			(*i_ptr)++;
+			if (jstr_nullchk(argv[*i_ptr])) {
 				fprintf(stderr, "find-and-replace: invalid flag '-j' (missing worker count, e.g. -j4). See usage below:\n\n%s", usage);
 				exit(err_exit_code());
 			}
-			set_jobs_or_die(argp + 1);
+			is_flag[*i_ptr] = 1;
+			set_jobs_or_die(argv[*i_ptr]);
 			return;
 		case 'q':
 			G.mode |= MODE_QUIET;
@@ -328,13 +335,14 @@ parse_single_flags(const char *arg)
 
 /* Handle double-dash flags (e.g. --include, --exclude, --grep). */
 static int
-parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
+parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags, char *is_flag)
 {
 	const char *arg = argv[*i_ptr];
 	if (!strcmp(arg + 2, "include")) {
 		(*i_ptr)++;
 		if (jstr_nullchk(argv[*i_ptr]))
 			jstr_errdie("%s: %s", argv[0], "no argument after --include flag.\n");
+		is_flag[*i_ptr] = 1;
 		G.include_pat = argv[*i_ptr];
 		const int re_ret = jstr_re_comp(&G.include_re, argv[*i_ptr], G.cflags);
 		if (jstr_unlikely(re_ret != JSTR_RE_RET_NOERROR)) {
@@ -348,6 +356,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 		(*i_ptr)++;
 		if (jstr_nullchk(argv[*i_ptr]))
 			jstr_errdie("%s: %s", argv[0], "no argument after --exclude flag.\n");
+		is_flag[*i_ptr] = 1;
 		G.exclude_pat = argv[*i_ptr];
 		const int re_ret = jstr_re_comp(&G.exclude_re, argv[*i_ptr], G.cflags);
 		if (jstr_unlikely(re_ret != JSTR_RE_RET_NOERROR)) {
@@ -375,6 +384,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, int *end_of_flags)
 		(*i_ptr)++;
 		if (jstr_nullchk(argv[*i_ptr]))
 			jstr_errdie("%s: %s", argv[0], "no argument after --jobs flag.\n");
+		is_flag[*i_ptr] = 1;
 		set_jobs_or_die(argv[*i_ptr]);
 		return 1;
 	}
@@ -657,12 +667,6 @@ main(int argc, char **argv)
 		fprintf(fp, "%s", usage);
 		return ret;
 	}
-	/* Persistent worker pool for the whole process lifetime: traversal,
-	 * processing and TUI rescans all submit onto it (async.h). */
-	DIE_IF(async_pool_start(default_jobs()) != 0, "%s", "Can't start the worker thread pool.\n");
-	atexit(async_pool_stop);
-	atexit(grep_stream_atexit_stop);
-
 	args_ty a = { 0 };
 	jstr_twoway_ty t;
 	a.t = &t;
@@ -689,8 +693,12 @@ main(int argc, char **argv)
 		a.rplc_len = 0;
 		arg_start = 2;
 	}
-	for (i = arg_start; ARG; ++i) {
+	char *is_flag = (char *)calloc((size_t)argc, sizeof(char));
+	DIE_IF(is_flag == NULL, "%s", "Out of memory.\n");
+
+	for (i = arg_start; i < (unsigned int)argc; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
+			is_flag[i] = 1;
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
@@ -702,12 +710,24 @@ main(int argc, char **argv)
 				continue;
 			}
 			if (ARG[1] == '-') {
-				if (parse_long_flag(argv, &i, &end_of_flags))
+				if (parse_long_flag(argv, &i, &end_of_flags, is_flag))
 					continue;
 			}
-			parse_single_flags(ARG);
+			parse_single_flags(argv, &i, is_flag);
 			continue;
 		}
+	}
+
+	/* Persistent worker pool for the whole process lifetime: traversal,
+	 * processing and TUI rescans all submit onto it (async.h). Start after
+	 * flag parsing so G.jobs (-j/--jobs) sets the thread pool size. */
+	DIE_IF(async_pool_start(G.jobs) != 0, "%s", "Can't start the worker thread pool.\n");
+	atexit(async_pool_stop);
+	atexit(grep_stream_atexit_stop);
+
+	for (i = arg_start; i < (unsigned int)argc; ++i) {
+		if (is_flag[i])
+			continue;
 		G.mode |= MODE_HAVE_FILES;
 		if (a.find_len == 0) {
 			if (G.mode & MODE_GREP)
@@ -717,6 +737,7 @@ main(int argc, char **argv)
 		}
 		if (ARG[0] == '-' && ARG[1] == '\0') {
 			if (jstr_chk(process_stdin_arg(&a, &t, argv[0]))) {
+				free(is_flag);
 				cleanup();
 				exit(err_exit_code());
 			}
@@ -724,6 +745,7 @@ main(int argc, char **argv)
 		}
 		process_target_arg(ARG, &a, &t);
 	}
+	free(is_flag);
 	if (jstr_unlikely((G.mode & MODE_GREP) && (G.mode & (MODE_CONFIRM | MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))) {
 		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i or -c.\n");
 		exit(err_exit_code());

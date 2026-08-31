@@ -783,12 +783,12 @@ confirm_scan_file(const jstr_twoway_ty *R t,
 				G.new_ranges.data[idx].start = G.new_buf.size;
 
 				if (G.mode & MODE_USE_REGEX && backref) {
-					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len);
+					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len, JSTR_NMATCH_MAX);
 					jstr_empty_j(&G.rplc_buf);
 					DIE_IF(jstr_chk(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1)), "%s", "Out of memory.\n");
 					DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
 					const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
-					jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len);
+					jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len, JSTR_NMATCH_MAX);
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, G.rplc_buf.data, rplcwbackref_len)), "%s", "Out of memory.\n");
 				} else {
 					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, rplc, rplc_len)), "%s", "Out of memory.\n");

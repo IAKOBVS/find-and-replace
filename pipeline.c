@@ -258,6 +258,8 @@ pipeline_run(const char *R dir, args_ty *R a, size_t nwork, int *fatal_out, int 
 	nwork = (nwork == 0) ? 1 : nwork;
 	if (nwork > PIPELINE_DEPTH)
 		nwork = PIPELINE_DEPTH;
+	if (async_pool_size() > 0 && nwork > async_pool_size())
+		nwork = async_pool_size();
 
 	ctx.a = a;
 	ctx.dir = dir;
@@ -290,7 +292,7 @@ pipeline_run(const char *R dir, args_ty *R a, size_t nwork, int *fatal_out, int 
 	 * processing tasks are submitted per directory run; the threads
 	 * themselves never exit until async_pool_stop() at process end. */
 	if (jstr_unlikely(async_pool_size() == 0))
-		DIE_IF(async_pool_start(nwork + 1) != 0, "%s", "Can't start the worker thread pool.\n");
+		DIE_IF(async_pool_start(nwork) != 0, "%s", "Can't start the worker thread pool.\n");
 	for (size_t k = 0; k < nwork; ++k)
 		async_pool_submit(worker_task, &ctx);
 	/* Traversal runs on its own thread: pool slots are all occupied by
@@ -447,6 +449,8 @@ gs_nwork(size_t nwork)
 		nwork = 1;
 	if (nwork > PIPELINE_DEPTH)
 		nwork = PIPELINE_DEPTH;
+	if (async_pool_size() > 0 && nwork > async_pool_size())
+		nwork = async_pool_size();
 	return nwork;
 }
 

@@ -13,7 +13,7 @@ TMPDIR=$(mktemp -d) && trap 'rm -rf "$TMPDIR"' EXIT
 
 # Build with coverage flags — .gcno lands in TMPDIR
 echo "=== Building with coverage support ==="
-COVERAGE=1 COVERAGE_OUTDIR="$TMPDIR" ./compile
+COVERAGE=1 BUILD_DIR="$TMPDIR" ./compile
 
 # Copy binary so tests can find it at the usual path
 cp "$TMPDIR/$PROG" "$DIR/$PROG"

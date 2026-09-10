@@ -4,7 +4,6 @@
 
 PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROG="$PROG_DIR/find-and-replace"
-export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 N=${1:-500}
 ncpu() { nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4; }
 _cpu=$(ncpu)

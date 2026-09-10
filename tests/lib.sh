@@ -1,6 +1,5 @@
 PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROG="$PROG_DIR/find-and-replace"
-export LD_LIBRARY_PATH="$PROG_DIR/lib/jstring/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 PASS=0
 FAIL=0
 

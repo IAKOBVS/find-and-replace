@@ -1,11 +1,14 @@
 #!/bin/sh
-if [ ! -f /usr/local/lib/libjstr.so ]; then
-	if [ "$(id -u)" -eq 0 ]; then
-		if mkdir lib/jstring; then
-			git clone https://github.com/IAKOBVS/jstring lib/jstring
-		fi
-		cd ./lib/jstring && git pull && ./compile && ./install
-	else
-		echo "Please run the command with sudo, as it requires permission to install to /usr/local"
-	fi
+
+# Update the globally-installed jstring dependency to the latest upstream.
+# Runs with sudo (writes to /usr/local).
+if [ "$(id -u)" -ne 0 ]; then
+	echo "Please run the command with sudo, as it requires permission to install to /usr/local"
+	exit 1
 fi
+
+td=$(mktemp -d)
+trap 'rm -rf "$td"' EXIT
+git clone https://github.com/IAKOBVS/jstring "$td/jstring"
+cd "$td/jstring" || exit
+./compile && ./test && ./install

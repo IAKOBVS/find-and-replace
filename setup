@@ -1,4 +1,12 @@
 #!/bin/sh
-git clone https://github.com/IAKOBVS/jstring lib/jstring
-cd lib/jstring || exit
+
+# Install jstring globally (headers to /usr/local/include, lib to /usr/local/lib).
+# Uses a temp clone; run with sudo since it writes to /usr/local.
+set -e
+
+td=$(mktemp -d)
+trap 'rm -rf "$td"' EXIT
+git clone https://github.com/IAKOBVS/jstring "$td/jstring"
+cd "$td/jstring" || exit
 ./compile && ./test
+sudo ./install

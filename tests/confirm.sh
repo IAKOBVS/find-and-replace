@@ -1,7 +1,7 @@
 #!/bin/sh
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-PDRV="$PROG_DIR/tests/pty_drive.py"
+PDRV="$PROG_DIR/tests/pty_drive"
 
 # pdrive [--out FILE] [--rc FILE] [--noready] [--phase HEX[@MS] ...] [--tail TEXT] -- [tool args...]
 # Runs the tool under a pty, feeding --phase hex bytes (default 100ms sleep
@@ -19,7 +19,7 @@ pdrive() {
 	if [ "$use_ready" -eq 1 ]; then
 		set -- --ready '-- [INSERT] --' "$@"
 	fi
-	python3 "$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
+	"$PDRV" --prog "$PROG" --out "$td/out" --rc "$td/rc" "$@" >/dev/null 2>&1
 }
 
 t_confirm_yes() {

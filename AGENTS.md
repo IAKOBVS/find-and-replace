@@ -8,14 +8,22 @@ basenames via `--include`/`--exclude`, and in-place editing with backups.
 ## Setup & build
 
 ```
-sudo ./setup   # clones lib/jstring from github.com/IAKOBVS/jstring, compiles + tests it
-./compile      # parallel-compiles the 4 translation units, links against lib/jstring/build/lib/libjstr.so
+sudo ./setup   # installs jstring globally (headers to /usr/local/include, lib to /usr/local/lib)
+make           # or ./compile — build find-and-replace + the C pty test driver
 sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 ```
 
-- `./compile` compiles all `*.c` units **in parallel** (`cc -c ... &` + `wait`), then links
-- `COVERAGE=1 ./compile` builds with `--coverage` flags for `gcov` analysis
-- `./update` runs `git restore && ./update` inside `lib/jstring` (update jstring dependency)
+- The build system is a **Makefile** (`make`). `./compile` and `./test` are thin
+  wrappers that delegate to `make`:
+  - `./compile` → `make` (compiles the 6 TUs with `-MMD/-MP` dependency
+    tracking, links against the globally-installed `/usr/local/lib/libjstr.so`,
+    and builds the C pty test driver `tests/pty_drive` + `tests/test_pty_drive`)
+  - `./test [N]` → `make test FZ=[N]` (runs all suites, then `N` fuzz
+    iterations; `N` defaults to 250)
+  - `make COVERAGE=1` builds with `--coverage` flags for `gcov` analysis; use
+    `make clean` to force a rebuild after header changes
+- `./update` re-clones jstring from upstream and reinstalls it to `/usr/local`
+  (update the jstring dependency; run with sudo)
 - `./generate-readme` rebuilds `README.md` from `.README.md` + usage strings in `main.c`
 - `./coverage` builds with coverage, runs all tests, and runs `gcov` on all 4 units
 
@@ -41,23 +49,22 @@ TUs are non-static; their prototypes live in the module headers
 ## Key facts
 
 - **Only ANSI C features** - no VLAs, no `//` comments, no C99+ features beyond what POSIX requires
-- **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - linked via `lib/jstring/build/lib/libjstr.so`
-- **Include path**: `lib/jstring/build/include/` passed via `-I` (pinned checkout, not `/usr/local/include`)
+- **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - installed globally, linked via `/usr/local/lib/libjstr.so`
+- **Include path**: `/usr/local/include/` (global install; no local checkout)
 - **Code style**: no comments, SPDX MIT header, `clang-format off/on` around the usage string
 - **Brace style**: a single statement in `if`/`else`/`for`/`while`/`do` needs no wrapping braces (e.g. `if (x) return;`); braces are only used when the block has two or more statements. The statement must go on the **next line** — never on the same line as the condition (`if (x) return;` on one line is disallowed). In an `if`/`else if`/`else` chain, braces must be **uniform**: if one branch needs braces (two or more statements), then every branch gets braces — even the single-statement ones
-- **Python test scripts**: every function, parameter, and local variable must be
-  fully type annotated (PEP 484, `typing` imports). Verify with `mypy
-  tests/pty_drive.py` — the shared pty driver is mypy-clean.
+- **Interactive TUI pty driver**: the C binary `tests/pty_drive`
+  (built from `tests/pty_drive.c`) drives the interactive TUI tests via `pdrive`
+  in `confirm.sh`/`grep.sh`; `tests/test_pty_drive.sh` is its self-test.
+  No Python driver remains (`tests/pty_drive.py` was removed).
 - **Usage strings** are defined with `_(...)` macro calls in `main.c`; `generate-readme` parses these with `grep '_('`
-- `.gitignore` ignores `find-and-replace` binary, `*.o`, and `jstring/` (symlink/lib dir)
+- `.gitignore` ignores `find-and-replace` binary and `*.o`
 - **No linter/formatter** beyond compiler flags (`-Wall -Wextra -Wpedantic`)
 - **No CI** workflows
 - **Coding style / Performance**: Use `jstr_unlikely` for all error or unlikely execution paths to aid compiler branch prediction. Use `memcmp` instead of `strncmp` when key length is known and bounded to avoid unnecessary null-termination checks.
-- **jstring .so gotcha**: `lib/jstring/scripts/test` rebuilds `libjstr.so` with
-  `-fsanitize=address`. Re-run `lib/jstring/./compile` (non-ASan) after any
-  jstring `./test` run, before linking the tool.
-- **`sudo ./install` in `lib/jstring` is optional**: the tool compiles against
-  the pinned `lib/jstring/build/{include,lib}`, so `/usr/local` copies may be stale.
+- **jstring .so gotcha**: if you run jstring's own `./test` after installing it
+  globally from a source clone, re-run its `./compile` (non-ASan) and
+  `./install` — `scripts/test` rebuilds `libjstr.so` with `-fsanitize=address`.
 
 ## Tests
 
@@ -140,11 +147,11 @@ All 13 deterministic suites run in order via `tests/run.sh`, each suite's
 progressive per-test output streaming straight to the terminal (no log
 capture); each suite keeps its own internal batch-wait jobserver for
 test-level parallelism, and run.sh exits non-zero if any suite failed.
-Interactive TUI tests drive the binary through `tests/pty_drive.py` (typed
-driver, mypy-clean), which creates the pty, applies
-`--winsize` to the slave **before** forking (no race with the child's first
-render), feeds `--phase`/`--tail` keystrokes, and reports the child's real exit
-status (including a non-blocking reap + EIO-safe read on early marker-miss).
+Interactive TUI tests drive the binary through the **C** driver
+`tests/pty_drive` (built from `tests/pty_drive.c`), which creates the pty,
+applies `--winsize` to the slave **before** forking (no race with the child's
+first render), feeds `--phase`/`--tail` keystrokes, and reports the child's
+real exit status (including a non-blocking reap on early marker-miss).
 
 ### Coverage: 95.5% of executable lines
 
@@ -453,9 +460,9 @@ New file at `lib/jstring/tests/test-replace-edge.c` testing:
 ## Critical: How to implement the TODO
 
 ### Prerequisites
-- Set `LD_LIBRARY_PATH=lib/jstring/build/lib` before running the binary
+- jstring is installed globally (`/usr/local/include` + `/usr/local/lib`); no
+  local checkout or `LD_LIBRARY_PATH` needed
 - `./compile` builds; `COVERAGE=1 ./compile` builds with `--coverage`
-- Build copy headers at `build/include/jstr/` must stay in sync with `include/`
 
 ### Priority order for TODO items
 
@@ -962,6 +969,70 @@ omitted marker, exercising both fixed-string and regex scan paths) and
 `t_confirm_interactive_no_pre_tui_dump` (asserts no preview line precedes the
 alt-screen enter `\x1b[?1049h`, byte-ordered via awk `index()`). confirm 80→82→86,
 total **308**.
+
+## Session 19: Makefile is the build/test entry; async removed; C pty_drive is the only driver
+
+Build and test now go through the **Makefile**; the `./compile` and `./test`
+wrapper scripts are thin aliases over it (no parallel-`cc` shell logic, no
+`python3` invocation):
+
+- `./compile` → `make` (default target compiles the 6 TUs with `-MMD/-MP`
+  dependency tracking, links against the globally-installed
+  `/usr/local/lib/libjstr.so`, and builds the C pty driver `tests/pty_drive` +
+  its self-test `tests/test_pty_drive`).
+- `./test [N]` → `make test FZ=[N]` (run.sh + `N` fuzz iterations, default 250).
+
+**Async layer removed.** `async.c`, `async.h`, and `tests/async_unit.c` were
+deleted. They were dead code: the only TUs that referenced `async_chan_*` /
+`async_thread_*` were the removed files themselves (`nm -u` on every other TU
+shows no async or `pthread` undefined symbols), and `tests/unit.sh` had already
+been rewritten to test the meminfo shim instead of the channel. The Makefile
+dropped `async.c` from `SRCS` and the now-unneeded `-pthread` from `CFLAGS`/
+link. `tests/unit.sh` remains 6 meminfo tests.
+
+**C pty driver is the only driver.** All TUI tests now use the C binary
+`tests/pty_drive` (from `tests/pty_drive.c`). The `pdrive()` wrappers in
+`tests/confirm.sh` and `tests/grep.sh` invoke the binary directly
+(`"$PDRV" ...`), no `python3`. `tests/pty_drive.py` was removed.
+
+`tests/test_pty_drive.sh` (the driver's self-test) was updated to the C
+driver's semantics: after `--prog PROG --`, pass only the **arguments** (the
+driver injects argv[0]=PROG), not a repeated program name; the `--timeout` /
+`--ready-timeout` deadline kills a still-running child with SIGTERM, so the
+driver reports the real outcome `sig:15` rather than a `timeout` string
+(`timeout` is only written on spawn failure). Cat-based phase/tail tests now
+check the output content (`*ABC*`, `*hello*`) instead of relying on
+"cat exits when stdin closes".
+
+Verification: `make test FZ=60` → 14 suites, 0 failed, 60 fuzz iterations
+0 crashes; `tests/test_pty_drive.sh` → 18/18.
+
+## Session 20: global jstring; local checkout removed
+
+The tool now builds against the **globally-installed** jstring instead of a
+pinned `lib/jstring` checkout:
+
+- **Makefile**: `JSTRING_INC=/usr/local/include`, `JSTRING_LIB=/usr/local/lib`;
+  the `-Wl,-rpath` to the local build dir was dropped. `-ljstr` resolves to
+  `/usr/lib/libjstr.so → /usr/local/lib/libjstr.so`.
+- **`tests/lib.sh` / `tests/fuzz.sh`**: the `LD_LIBRARY_PATH=lib/jstring/build/lib`
+  exports were removed (no local checkout to point at).
+- **`setup` / `update`**: rewritten to clone jstring into a temp dir, compile +
+  test it, and `sudo ./install` to `/usr/local` (`update` requires root;
+  `setup` shells into `sudo`). No more in-tree `lib/` directory.
+- **`.gitignore`**: `jstring` entry removed.
+- **API drift fix**: the global jstring's backref engine always takes `nmatch`
+  (`JSTR_INTERNAL_NMATCH_PARAM` is unconditional, not gated on `JSTR_DEBUG`).
+  The two direct internal calls in `confirm.c` (`jstr_internal_re_rplcbackrefstrlen`
+  / `jstr_internal_re_rplcbackrefcpy`) now pass `JSTR_NMATCH_MAX` as the final
+  argument.
+
+`lib/jstring` was deleted from the tree. Historical session/bug notes that
+refer to it (Sessions 6–13, library-bug table) describe past state.
+
+Verification: clean `make`; `ldd ./find-and-replace` → `libjstr.so =>
+/usr/lib/libjstr.so`; `make test FZ=40` → 14 suites, 0 failed, 40 fuzz
+iterations, 0 crashes.
 
 ## Test-Driven Development (TDD) Guidelines
 

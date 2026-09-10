@@ -1,5 +1,11 @@
 #!/bin/sh
-./tests/run.sh
-rc=$?
-./tests/fuzz.sh "${1:-250}"
-exit $((rc || $?))
+
+# Run the full test suite (deterministic suites + fuzz). Thin wrapper over
+# make; pass a fuzz iteration count to override the default 250, e.g.
+#   ./test        # 250 fuzz iterations
+#   ./test 60     # 60 fuzz iterations
+#   make test FZ=60
+if [ "$1" -gt 0 ] 2>/dev/null; then
+	exec make test FZ="$1"
+fi
+exec make test

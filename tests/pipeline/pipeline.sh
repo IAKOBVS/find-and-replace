@@ -15,6 +15,55 @@ t_pipeline_spsc_unit() {
 	fi
 }
 
+t_pipeline_spmc_unit() {
+	td=$1
+	if [ ! -x "$PROG_DIR/tests/pipeline/spmc_unit" ]; then
+		echo "FAIL: tests/pipeline/spmc_unit missing (run make)" > "$td/result"
+		return
+	fi
+	if "$PROG_DIR/tests/pipeline/spmc_unit" > "$td/out" 2>&1; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: spmc unit: $(cat "$td/out")" > "$td/result"
+	fi
+}
+
+t_pipeline_multi_worker_inplace() {
+	td=$1; mkdir -p "$td/sub"
+	for i in $(seq 1 200); do printf 'foo\n' > "$td/sub/f$i"; done
+	"$PROG" foo bar -i -r -j 4 "$td/sub" 2>/dev/null
+	bad=0
+	for f in "$td"/sub/f*; do
+		[ "$(cat "$f")" = 'bar' ] || bad=$((bad + 1))
+	done
+	[ "$bad" -eq 0 ] && echo PASS > "$td/result" || echo "FAIL: $bad files not replaced" > "$td/result"
+}
+
+t_pipeline_multi_worker_explicit_batch() {
+	td=$1; mkdir -p "$td/sub"
+	for i in $(seq 1 100); do printf 'foo\n' > "$td/sub/f$i"; done
+	set -- "$td"/sub/f*
+	"$PROG" foo bar -i -j 4 "$@" 2>/dev/null
+	bad=0
+	for f in "$td"/sub/f*; do
+		[ "$(cat "$f")" = 'bar' ] || bad=$((bad + 1))
+	done
+	[ "$bad" -eq 0 ] && echo PASS > "$td/result" || echo "FAIL: $bad explicit files not replaced" > "$td/result"
+}
+
+t_pipeline_multi_worker_grep() {
+	td=$1; mkdir -p "$td/sub"
+	for i in $(seq 1 100); do printf 'hit %s\n' "$i" > "$td/sub/f$i"; done
+	n=$("$PROG" hit x --grep -r -j 4 "$td/sub" 2>/dev/null | wc -l)
+	[ "$n" -eq 100 ] && echo PASS > "$td/result" || echo "FAIL: got $n grep lines" > "$td/result"
+}
+
+t_pipeline_j_invalid() {
+	td=$1
+	rc=0; "$PROG" a b -j 0 < /dev/null > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -j 0 accepted" > "$td/result"
+}
+
 t_pipeline_multi_root_order() {
 	td=$1; mkdir -p "$td/r1" "$td/r2"
 	printf 'x1\n' > "$td/r1/a"
@@ -282,6 +331,11 @@ t_pipeline_confirm_noninteractive() {
 
 TESTS="
 t_pipeline_spsc_unit
+t_pipeline_spmc_unit
+t_pipeline_multi_worker_inplace
+t_pipeline_multi_worker_explicit_batch
+t_pipeline_multi_worker_grep
+t_pipeline_j_invalid
 t_pipeline_multi_root_order
 t_pipeline_recursive_inplace
 t_pipeline_recursive_backup

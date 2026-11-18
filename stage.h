@@ -32,6 +32,7 @@ typedef struct process_result_ty {
 typedef enum {
 	FAR_ROOT_DIR,
 	FAR_ROOT_FILE,
+	FAR_ROOT_FILES,
 	FAR_ROOT_STDIN,
 	FAR_ROOT_MEM
 } far_root_kind_ty;
@@ -92,6 +93,11 @@ typedef struct grep_cfg_ty {
 	int eflags;
 } grep_cfg_ty;
 
+typedef struct far_path_stat_ty {
+	const char *path;
+	struct stat st;
+} far_path_stat_ty;
+
 typedef struct far_job_ty far_job_ty;
 typedef struct far_result_ty far_result_ty;
 typedef struct root_ctx_ty root_ctx_ty;
@@ -108,6 +114,7 @@ struct far_job_ty {
 
 struct far_result_ty {
 	unsigned long seq;
+	size_t total;
 	far_res_kind_ty kind;
 	char *path;
 	size_t path_len;
@@ -126,10 +133,16 @@ struct root_ctx_ty {
 	struct stat st;
 	const file_ty *const *mem_files;
 	size_t mem_count;
+	const far_path_stat_ty *file_args;
+	size_t file_arg_count;
 	args_ty *a;
 	jstr_twoway_ty *t;
 	atomic_bool cancel;
 	atomic_size_t total;
+	atomic_size_t jobs_done;
+	atomic_size_t workers_done;
+	atomic_bool eos_taken;
+	atomic_bool eos_sent;
 	atomic_int ftw_ret;
 	atomic_size_t prod_errs;
 	unsigned long seq;

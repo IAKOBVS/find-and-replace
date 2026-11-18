@@ -1439,16 +1439,18 @@ terminal_rows(void)
 static void
 ui_drain_root(root_ctx_ty *R root)
 {
-	if (root != NULL)
+	if (root != NULL) {
 		atomic_store_explicit(&root->cancel, true, memory_order_release);
-	for (;;) {
-		far_result_ty *res = pipeline_done_recv();
-		if (res == NULL)
-			break;
-		const int eos = (res->kind == FAR_RES_EOS);
-		ui_result_free(res);
-		if (eos)
-			break;
+		while (atomic_load_explicit(&root->workers_done, memory_order_acquire) <
+		       pipeline_worker_count()) {
+			struct timespec ts = { 0, 1000000 };
+			nanosleep(&ts, NULL);
+		}
+	}
+	for (size_t w = 0; w < pipeline_worker_count(); ++w) {
+		far_result_ty *res;
+		while ((res = pipeline_done_try_recv(w)) != NULL)
+			ui_result_free(res);
 	}
 }
 

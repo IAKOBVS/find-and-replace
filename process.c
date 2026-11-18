@@ -4,10 +4,13 @@
 #include "process.h"
 #include "io.h"
 #include "pipeline.h"
+#include "spsc.h"
 #include "ui.h"
 
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 
 /* Number of leading bytes scanned for NULs when deciding a file is binary;
@@ -32,12 +35,13 @@ grep_scan_to_buf(const jstr_twoway_ty *R t, const jstr_ty *R buf,
 	for (size_t line = 1;; ++line) {
 		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
+		const char *const line_data = line_len ? p : "";
 		int matched = 0;
 		size_t moff = 0;
 		size_t mlen = 0;
 		if (G.mode & MODE_USE_REGEX) {
 			regmatch_t rm = { 0 };
-			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+			matched = (jstr_re_search_len(&G.regex, line_data, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
 			if (matched) {
 				moff = (size_t)rm.rm_so;
 				mlen = (size_t)(rm.rm_eo - rm.rm_so);
@@ -52,7 +56,7 @@ grep_scan_to_buf(const jstr_twoway_ty *R t, const jstr_ty *R buf,
 		}
 		if (matched) {
 			*matched_out = 1;
-			if (jstr_chk(ui_format_grep_line(out, fname, fname_len, line, p, line_len, moff, mlen)))
+			if (jstr_chk(ui_format_grep_line(out, fname, fname_len, line, line_data, line_len, moff, mlen)))
 				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		if (nl == NULL)
@@ -74,12 +78,13 @@ grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char 
 	for (size_t line = 1;; ++line) {
 		const char *nl = memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
+		const char *const line_data = line_len ? p : "";
 		int matched = 0;
 		size_t moff = 0;
 		size_t mlen = 0;
 		if (G.mode & MODE_USE_REGEX) {
 			regmatch_t rm = { 0 };
-			matched = (jstr_re_search_len(&G.regex, p, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
+			matched = (jstr_re_search_len(&G.regex, line_data, line_len, &rm, G.eflags) == JSTR_RE_RET_NOERROR);
 			if (matched) {
 				moff = (size_t)rm.rm_so;
 				mlen = (size_t)(rm.rm_eo - rm.rm_so);
@@ -103,7 +108,7 @@ grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char 
 			G.grep_lines.data[G.grep_lines.size].fname = fname;
 			G.grep_lines.data[G.grep_lines.size].fname_len = fname_len;
 			G.grep_lines.data[G.grep_lines.size].line_num = line;
-			G.grep_lines.data[G.grep_lines.size].content = p;
+			G.grep_lines.data[G.grep_lines.size].content = line_data;
 			G.grep_lines.data[G.grep_lines.size].content_len = line_len;
 			G.grep_lines.data[G.grep_lines.size].match_off = moff;
 			G.grep_lines.data[G.grep_lines.size].match_len = mlen;
@@ -340,68 +345,126 @@ out:
 	return JSTR_RET_SUCC;
 }
 
+static void
+maybe_send_eos(root_ctx_ty *R root, size_t worker, int grep_live)
+{
+	if (!atomic_load_explicit(&root->eos_taken, memory_order_acquire))
+		return;
+	if (atomic_load_explicit(&root->workers_done, memory_order_acquire) < pipeline_worker_count())
+		return;
+	if (atomic_load_explicit(&root->jobs_done, memory_order_acquire) <
+	    atomic_load_explicit(&root->total, memory_order_acquire))
+		return;
+	if (atomic_exchange_explicit(&root->eos_sent, true, memory_order_acq_rel))
+		return;
+	far_result_ty *const eos = (far_result_ty *)calloc(1, sizeof *eos);
+	if (jstr_unlikely(!eos))
+		jstr_errdie("%s", "Out of memory.\n");
+	eos->kind = FAR_RES_EOS;
+	eos->total = atomic_load_explicit(&root->total, memory_order_acquire);
+	const int send_ret = grep_live ? pipeline_grep_work_send(worker, eos) : pipeline_done_send(worker, eos);
+	if (send_ret != 0)
+		free(eos);
+}
+
+static void
+finish_worker(root_ctx_ty *R root, size_t worker, int grep_live)
+{
+	atomic_fetch_add_explicit(&root->workers_done, 1, memory_order_acq_rel);
+	maybe_send_eos(root, worker, grep_live);
+}
+
 far_thread_ret_ty
 process_thread(void *arg)
 {
-	(void)arg;
+	const size_t worker = (size_t)(uintptr_t)arg;
 	jstr_ty *buf = NULL;
+	unsigned long seen_epoch = 0;
 	for (;;) {
-		far_job_ty *const job = pipeline_work_recv();
-		if (job == NULL)
-			break;
-		far_result_ty *const res = (far_result_ty *)calloc(1, sizeof *res);
-		if (jstr_unlikely(!res))
-			jstr_errdie("%s", "Out of memory.\n");
-		if (job->kind == FAR_JOB_EOS) {
-			res->kind = FAR_RES_EOS;
-			const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
-			                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-			const int send_ret = grep_live ? pipeline_grep_work_send(res) : pipeline_done_send(res);
-			if (send_ret != 0)
-				free(res);
+		root_ctx_ty *const root = pipeline_root_get();
+		if (root == NULL) {
+			if (pipeline_stopping())
+				break;
+			struct timespec ts = { 0, 1000000 };
+			nanosleep(&ts, NULL);
 			continue;
 		}
-		res->seq = job->seq;
-		res->kind = FAR_RES_DATA;
-		res->path = job->path;
-		res->path_len = job->path_len;
-		if (jstr_unlikely(atomic_load_explicit(&job->root->cancel, memory_order_acquire))) {
-			res->canceled = 1;
-		} else {
-			switch (job->kind) {
-			case FAR_JOB_FILE:
-				process_job(job->root->t, &buf, job->path, job->path_len, &job->st,
-				            job->root->a->find, job->root->a->find_len,
-				            job->root->a->rplc, job->root->a->rplc_len, &res->pr);
-				break;
-			case FAR_JOB_STDIN:
-				process_stdin_job(job->root->t, &buf, job->root->a->find,
-				                  job->root->a->find_len, job->root->a->rplc,
-				                  job->root->a->rplc_len, &res->pr);
-				break;
-			case FAR_JOB_MEM:
-				process_mem_job(job->root->t, &buf, job->mem_file,
-				                job->root->a->find, job->root->a->find_len,
-				                job->root->a->rplc, job->root->a->rplc_len, &res->pr);
-				break;
-			default:
-				res->pr.err = 1;
-				break;
-			}
-			if (buf == NULL) {
-				buf = (jstr_ty *)malloc(sizeof *buf);
-				if (jstr_unlikely(!buf))
-					jstr_errdie("%s", "Out of memory.\n");
-				*buf = (jstr_ty)JSTR_INIT;
-			}
+		const unsigned long epoch = pipeline_root_epoch();
+		if (epoch == seen_epoch) {
+			struct timespec ts = { 0, 1000000 };
+			nanosleep(&ts, NULL);
+			continue;
 		}
-		free(job);
-		const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
-		                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-		const int send_ret = grep_live ? pipeline_grep_work_send(res) : pipeline_done_send(res);
-		if (send_ret != 0) {
-			ui_result_free(res);
-			break;
+		seen_epoch = epoch;
+		unsigned int spin = 0;
+		for (;;) {
+			far_job_ty *const job = pipeline_work_try_recv();
+			if (job != NULL)
+				spin = 0;
+			if (job == NULL) {
+				if (atomic_load_explicit(&root->eos_taken, memory_order_acquire)) {
+					const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
+					                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+					finish_worker(root, worker, grep_live);
+					break;
+				}
+				spsc_backoff(&spin);
+				continue;
+			}
+			if (job->kind == FAR_JOB_EOS) {
+				atomic_store_explicit(&root->eos_taken, true, memory_order_release);
+				const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
+				                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+				finish_worker(root, worker, grep_live);
+				break;
+			}
+			far_result_ty *const res = (far_result_ty *)calloc(1, sizeof *res);
+			if (jstr_unlikely(!res))
+				jstr_errdie("%s", "Out of memory.\n");
+			res->seq = job->seq;
+			res->kind = FAR_RES_DATA;
+			res->path = job->path;
+			res->path_len = job->path_len;
+			if (jstr_unlikely(atomic_load_explicit(&root->cancel, memory_order_acquire)))
+				res->canceled = 1;
+			else {
+				switch (job->kind) {
+				case FAR_JOB_FILE:
+					process_job(job->root->t, &buf, job->path, job->path_len, &job->st,
+					            job->root->a->find, job->root->a->find_len,
+					            job->root->a->rplc, job->root->a->rplc_len, &res->pr);
+					break;
+				case FAR_JOB_STDIN:
+					process_stdin_job(job->root->t, &buf, job->root->a->find,
+					                  job->root->a->find_len, job->root->a->rplc,
+					                  job->root->a->rplc_len, &res->pr);
+					break;
+				case FAR_JOB_MEM:
+					process_mem_job(job->root->t, &buf, job->mem_file,
+					                job->root->a->find, job->root->a->find_len,
+					                job->root->a->rplc, job->root->a->rplc_len, &res->pr);
+					break;
+				default:
+					res->pr.err = 1;
+					break;
+				}
+				if (buf == NULL) {
+					buf = (jstr_ty *)malloc(sizeof *buf);
+					if (jstr_unlikely(!buf))
+						jstr_errdie("%s", "Out of memory.\n");
+					*buf = (jstr_ty)JSTR_INIT;
+				}
+			}
+			free(job);
+			const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
+			                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+			const int send_ret = grep_live ? pipeline_grep_work_send(worker, res) : pipeline_done_send(worker, res);
+			if (send_ret != 0) {
+				ui_result_free(res);
+				break;
+			}
+			atomic_fetch_add_explicit(&root->jobs_done, 1, memory_order_acq_rel);
+			maybe_send_eos(root, worker, grep_live);
 		}
 	}
 	if (buf != NULL)

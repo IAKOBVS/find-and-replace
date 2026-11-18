@@ -68,6 +68,7 @@ traverse_thread(void *arg)
 		root_ctx_ty *const root = (root_ctx_ty *)pipeline_cmd_recv();
 		if (root == NULL)
 			break;
+		pipeline_root_set(root);
 		atomic_store_explicit(&root->cancel, false, memory_order_relaxed);
 		atomic_store_explicit(&root->total, 0, memory_order_relaxed);
 		atomic_store_explicit(&root->ftw_ret, JSTR_RET_SUCC, memory_order_relaxed);
@@ -83,6 +84,14 @@ traverse_thread(void *arg)
 			break;
 		case FAR_ROOT_FILE:
 			ret = traverse_emit(root, root->path, strlen(root->path), &root->st, FAR_JOB_FILE, NULL);
+			break;
+		case FAR_ROOT_FILES:
+			for (size_t i = 0; i < root->file_arg_count; ++i) {
+				const far_path_stat_ty *const f = &root->file_args[i];
+				ret = traverse_emit(root, f->path, strlen(f->path), &f->st, FAR_JOB_FILE, NULL);
+				if (ret != JSTR_RET_SUCC)
+					break;
+			}
 			break;
 		case FAR_ROOT_STDIN: {
 			struct stat st;
@@ -115,7 +124,7 @@ traverse_thread(void *arg)
 		if (jstr_unlikely(pipeline_work_send(&root->eos) != 0))
 			atomic_fetch_add_explicit(&root->prod_errs, 1, memory_order_relaxed);
 	}
-	(void)pipeline_work_send(NULL);
+	pipeline_root_set(NULL);
 	return FAR_THREAD_RETURN;
 }
 

@@ -398,6 +398,53 @@ t_grep_interactive_large_batch() {
 	fi
 }
 
+# Regression: regex grep sliced the buffer at a zero-length line but the
+# regex engine was given the NUL-terminated buffer position, so it matched
+# into later lines and produced offsets larger than the line. That underflowed
+# ui_format_grep_line's tail length and corrupted the heap.
+t_grep_regex_empty_lines() {
+	td=$1
+	printf 'foo\n\nbar\n' > "$td/f"
+	rc=0
+	out=$("$PROG" '.' x -R --grep -j 1 "$td/f" 2>/dev/null) || rc=$?
+	out=$(printf '%s\n' "$out" | strip_ansi)
+	n=$(printf '%s\n' "$out" | grep -c . || true)
+	if [ "$rc" -eq 0 ] && [ "$n" -eq 2 ] && \
+	   printf '%s\n' "$out" | grep -qF 'foo' && \
+	   printf '%s\n' "$out" | grep -qF 'bar'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	fi
+}
+
+t_grep_regex_empty_line_anchor() {
+	td=$1
+	printf 'foo\n\nbar\n' > "$td/f"
+	rc=0
+	out=$("$PROG" '^$' x -R --grep -j 1 "$td/f" 2>/dev/null) || rc=$?
+	out=$(printf '%s\n' "$out" | strip_ansi)
+	if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF ':2:'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	fi
+}
+
+t_grep_interactive_regex_empty_lines() {
+	td=$1
+	mkdir -p "$td/sub"
+	printf 'foo\n\nbar\n' > "$td/sub/f"
+	pdrive --phase 0d --tail '' -- '.' x -R --grep -r "$td/sub"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF '[INSERT]' && \
+	   printf '%s\n' "$out" | grep -qF '2 matches, 1 files'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
+}
+
 # Regression: grep output should highlight the matched string in red.
 # The non-interactive path wraps only the match in \x1b[31m...\x1b[0m.
 t_grep_match_highlight() {
@@ -468,6 +515,9 @@ t_grep_dash_stdin_placeholder
 t_grep_exclude_cli
 t_grep_nonexistent_file
 t_grep_interactive_regex
+t_grep_regex_empty_lines
+t_grep_regex_empty_line_anchor
+t_grep_interactive_regex_empty_lines
 t_grep_interactive_recursive
 t_grep_interactive_basic
 t_grep_interactive_scroll

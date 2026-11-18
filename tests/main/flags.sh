@@ -216,6 +216,24 @@ t_grep_omit_replace() {
 	fi
 }
 
+t_j_workers() {
+	td=$1
+	out=$(printf 'hello\n' | "$PROG" hello hi -j 2 2>/dev/null)
+	[ "$out" = 'hi' ] && echo PASS > "$td/result" || echo "FAIL: -j 2 expected [hi] got [$out]" > "$td/result"
+}
+
+t_j_attached() {
+	td=$1
+	out=$(printf 'hello\n' | "$PROG" hello hi -j2 2>/dev/null)
+	[ "$out" = 'hi' ] && echo PASS > "$td/result" || echo "FAIL: -j2 expected [hi] got [$out]" > "$td/result"
+}
+
+t_j_invalid() {
+	td=$1
+	rc=0; "$PROG" a b -j nope < /dev/null > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: invalid -j accepted" > "$td/result"
+}
+
 TESTS="
 t_explicit_F
 t_literal_F_with_dot
@@ -243,5 +261,8 @@ t_quiet_inplace
 t_quiet_long_flag
 t_exclude_long_relative_path
 t_grep_omit_replace
+t_j_workers
+t_j_attached
+t_j_invalid
 "
 run_suite "flag tests" "$TESTS"

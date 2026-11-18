@@ -9,6 +9,9 @@
 #include "ui.h"
 #include "pipeline.h"
 
+#include <errno.h>
+#include <stdint.h>
+
 #define IS_REG(x) S_ISREG(x)
 #define IS_DIR(x) S_ISDIR(x)
 #define ARG                 argv[i]
@@ -71,6 +74,8 @@ static const char *usage =
 	_("    REG_NEWLINE is not passed as the cflag to regexec.\n")
 	_("  -v, --version\n")
 	_("    Print version information and exit.\n")
+	_("  -j N\n")
+	_("    Use N file-processing worker threads (default: 2 * nproc).\n")
 	_("  -q, --quiet\n")
 	_("    Suppress status output: the per-file stderr echo from -i and the\n")
 	_("    matching lines in --grep mode (the exit code is still returned).\n")
@@ -326,17 +331,107 @@ process_stdin_arg(args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 	return JSTR_RET_SUCC;
 }
 
+typedef struct file_batch_ty {
+	far_path_stat_ty *data;
+	size_t size;
+	size_t cap;
+} file_batch_ty;
+
+static size_t
+parse_workers_value(const char *prog, const char *s)
+{
+	if (s == NULL || *s == '\0' || *s == '-') {
+		fprintf(stderr, "%s: invalid worker count '%s'.\n", prog, s != NULL ? s : "");
+		exit(EXIT_FAILURE);
+	}
+	errno = 0;
+	char *end;
+	const unsigned long v = strtoul(s, &end, 10);
+	if (errno != 0 || *end != '\0' || v == 0) {
+		fprintf(stderr, "%s: invalid worker count '%s'.\n", prog, s != NULL ? s : "");
+		exit(EXIT_FAILURE);
+	}
+	return (size_t)v;
+}
+
+static void
+preparse_workers(int argc, char **argv)
+{
+	for (int k = 3; k < argc; ++k) {
+		const char *const arg = argv[k];
+		if (!strcmp(arg, "--"))
+			break;
+		if (!strcmp(arg, "--include") || !strcmp(arg, "--exclude")) {
+			++k;
+			continue;
+		}
+		if (!strcmp(arg, "-j")) {
+			if (k + 1 >= argc) {
+				fprintf(stderr, "%s: no argument after -j flag.\n", argv[0]);
+				exit(EXIT_FAILURE);
+			}
+			pipeline_set_workers(parse_workers_value(argv[0], argv[++k]));
+		} else if (!strncmp(arg, "-j", 2) && arg[2] != '\0') {
+			pipeline_set_workers(parse_workers_value(argv[0], arg + 2));
+		}
+	}
+}
+
+static void
+batch_add(file_batch_ty *R batch, const char *path, const struct stat *st)
+{
+	if (batch->size >= batch->cap) {
+		const size_t cap = batch->cap == 0 ? 16 : batch->cap * 2;
+		far_path_stat_ty *const tmp = (far_path_stat_ty *)realloc(batch->data, cap * sizeof *tmp);
+		if (jstr_unlikely(!tmp))
+			jstr_errdie("%s", "Out of memory.\n");
+		batch->data = tmp;
+		batch->cap = cap;
+	}
+	batch->data[batch->size].path = path;
+	batch->data[batch->size].st = *st;
+	++batch->size;
+}
+
+static void
+flush_file_batch(args_ty *a, jstr_twoway_ty *t, file_batch_ty *R batch)
+{
+	if (batch->size == 0)
+		return;
+	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
+	root_ctx_ty root;
+	root.kind = FAR_ROOT_FILES;
+	root.path = NULL;
+	memset(&root.st, 0, sizeof root.st);
+	root.mem_files = NULL;
+	root.mem_count = 0;
+	root.file_args = batch->data;
+	root.file_arg_count = batch->size;
+	root.a = a;
+	root.t = t;
+	const size_t before = a->err_count;
+	const jstr_ret_ty ret = pipeline_run(&root);
+	if (jstr_chk(ret) || a->err_count > before) {
+		if (batch->size == 1)
+			fprintf(stderr, "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", batch->data[0].path, a->find, a->rplc);
+		else
+			fprintf(stderr, "find-and-replace: error processing %zu files (find=\"%s\", replace=\"%s\").\n", batch->size, a->find, a->rplc);
+		exit(err_exit_code());
+	}
+	batch->size = 0;
+}
+
 /* Process a target regular file or directory argument. */
 static void
-process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t)
+process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t, file_batch_ty *batch)
 {
 	struct stat st;
 	int ret = xstat(arg, &st);
 	if (jstr_unlikely(ret == JSTR_RET_ERR)) {
+		flush_file_batch(a, t, batch);
 		fprintf(stderr, "find-and-replace: stat(%s) failed.\n", arg);
 		exit(err_exit_code());
 	}
-	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 	if (IS_REG(st.st_mode)) {
 		const size_t fname_len = strlen(arg);
 		if (G.have_exclude) {
@@ -346,20 +441,10 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t)
 			if (jstr_re_match_len(&G.exclude_re, fname, base_len, 0) == JSTR_RE_RET_NOERROR)
 				return;
 		}
-		root_ctx_ty root;
-		root.kind = FAR_ROOT_FILE;
-		root.path = arg;
-		root.st = st;
-		root.mem_files = NULL;
-		root.mem_count = 0;
-		root.a = a;
-		root.t = t;
-		const size_t before = a->err_count;
-		if (jstr_chk(pipeline_run(&root)) || a->err_count > before) {
-			fprintf(stderr, "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", arg, a->find, a->rplc);
-			exit(err_exit_code());
-		}
+		batch_add(batch, arg, &st);
 	} else if (IS_DIR(st.st_mode)) {
+		flush_file_batch(a, t, batch);
+		compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 		if (G.mode & MODE_USE_RECURSIVE) {
 			root_ctx_ty root;
 			root.kind = FAR_ROOT_DIR;
@@ -375,6 +460,7 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t)
 			}
 		}
 	} else {
+		flush_file_batch(a, t, batch);
 		fprintf(stderr, "find-and-replace: %s is not a regular file or directory.\n", arg);
 		exit(err_exit_code());
 	}
@@ -578,11 +664,19 @@ main(int argc, char **argv)
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	init_defaults();
 	G.confirm_pass = 1;
+	preparse_workers(argc, argv);
 	if (jstr_unlikely(pipeline_start() != 0))
 		jstr_errdie("%s", "Can't start the pipeline threads.\n");
 	int end_of_flags = 0;
+	file_batch_ty batch = { 0 };
 	for (i = 3; ARG; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
+			flush_file_batch(&a, &t, &batch);
+			if (ARG[1] == 'j') {
+				const char *val = ARG[2] != '\0' ? ARG + 2 : argv[++i];
+				pipeline_set_workers(parse_workers_value(argv[0], val));
+				continue;
+			}
 			if (ARG[1] == 'i') {
 				if (ARG[2] == '\0') {
 					G.mode = (G.mode & ~MODE_PRINT_STDOUT) | MODE_PRINT_FILE;
@@ -608,11 +702,14 @@ main(int argc, char **argv)
 				continue;
 		}
 		if (ARG[0] == '-' && ARG[1] == '\0') {
+			flush_file_batch(&a, &t, &batch);
 			(void)process_stdin_arg(&a, &t, argv[0]);
 			continue;
 		}
-		process_target_arg(ARG, &a, &t);
+		process_target_arg(ARG, &a, &t, &batch);
 	}
+	flush_file_batch(&a, &t, &batch);
+	free(batch.data);
 	if (jstr_unlikely((G.mode & MODE_GREP) && (G.mode & (MODE_CONFIRM | MODE_PRINT_FILE | MODE_PRINT_FILE_BACKUP)))) {
 		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i or -c.\n");
 		exit(err_exit_code());

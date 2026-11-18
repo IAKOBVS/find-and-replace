@@ -76,6 +76,8 @@ ui_format_grep_line(jstr_ty *R out, const char *R fname, size_t fname_len,
                     size_t line, const char *R data, size_t size,
                     size_t match_off, size_t match_len)
 {
+	if (jstr_unlikely(match_off > size || match_len > size - match_off))
+		return JSTR_RET_ERR;
 	if (jstr_likely(fname != NULL)) {
 		if (jstr_chk(ui_append(out, S_LITERAL(TUI_GREP_FILENAME))) ||
 		    jstr_chk(ui_append(out, fname, fname_len)) ||

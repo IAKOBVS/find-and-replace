@@ -1,5 +1,6 @@
 find-and-replace
 tests/pipeline/spsc_unit
+tests/pipeline/spmc_unit
 tests/pipeline/pipeline_unit
 compile_commands.json
 *.gcov

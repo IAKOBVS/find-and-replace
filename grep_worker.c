@@ -53,6 +53,9 @@ typedef struct grep_cfg_state_ty {
 
 static grep_cfg_state_ty C;
 static size_t sent_matches;
+static size_t data_seen;
+static size_t pending_eos_total;
+static int pending_eos;
 static grep_line_ty batch[GREP_BATCH_MAX];
 static size_t batch_n;
 static size_t batch_files;
@@ -170,6 +173,10 @@ static void
 send_one_match(const char *R fname, size_t fname_len, size_t line,
                const char *R data, size_t len, size_t moff, size_t mlen, int first)
 {
+	if (moff > len)
+		moff = 0;
+	if (mlen > len - moff)
+		mlen = len - moff;
 	char *const block = (char *)malloc(fname_len + 1 + len + 1);
 	if (jstr_unlikely(!block))
 		return;
@@ -205,6 +212,7 @@ scan_content(const char *R fname, size_t fname_len, const jstr_ty *R buf)
 	for (size_t line = 1;; ++line) {
 		const char *nl = (const char *)memchr(p, '\n', (size_t)(d + n - p));
 		const size_t line_len = (nl != NULL) ? (size_t)(nl - p) : (size_t)(d + n - p);
+		const char *const line_data = line_len ? p : "";
 		int matched = 0;
 		size_t moff = 0;
 		size_t mlen = 0;
@@ -212,7 +220,7 @@ scan_content(const char *R fname, size_t fname_len, const jstr_ty *R buf)
 			matched = 1;
 		} else if (C.use_regex) {
 			regmatch_t rm = { 0 };
-			matched = (jstr_re_search_len(&C.regex, p, line_len, &rm, C.eflags) == JSTR_RE_RET_NOERROR);
+			matched = (jstr_re_search_len(&C.regex, line_data, line_len, &rm, C.eflags) == JSTR_RE_RET_NOERROR);
 			if (matched) {
 				moff = (size_t)rm.rm_so;
 				mlen = (size_t)(rm.rm_eo - rm.rm_so);
@@ -228,7 +236,7 @@ scan_content(const char *R fname, size_t fname_len, const jstr_ty *R buf)
 		if (matched) {
 			if (sent_matches >= C.limit)
 				return;
-			send_one_match(fname, fname_len, line, p, line_len, moff, mlen, first);
+			send_one_match(fname, fname_len, line, line_data, line_len, moff, mlen, first);
 			++sent_matches;
 			first = 0;
 			if (C.limit != (size_t)-1)
@@ -311,10 +319,17 @@ static void
 handle_result(far_result_ty *R res)
 {
 	if (res->kind == FAR_RES_EOS) {
-		send_kind(FAR_GREP_EOS);
+		pending_eos = 1;
+		pending_eos_total = res->total;
 		ui_result_free(res);
+		if (data_seen >= pending_eos_total) {
+			send_kind(FAR_GREP_EOS);
+			pending_eos = 0;
+			data_seen = 0;
+		}
 		return;
 	}
+	++data_seen;
 	if (res->pr.err) {
 		send_kind(FAR_GREP_ERROR);
 		ui_result_free(res);
@@ -382,9 +397,17 @@ grep_worker_thread(void *arg)
 		}
 		if (retire_step())
 			did = 1;
-		far_result_ty *res;
-		while (C.ready && (res = pipeline_grep_work_try_recv()) != NULL) {
-			handle_result(res);
+		for (size_t w = 0; w < pipeline_worker_count(); ++w) {
+			far_result_ty *res;
+			while ((res = pipeline_grep_work_try_recv(w)) != NULL) {
+				handle_result(res);
+				did = 1;
+			}
+		}
+		if (pending_eos && data_seen >= pending_eos_total) {
+			send_kind(FAR_GREP_EOS);
+			pending_eos = 0;
+			data_seen = 0;
 			did = 1;
 		}
 		if (did)

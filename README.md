@@ -59,6 +59,8 @@ Options:
     REG_NEWLINE is not passed as the cflag to regexec.
   -v, --version
     Print version information and exit.
+  -j N
+    Use N file-processing worker threads (default: 2 * nproc).
   -q, --quiet
     Suppress status output: the per-file stderr echo from -i and the
     matching lines in --grep mode (the exit code is still returned).

@@ -2,6 +2,8 @@ if [ -z "${PROG_DIR:-}" ]; then
 	PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 fi
 PROG="$PROG_DIR/find-and-replace"
+FAR_THREADS=${FAR_THREADS:-1}
+export FAR_THREADS
 PASS=0
 FAIL=0
 

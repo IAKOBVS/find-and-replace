@@ -6,19 +6,23 @@
 
 #include "stage.h"
 
+void pipeline_set_workers(size_t count);
+size_t pipeline_worker_count(void);
+void pipeline_root_set(root_ctx_ty *root);
+root_ctx_ty *pipeline_root_get(void);
+unsigned long pipeline_root_epoch(void);
+int pipeline_stopping(void);
 int pipeline_start(void);
 void pipeline_shutdown(void);
 int pipeline_run(root_ctx_ty *R root);
 
 root_ctx_ty *pipeline_cmd_recv(void);
 int pipeline_work_send(far_job_ty *job);
-far_job_ty *pipeline_work_recv(void);
-int pipeline_done_send(far_result_ty *res);
-far_result_ty *pipeline_done_recv(void);
-far_result_ty *pipeline_done_try_recv(void);
-int pipeline_grep_work_send(far_result_ty *res);
-far_result_ty *pipeline_grep_work_recv(void);
-far_result_ty *pipeline_grep_work_try_recv(void);
+far_job_ty *pipeline_work_try_recv(void);
+int pipeline_done_send(size_t worker, far_result_ty *res);
+far_result_ty *pipeline_done_try_recv(size_t worker);
+int pipeline_grep_work_send(size_t worker, far_result_ty *res);
+far_result_ty *pipeline_grep_work_try_recv(size_t worker);
 int pipeline_grep_msg_send(far_grep_msg_ty *msg);
 far_grep_msg_ty *pipeline_grep_msg_recv(void);
 far_grep_msg_ty *pipeline_grep_msg_try_recv(void);

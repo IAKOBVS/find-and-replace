@@ -1,5 +1,6 @@
 #!/bin/sh
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_empty_find_regex() {
 	td=$1; out=$(printf 'abc\n' | "$PROG" '' 'X' -R 2>/dev/null)

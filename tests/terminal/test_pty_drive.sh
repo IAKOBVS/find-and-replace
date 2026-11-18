@@ -1,5 +1,6 @@
 #!/bin/sh
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 PDRV="$PROG_DIR/tests/pty_drive"
 
@@ -182,5 +183,6 @@ t_delay_overridden_by_phase() {
 
 TESTS="t_basic_echo t_exit_code t_signal_term t_signal_kill t_timeout t_out_captures_output t_out_multiline t_phase_hex t_tail_literal t_tail_escapes t_winsize_sets_terminal t_ready_waits_for_marker t_ready_timeout t_early_exit_detection t_after_ready t_env_passthrough t_phase_then_tail_order t_delay_overridden_by_phase"
 
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 run_suite "pty_drive" "$TESTS"

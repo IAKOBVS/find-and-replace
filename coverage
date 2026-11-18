@@ -7,7 +7,7 @@ PROG=find-and-replace
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-SRCS='main.c files.c process.c confirm.c procfs.c vim.c'
+SRCS='main.c io.c traverse.c process.c terminal.c vim.c procfs.c grep_worker.c spsc.c pipeline.c ui.c'
 
 TMPDIR=$(mktemp -d) && trap 'rm -rf "$TMPDIR"' EXIT
 

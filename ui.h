@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#ifndef CONFIRM_H
-#define CONFIRM_H
+#ifndef UI_H
+#define UI_H
 
 #include "common.h"
+#include "stage.h"
 
+/* ANSI escape codes used by -c confirm mode and --grep mode. */
 /* ANSI escape codes used by -c confirm mode and --grep mode. */
 #define COLOR_BLACK             "\x1b[30m"
 #define COLOR_RED               "\x1b[31m"
@@ -112,67 +114,34 @@
 #define CONFIRM_ABORTED "Aborted.\n"
 #define MATCHES_CAP_MIN 8
 
-/* Interactive TUI fields. FIELD_COUNT must match the order of the buffers
- * passed to confirm_interactive_loop. */
-typedef enum {
-	FIELD_FIND,
-	FIELD_RPLC,
-	FIELD_FLAGS,
-	FIELD_FILES,
-	FIELD_INCLUDE,
-	FIELD_EXCLUDE,
-	FIELD_BACKUP,
-	FIELD_COUNT
-} field_ty;
 
-typedef enum {
-	KEY_NONE,
-	KEY_ENTER,
-	KEY_TAB,
-	KEY_SHIFT_TAB,
-	KEY_BACKSPACE,
-	KEY_DELETE,
-	KEY_ESC,
-	KEY_UP,
-	KEY_DOWN,
-	KEY_LEFT,
-	KEY_RIGHT,
-	KEY_CTRL_C,
-	KEY_CTRL_D,
-	KEY_CTRL_J,
-	KEY_CTRL_K,
-	KEY_ALT_J,
-	KEY_ALT_K,
-	KEY_CTRL_U,
-	KEY_CHAR
-} confirm_key_ty;
+#define MATCHES_CAP_MIN 8
+#define FILE_CACHE_MAX  (16 * JSTR_IO_GIB)
+#define FILES_CAP_MIN   8
 
-/* Write VAL in decimal to stdout without using printf. */
-void
-print_size_t(size_t val);
 
-/* -c dry-run scan that collects matches and prints the preview. */
-jstr_ret_ty confirm_scan_file(const jstr_twoway_ty *R t,
-                              const jstr_ty *R buf, const char *R fname,
-                              size_t fname_len, const char *R find,
-                              size_t find_len, const char *R rplc,
-                              size_t rplc_len, size_t *R out_matches);
+jstr_ret_ty ui_replaced_buf(const char *R data, size_t size);
+jstr_ret_ty ui_report_changed(const char *R fname, size_t fname_len);
+void ui_grep_line(const char *R fname, size_t fname_len, size_t line,
+                  const char *R data, size_t size,
+                  size_t match_off, size_t match_len);
+jstr_ret_ty ui_format_grep_line(jstr_ty *R out, const char *R fname,
+                                size_t fname_len, size_t line,
+                                const char *R data, size_t size,
+                                size_t match_off, size_t match_len);
+jstr_ret_ty ui_result(far_result_ty *R res, const args_ty *R a);
+void ui_result_free(far_result_ty *R res);
 
-jstr_ret_ty confirm_interactive_loop(jstr_twoway_ty *R t,
-                                     jstr_ty *R find_buf,
-                                     jstr_ty *R rplc_buf,
-                                     jstr_ty *R flags_buf,
-                                     jstr_ty *R files_buf,
-                                     jstr_ty *R include_buf,
-                                     jstr_ty *R exclude_buf,
-                                     jstr_ty *R backup_buf);
+int ui_ok(void);
+unsigned short ui_size_t_width(size_t val);
+void ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr);
+void ui_print_size_t(size_t val);
+jstr_ret_ty ui_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf,
+                         const char *R fname, size_t fname_len,
+                         const char *R find, size_t find_len,
+                         const char *R rplc, size_t rplc_len,
+                         size_t *R out_matches);
+void ui_file_pushback(files_ty *files, const char *R fname, size_t fname_len,
+                      const struct stat *st, jstr_ty *R buf);
 
-/* --grep TUI: scrollable match browser. Prints the selected line to stdout
- * on Enter, exits 0. Ctrl-C/D exits without printing. */
-jstr_ret_ty grep_interactive_loop(jstr_twoway_ty *R t,
-                                   jstr_ty *R find_buf,
-                                   jstr_ty *R files_buf,
-                                   jstr_ty *R include_buf,
-                                   jstr_ty *R exclude_buf);
-
-#endif /* CONFIRM_H */
+#endif /* UI_H */

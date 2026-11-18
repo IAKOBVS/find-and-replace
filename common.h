@@ -17,6 +17,7 @@
 #include <jstr/io.h>
 #include <jstr/regex.h>
 #include <jstr/stdstring.h>
+#include <stdalign.h>
 #include <unistd.h>
 
 #define S_LEN(s)     (sizeof(s) - 1)
@@ -86,6 +87,7 @@ typedef struct grep_line_ty {
 	size_t content_len;
 	size_t match_off;
 	size_t match_len;
+	void *owner;
 } grep_line_ty;
 
 typedef struct grep_lines_ty {
@@ -102,6 +104,7 @@ typedef struct file_ty {
 	size_t fname_len;
 	size_t content_size;
 	unsigned int st_mode;
+	int has_match;
 	jstr_ty content;
 } file_ty;
 
@@ -119,28 +122,19 @@ typedef struct global_ty {
 	int mode;
 	int eflags;
 	int cflags;
-	/* State under which the find matcher was last compiled, so compile()
-	 * recompiles when flags flip between files mid-command-line. */
-	int compiled_regex;
-	int compiled_cflags;
-	/* Set by the scan pass when at least one match exists; decides whether the
-	 * confirmation prompt is shown. */
-	unsigned int matches_found;
-	/* 1 when --grep found at least one matching line; decides the exit code
-	 * (0 vs 1). Set even with -q, which only silences the line output. */
-	int grep_matched;
-	/* 1 while in the -c dry-run pass: process_file only scans/reports matches
-	 * instead of modifying files. Reset before the second (real) pass. */
 	int confirm_pass;
-	/* 1 when --grep + tty: process_file caches files instead of printing
-	 * so the grep TUI can scan them interactively. */
 	int grep_collect;
-	/* 1 when --include/--exclude were given (or edited in the confirm TUI);
-	 * guards use of the compiled include_re/exclude_re. */
 	int have_include;
 	int have_exclude;
 	size_t n;
 	size_t bak_suffix_len;
+	/* Written by the UI thread; kept off the read-only configuration line. */
+	alignas(64) unsigned int matches_found;
+	int grep_matched;
+	/* State under which the find matcher was last compiled, so compile()
+	 * recompiles when flags flip between files mid-command-line. */
+	int compiled_regex;
+	int compiled_cflags;
 	/* Frequently-touched growable state, grouped so the match list and the
 	 * preview buffers' headers sit on the same cache lines while scanning. */
 	matches_ty matches;
@@ -148,7 +142,6 @@ typedef struct global_ty {
 	/* Cached output of the previous -c preview hunk; emptied per block but
 	 * the allocation is reused across files so capacity persists. */
 	jstr_ty new_buf;
-	jstr_ty content_buf;
 	/* Cached interactive TUI buffers */
 	jstr_ty interactive_find_buf;
 	jstr_ty interactive_rplc_buf;
@@ -191,6 +184,5 @@ typedef struct global_ty {
 
 extern global_ty G;
 
-jstr_ret_ty far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size);
 
 #endif /* COMMON_H */

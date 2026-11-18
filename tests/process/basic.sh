@@ -1,5 +1,6 @@
 #!/bin/sh
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_fixed_stdin() {
 	td=$1; out=$(echo 'hello world' | "$PROG" hello goodbye 2>/dev/null)

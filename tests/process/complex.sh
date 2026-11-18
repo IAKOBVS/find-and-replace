@@ -1,5 +1,6 @@
 #!/bin/bash
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_backref_reorder() {
 	td=$1; out=$(printf 'apple, banana, cherry\n' | "$PROG" '([a-z]+), ([a-z]+), ([a-z]+)' '\\3, \\1, \\2' -RE 2>/dev/null)

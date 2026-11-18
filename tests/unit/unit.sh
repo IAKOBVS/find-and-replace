@@ -3,7 +3,8 @@
 # branches (open/read failure, MemAvailable parsing, edge-case parsing) and
 # the pass-2 disk re-read when a file's content is not cached.
 
-. "$(dirname "$0")/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 SHIM="$td_root/fake_meminfo.so"
 cc -shared -fPIC -O2 -o "$SHIM" "$(dirname "$0")/fake_meminfo.c" -ldl 2>/dev/null || {

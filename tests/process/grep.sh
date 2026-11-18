@@ -1,5 +1,6 @@
 #!/bin/sh
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 PDRV="$PROG_DIR/tests/pty_drive"
 
@@ -115,6 +116,21 @@ t_grep_empty_find() {
 	[ "$rc" -eq 0 ] && [ ! -s "$td/out" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc" > "$td/result"
 }
 
+t_grep_empty_find_dash() {
+	td=$1
+	printf 'a\n' | "$PROG" '' x --grep - > "$td/out" 2>/dev/null
+	rc=$?
+	[ "$rc" -eq 0 ] && [ ! -s "$td/out" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc" > "$td/result"
+}
+
+t_grep_empty_find_file() {
+	td=$1
+	printf 'abc\n' > "$td/f"
+	"$PROG" '' x --grep "$td/f" > "$td/out" 2>/dev/null
+	rc=$?
+	[ "$rc" -eq 0 ] && [ ! -s "$td/out" ] && echo PASS > "$td/result" || echo "FAIL: rc=$rc" > "$td/result"
+}
+
 t_grep_empty_input() {
 	td=$1
 	: | "$PROG" foo bar --grep > "$td/out" 2>/dev/null
@@ -163,6 +179,31 @@ t_grep_nonexistent_file() {
 	"$PROG" foo bar --grep "$td/nope" > /dev/null 2>&1
 	rc=$?
 	[ "$rc" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: nonexistent file in --grep should exit 2 (rc=$rc)" > "$td/result"
+}
+
+t_grep_interactive_regex() {
+	td=$1
+	printf 'hello\nworld\n' > "$td/f"
+	pdrive --noready --phase 0d --tail '' -- 'hel+' x --grep -R -E "$td/f"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF '1:hello'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
+}
+
+t_grep_interactive_recursive() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'hello one\n' > "$td/sub/a"
+	printf 'hello two\n' > "$td/sub/b"
+	pdrive --noready --phase 0d --tail '' -- hello x --grep -r "$td/sub"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF 'hello one' || printf '%s\n' "$out" | grep -qF 'hello two'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
 }
 
 t_grep_interactive_basic() {
@@ -317,6 +358,46 @@ pdrive --noready --phase 1b --phase 0d@200 --tail '' -- hello x --grep "$td/f"
 	fi
 }
 
+t_grep_interactive_no_blank_while_typing() {
+	td=$1
+	for i in $(seq 1 200); do printf 'hello line %s\n' "$i"; done > "$td/f"
+	pdrive --phase 15 --phase 61@50 --phase 62@50 --phase 63@50 \
+	       --phase 04@50 --tail '' -- hello x --grep "$td/f"
+	out=$(strip_ansi < "$td/out")
+	after=$(printf '%s\n' "$out" | awk '/200 matches, 1 files/{seen=1; next} seen')
+	if printf '%s\n' "$after" | grep -qF '0 matches, 0 files'; then
+		echo "FAIL: blanked while typing: out=[$out]" > "$td/result"
+	else
+		echo PASS > "$td/result"
+	fi
+}
+
+t_grep_interactive_blank_after_debounce() {
+	td=$1
+	for i in $(seq 1 20); do printf 'hello line %s\n' "$i"; done > "$td/f"
+	pdrive --phase 15 --phase 04@300 --tail '' -- hello x --grep "$td/f"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF '0 matches, 0 files' && \
+	   printf '%s\n' "$out" | grep -qF '20 matches, 1 files'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
+}
+
+t_grep_interactive_large_batch() {
+	td=$1
+	for i in $(seq 1 200); do printf 'hello line %s\n' "$i"; done > "$td/f"
+	pdrive --phase 0d --tail '' -- hello x --grep "$td/f"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF '200 matches, 1 files' && \
+	   printf '%s\n' "$out" | grep -qF '1:hello line 1'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
+}
+
 # Regression: grep output should highlight the matched string in red.
 # The non-interactive path wraps only the match in \x1b[31m...\x1b[0m.
 t_grep_match_highlight() {
@@ -378,12 +459,16 @@ t_grep_recursive
 t_grep_regex_anchor
 t_grep_fixed
 t_grep_empty_find
+t_grep_empty_find_dash
+t_grep_empty_find_file
 t_grep_empty_input
 t_grep_quiet
 t_grep_binary
 t_grep_dash_stdin_placeholder
 t_grep_exclude_cli
 t_grep_nonexistent_file
+t_grep_interactive_regex
+t_grep_interactive_recursive
 t_grep_interactive_basic
 t_grep_interactive_scroll
 t_grep_interactive_ctrl_j_k_nav
@@ -394,6 +479,9 @@ t_grep_interactive_file_cache
 t_grep_interactive_find_field
 t_grep_interactive_controls_fixed
 t_grep_interactive_vim_mode
+t_grep_interactive_large_batch
+t_grep_interactive_no_blank_while_typing
+t_grep_interactive_blank_after_debounce
 t_grep_match_highlight
 t_grep_regex_highlight
 "

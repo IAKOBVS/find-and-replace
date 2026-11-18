@@ -1,5 +1,6 @@
 #!/bin/bash
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_edge_empty_find() {
 	td=$1; out=$(printf 'text\n' | "$PROG" '' 'replacement' 2>/dev/null)

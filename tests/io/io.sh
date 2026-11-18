@@ -1,5 +1,6 @@
 #!/bin/bash
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_backup_content_identity() {
 	td=$1; printf 'original content\nsecond line\n' > "$td/f"

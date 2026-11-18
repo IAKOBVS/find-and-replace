@@ -1,42 +1,28 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#include "confirm.h"
-#include "files.h"
+#include "terminal.h"
 #include "process.h"
+#include "pipeline.h"
 #include "vim.h"
-#include <termios.h>
+
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
 #include <signal.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
-#include <fcntl.h>
-
-#ifdef __linux__
-#include "procfs.h"
-#endif
+#include <termios.h>
+#include <unistd.h>
 
 static struct termios orig_termios;
 static int term_initialized = 0;
 static const char *env_cols;
 static const char *env_lines;
+static int ui_stop_requested;
 
-/* Terminal size fallbacks for when ioctl(TIOCGWINSZ) and the LINES/COLUMNS
- * environment variables are all unavailable (non-tty, redirected output). */
 #define TERM_ROWS_FALLBACK 24
 #define TERM_COLS_FALLBACK 80
-/* Preview match budget multiplier: the -c scan collects at most
- * max_preview_lines * this many matches per file, so a -g global scan on a
- * huge tree cannot balloon into millions of collected matches on every TUI
- * redraw. The preview display only needs max_preview_lines lines anyway.
- * 4x covers same-line grouping (many matches merging into one block). */
-#define PREVIEW_MATCH_BUDGET_FACTOR 4
-/* Free-RAM estimate fallback when /proc/meminfo cannot be read; large enough
- * that the scan cache limit never artificially caps a preview. */
-#define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
-/* Read buffer size for /proc/meminfo (a few KiB is far beyond the file size). */
-#define MEMINFO_BUF_SIZE (4096 + 1)
-#define RANGES_CAP_MIN 1
 
 static void
 restore_terminal(void)
@@ -57,16 +43,10 @@ handle_signal(int sig)
 	_exit(EXIT_FAILURE);
 }
 
-static int
-io_ok(void)
-{
-	return !ferror(stdout);
-}
-
 static void
 term_clear_screen(void)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_CLEAR_SCREEN, 1, S_LEN(ANSI_CLEAR_SCREEN), stdout);
 }
@@ -74,7 +54,7 @@ term_clear_screen(void)
 static void
 term_home(void)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_HOME, 1, S_LEN(ANSI_HOME), stdout);
 }
@@ -89,7 +69,7 @@ term_clear_and_home(void)
 static void
 term_clear_line_end(void)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
 }
@@ -97,7 +77,7 @@ term_clear_line_end(void)
 static void
 term_clear_down(void)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_CLEAR_DOWN, 1, S_LEN(ANSI_CLEAR_DOWN), stdout);
 }
@@ -105,7 +85,7 @@ term_clear_down(void)
 static void
 term_show_cursor(void)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_CURSOR_SHOW, 1, S_LEN(ANSI_CURSOR_SHOW), stdout);
 }
@@ -113,7 +93,7 @@ term_show_cursor(void)
 static void
 term_hide_cursor(void)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_CURSOR_HIDE, 1, S_LEN(ANSI_CURSOR_HIDE), stdout);
 }
@@ -121,12 +101,12 @@ term_hide_cursor(void)
 static void
 term_move_cursor(size_t line, size_t col)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	(void)jstr_io_fwrite(ANSI_CSI, 1, S_LEN(ANSI_CSI), stdout);
-	print_size_t(line);
+	ui_print_size_t(line);
 	(void)jstr_io_putchar(';');
-	print_size_t(col);
+	ui_print_size_t(col);
 	(void)jstr_io_putchar('H');
 }
 
@@ -165,173 +145,6 @@ setup_terminal(void)
 	signal(SIGQUIT, handle_signal);
 }
 
-/* Append one match range to the dynamically grown matches array. */
-static void
-match_pushback(matches_ty *R matches,
-                  size_t start,
-                  size_t end,
-                  const regmatch_t *rm)
-{
-	if (matches->size >= matches->cap) {
-		matches->cap = (matches->cap == 0 ? MATCHES_CAP_MIN : matches->cap * 2);
-		match_ty *const new_matches = (match_ty *)realloc(matches->data, matches->cap * sizeof(match_ty));
-		DIE_IF(!new_matches, "%s", "Out of memory allocating matches.\n");
-		matches->data = new_matches;
-	}
-	(matches->data)[matches->size].start = start;
-	(matches->data)[matches->size].end = end;
-	if (rm)
-		memcpy((matches->data)[matches->size].rm, rm, JSTR_NMATCH_MAX * sizeof(regmatch_t));
-	else
-		memset((matches->data)[matches->size].rm, 0, JSTR_NMATCH_MAX * sizeof(regmatch_t));
-	++matches->size;
-}
-
-static size_t
-get_free_ram_size(void)
-{
-#ifdef __linux__
-	const int fd = open("/proc/meminfo", O_RDONLY);
-	if (jstr_unlikely(fd == -1))
-		return FREE_RAM_FALLBACK;
-
-	char buf[MEMINFO_BUF_SIZE];
-	const ssize_t read_sz = read(fd, buf, sizeof(buf) - 1);
-	close(fd);
-	if (jstr_unlikely(read_sz <= 0))
-		return FREE_RAM_FALLBACK;
-
-	buf[read_sz] = '\0';
-
-	struct procfs_iter iter;
-	procfs_iter_init(&iter, buf, (unsigned int)read_sz);
-
-	const char *key;
-	const char *val;
-	unsigned int key_len;
-	unsigned int val_len;
-
-	size_t free_ram = 0;
-	while (procfs_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
-		if (key_len == S_LEN("MemAvailable") && memcmp(key, S_LITERAL("MemAvailable")) == 0) {
-			free_ram = (size_t)strtoul(val, NULL, 10) * JSTR_IO_KIB;
-			break;
-		}
-	}
-
-	return free_ram;
-#else
-	return 1 * JSTR_IO_GIB;
-#endif
-}
-
-static size_t
-get_file_cache_max(void)
-{
-	if (G.file_cache_max == 0) {
-		size_t free_ram = get_free_ram_size();
-		G.file_cache_max = free_ram / 2;
-	}
-	return G.file_cache_max;
-}
-
-/* Append one file to the -c confirm cache. The name is strdup'd because
- * ftw->dirpath is a transient buffer reused across callbacks; the content
- * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
-void
-file_pushback(files_ty *files,
-                 const char *R fname,
-                 size_t fname_len,
-                 const struct stat *st,
-                 jstr_ty *R buf)
-{
-	if (files->size >= files->cap) {
-		files->cap = (files->cap == 0 ? FILES_CAP_MIN : files->cap * 2);
-		file_ty *const tmp = (file_ty *)realloc(files->data, files->cap * sizeof(file_ty));
-		DIE_IF(!tmp, "%s", "Out of memory allocating cached files.\n");
-		files->data = tmp;
-	}
-	file_ty *file = &files->data[files->size];
-	file->fname = (char *)malloc(fname_len + 1);
-	DIE_IF(!file->fname, "%s", "Out of memory copying cached filename.\n");
-	jstr_strcpy_len(file->fname, fname, fname_len);
-	file->fname_len = fname_len;
-	file->content_size = (size_t)st->st_size;
-	file->st_mode = st->st_mode;
-	/* Take ownership of the already-read content and reset the shared buffer. */
-	if (jstr_likely(files->total_content_size < get_file_cache_max())) {
-		file->content = *buf;
-		*buf = (jstr_ty)JSTR_INIT;
-		files->total_content_size += file->content_size;
-	} else {
-		file->content = (jstr_ty)JSTR_INIT;
-	}
-	++files->size;
-}
-
-/* Return the offset of the first byte of the line containing IDX. */
-static size_t
-line_get_start(const char *R data, size_t size, size_t idx)
-{
-	const char *nl;
-	if (idx > size)
-		idx = size;
-	nl = (const char *)jstr_memrchr(data, '\n', idx);
-	return nl ? (size_t)JSTR_PTR_DIFF(nl, data) + 1 : 0;
-}
-
-/* Return one past the last byte of the line containing IDX (the index of the
- * terminating '\n', or SIZE if the line is not newline-terminated). */
-static size_t
-line_get_end(const char *R data, size_t size, size_t idx)
-{
-	const char *nl = (const char *)memchr(data + idx, '\n', size - idx);
-	return nl ? (size_t)JSTR_PTR_DIFF(nl, data) : size;
-}
-
-/* Incremental 1-based line-number counter for one buffer. Requests must be
- * monotonically non-decreasing within a file, so the counter only scans the
- * region it has not visited yet: a whole pass costs O(size) newline checks
- * instead of O(requests x offset). Reset per file (the buffer changes). */
-typedef struct line_counter_ty {
-	const char *data;
-	size_t pos;  /* Offset up to which LINE is already known. */
-	size_t line; /* 1-based line number of the byte at POS. */
-} line_counter_ty;
-
-static void
-line_counter_init(line_counter_ty *st, const char *R data)
-{
-	st->data = data;
-	st->pos = 0;
-	st->line = 1;
-}
-
-static size_t
-line_counter_get(line_counter_ty *st, size_t idx)
-{
-	if (jstr_likely(idx >= st->pos)) {
-		st->line += jstr_countchr_len(st->data + st->pos, '\n', idx - st->pos);
-	} else {
-		/* Non-monotonic request (never hit by the block loop): restart. */
-		st->line = jstr_countchr_len(st->data, '\n', idx) + 1;
-	}
-	st->pos = idx;
-	return st->line;
-}
-
-/* Return one past the last byte of the line that ends the match spanning
- * [START, END). When the match consumed the line's terminating newline, that
- * newline is the last byte of the block rather than a surviving terminator, so
- * END-1 is returned. */
-static size_t
-match_line_end(const char *R data, size_t size, size_t start, size_t end)
-{
-	if (end > start && data[end - 1] == '\n')
-		return end - 1;
-	return line_get_end(data, size, end);
-}
-
 static unsigned short
 get_terminal_cols(void)
 {
@@ -351,486 +164,6 @@ get_terminal_cols(void)
 	}
 	return TERM_COLS_FALLBACK; /* standard default fallback */
 }
-
-static unsigned short
-get_size_t_width(size_t val)
-{
-	if (val == 0)
-		return 1;
-	unsigned short width = 0;
-	while (val > 0) {
-		width++;
-		val /= 10;
-	}
-	return width;
-}
-
-/* Write VAL in decimal to stdout without using printf. */
-void
-print_size_t(size_t val)
-{
-	if (jstr_unlikely(!io_ok()))
-		return;
-	char buf[3 * sizeof(val) + 2];
-	size_t i = sizeof(buf);
-	if (val == 0)
-		buf[--i] = '0';
-	while (val > 0) {
-		buf[--i] = (char)('0' + val % 10);
-		val /= 10;
-	}
-	(void)jstr_io_fwrite(buf + i, 1, sizeof(buf) - i, stdout);
-}
-
-/* Print the "FNAME:LINE:" prefix of one -c preview line. FNAME_COLOR tints
- * the file name (wrapped in inverse video when IS_SELECTED); LINE_COLOR tints
- * the line number; colons are unmatched. */
-static void
-print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_selected,
-                  const char *fname_color, unsigned int fname_color_len,
-                  const char *line_color, unsigned int line_color_len)
-{
-	if (jstr_unlikely(!io_ok()))
-		return;
-	(void)jstr_io_fwrite(fname_color, 1, fname_color_len, stdout);
-	if (is_selected)
-		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
-	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
-	if (is_selected)
-		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
-	(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-	(void)jstr_io_putchar(':');
-	(void)jstr_io_fwrite(line_color, 1, line_color_len, stdout);
-	print_size_t(line);
-	(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-	(void)jstr_io_putchar(':');
-}
-
-/* Print S of LEN bytes, expanding tab characters to 8-column stops and
- * truncating/clipping to COLS - 1 columns. COL_PTR tracks the current column
- * (0-indexed). */
-static void
-print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr)
-{
-	if (jstr_unlikely(!io_ok()))
-		return;
-	unsigned short col = *col_ptr;
-	unsigned short limit = (cols > 1) ? (cols - 1) : 0;
-	for (size_t i = 0; i < len; ++i) {
-		char c = s[i];
-		if (c == '\t') {
-			unsigned short next_tab = (unsigned short)((col + 8) & ~7);
-			while (col < next_tab) {
-				if (col < limit)
-					(void)jstr_io_putchar(' ');
-				col++;
-			}
-		} else {
-			if (col < limit)
-				(void)jstr_io_putchar(c);
-			col++;
-		}
-	}
-	*col_ptr = col;
-}
-
-/* Print one side of a -c preview change: each line of DATA is printed on its
- * own line as "FNAME:LINE:<content>"; FNAME_COLOR tints the file name,
- * LINE_COLOR the line number, and MATCH_COLOR the matched ranges in RANGES;
- * everything else is unmatched. DATA covers the block from the start of
- * the first changed line up to (but not including) the '\n' that terminates
- * the last changed line; START_LINE is the line number of the first emitted line.
- * TRAILING_NL is set when that terminating '\n' exists. */
-static void
-print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t num_ranges,
-                    const char *fname_color, unsigned int fname_color_len,
-                    const char *line_color, unsigned int line_color_len,
-                    const char *match_color, unsigned int match_color_len,
-                    const char *R fname, size_t fname_len, size_t start_line, int trailing_nl)
-{
-	if (jstr_unlikely(!io_ok()))
-		return;
-	const char *p = data;
-	const char *const end = data + len;
-	size_t line = start_line;
-	const char *nl;
-	unsigned short cols = 0;
-	const size_t vis_end = G.scroll_offset + G.max_preview_lines;
-	const int has_scroll = term_initialized && (G.scroll_offset > 0 || G.total_lines > G.max_preview_lines);
-	if (term_initialized)
-		cols = get_terminal_cols();
-	int render = 1;
-	size_t r_idx = 0;
-
-	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
-		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
-			render = 0;
-		if (!render) {
-			G.preview_lines_printed++;
-			p = nl + 1;
-			continue;
-		}
-		if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
-			G.preview_lines_printed++;
-			p = nl + 1;
-			continue;
-		}
-
-		print_line_prefix(fname, fname_len, line++, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
-
-		unsigned short col = 0;
-		if (term_initialized)
-			col = (unsigned short)(fname_len + get_size_t_width(line - 1) + 2);
-
-		size_t line_start_off = (size_t)JSTR_PTR_DIFF(p, data);
-		size_t line_end_off = (size_t)JSTR_PTR_DIFF(nl, data);
-		size_t curr = line_start_off;
-		int in_highlight = 0;
-
-		while (curr < line_end_off) {
-			while (r_idx < num_ranges && ranges[r_idx].end <= curr)
-				r_idx++;
-
-			size_t next_boundary = line_end_off;
-			int want_highlight = 0;
-
-			if (r_idx < num_ranges && ranges[r_idx].start < line_end_off) {
-				if (ranges[r_idx].start > curr) {
-					next_boundary = ranges[r_idx].start;
-					want_highlight = 0;
-				} else {
-					next_boundary = (ranges[r_idx].end < line_end_off) ? ranges[r_idx].end : line_end_off;
-					want_highlight = (ranges[r_idx].end > ranges[r_idx].start);
-				}
-			}
-
-			if (want_highlight != in_highlight) {
-				if (want_highlight)
-					(void)jstr_io_fwrite(match_color, 1, match_color_len, stdout);
-				else
-					(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-				in_highlight = want_highlight;
-			}
-
-			size_t seg_len = next_boundary - curr;
-			if (term_initialized)
-				print_diff_line_chars(data + curr, seg_len, cols, &col);
-			else
-				(void)jstr_io_fwrite(data + curr, 1, seg_len, stdout);
-
-			curr = next_boundary;
-		}
-
-		if (in_highlight)
-			(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-		if (term_initialized)
-			(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
-		(void)jstr_io_putchar('\n');
-		if (term_initialized)
-			G.preview_lines_printed++;
-		p = nl + 1;
-	}
-
-	if (p < end) {
-		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
-			render = 0;
-		if (!render) {
-			G.preview_lines_printed++;
-		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
-			G.preview_lines_printed++;
-		} else {
-			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
-
-			unsigned short col = 0;
-			if (term_initialized)
-				col = (unsigned short)(fname_len + get_size_t_width(line) + 2);
-
-			size_t line_start_off = (size_t)JSTR_PTR_DIFF(p, data);
-			size_t line_end_off = (size_t)JSTR_PTR_DIFF(end, data);
-			size_t curr = line_start_off;
-			int in_highlight = 0;
-
-			while (curr < line_end_off) {
-				while (r_idx < num_ranges && ranges[r_idx].end <= curr)
-					r_idx++;
-
-				size_t next_boundary = line_end_off;
-				int want_highlight = 0;
-
-				if (r_idx < num_ranges && ranges[r_idx].start < line_end_off) {
-					if (ranges[r_idx].start > curr) {
-						next_boundary = ranges[r_idx].start;
-						want_highlight = 0;
-					} else {
-						next_boundary = (ranges[r_idx].end < line_end_off) ? ranges[r_idx].end : line_end_off;
-						want_highlight = (ranges[r_idx].end > ranges[r_idx].start);
-					}
-				}
-
-				if (want_highlight != in_highlight) {
-					if (want_highlight)
-						(void)jstr_io_fwrite(match_color, 1, match_color_len, stdout);
-					else
-						(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-					in_highlight = want_highlight;
-				}
-
-				size_t seg_len = next_boundary - curr;
-				if (term_initialized)
-					print_diff_line_chars(data + curr, seg_len, cols, &col);
-				else
-					(void)jstr_io_fwrite(data + curr, 1, seg_len, stdout);
-
-				curr = next_boundary;
-			}
-
-			if (in_highlight)
-				(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-			if (term_initialized)
-				(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
-			(void)jstr_io_putchar('\n');
-			if (term_initialized)
-				G.preview_lines_printed++;
-		}
-	} else if (trailing_nl) {
-		if (render && term_initialized && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
-			render = 0;
-		if (!render) {
-			G.preview_lines_printed++;
-		} else if (has_scroll && G.preview_lines_printed < G.scroll_offset) {
-			G.preview_lines_printed++;
-		} else {
-			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
-			if (term_initialized)
-				(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
-			(void)jstr_io_putchar('\n');
-			if (term_initialized)
-				G.preview_lines_printed++;
-		}
-	}
-}
-
-static void
-confirm_scan_regex_matches(const jstr_ty *R buf, size_t find_len, size_t match_budget)
-{
-	if (find_len == 0)
-		return;
-	/*
-	 * Scan for regex matches on the file buffer.
-	 * Mirror the state machine in jstr_internal_re_rplcn_backref_len_from_exec
-	 * to precisely align the on-the-fly confirm preview with actual replacements.
-	 * Like process_buffer, the final trailing newline is excluded from the
-	 * scanned region so regex semantics match the real replacement exactly.
-	 */
-	const size_t scan_size = (buf->size && buf->data[buf->size - 1] == '\n') ? buf->size - 1 : buf->size;
-	size_t off = 0;
-	int prev_zero = 1; /* Tracks if the previous match was zero-length. */
-	size_t n = G.n;
-	if (scan_size == 0)
-		n = 1;
-	while (n) {
-		/*
-		 * Stop if we are starting search at the end of the string, unless the
-		 * previous match was zero-length (which lets us match anchors at EOF).
-		 */
-		int matched_at_end = (off == scan_size);
-		if (matched_at_end) {
-			if (!prev_zero)
-				break;
-		} else if (off > scan_size) {
-			break;
-		}
-		/* Dynamically compute the eflags (like REG_NOTBOL) based on offset. */
-		const int eflags_curr = G.eflags | jstr_internal_re_notbol(buf->data, off, G.regex.cflags);
-		regmatch_t rm[JSTR_NMATCH_MAX];
-		memset(rm, 0, sizeof(rm));
-		const int ret = jstr_re_exec_len(&G.regex, buf->data + off, scan_size - off, JSTR_NMATCH_MAX, rm, eflags_curr);
-		if (ret == JSTR_RE_RET_NOERROR) {
-			const size_t match_len = (size_t)(rm[0].rm_eo - rm[0].rm_so);
-			const size_t m_start = off + (size_t)rm[0].rm_so;
-			const size_t m_end = off + (size_t)rm[0].rm_eo;
-			if (jstr_unlikely(G.matches.size >= match_budget)) {
-				G.preview_full = 1;
-				break;
-			}
-			match_pushback(&G.matches, m_start, m_end, rm);
-			--n;
-			/* Set the next search pointer to the end of the match. */
-			size_t next_src = m_end;
-			/*
-			 * If the match was zero-length (e.g. ^$ or empty group), advance
-			 * past one character to prevent infinite loops, copying that character plain.
-			 */
-			if (match_len == 0)
-				if (next_src < scan_size)
-					++next_src;
-			off = next_src;
-			/* If the match occurred at the end of the string, stop immediately. */
-			if (matched_at_end)
-				break;
-			prev_zero = (match_len == 0);
-		} else {
-			break;
-		}
-	}
-}
-
-static void
-confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R find, size_t find_len, size_t match_budget)
-{
-	if (find_len == 0)
-		return;
-	/* Fixed-string pass uses the precompiled Two-Way matcher. */
-	for (size_t off = 0; off < buf->size; ) {
-		const char *const p = (const char *)jstr_memmem_exec(t, buf->data + off, buf->size - off, find, find_len);
-		if (p == NULL)
-			break;
-		const size_t m_start = (size_t)JSTR_PTR_DIFF(p, buf->data);
-		const size_t m_end = m_start + find_len;
-		if (jstr_unlikely(G.matches.size >= match_budget)) {
-			G.preview_full = 1;
-			break;
-		}
-		match_pushback(&G.matches, m_start, m_end, NULL);
-		if (G.n == 1)
-			break;
-		off = m_end;
-	}
-}
-
-static jstr_ret_ty
-ranges_reserve(ranges_ty *ranges, size_t required_size)
-{
-	if (ranges->cap < required_size) {
-		if (ranges->cap == 0)
-			ranges->cap = RANGES_CAP_MIN;
-		while (ranges->cap < required_size)
-			ranges->cap *= 2;
-		range_ty *const new_data = (range_ty *)realloc(ranges->data, ranges->cap * sizeof(range_ty));
-		if (jstr_unlikely(new_data == NULL))
-			return JSTR_RET_ERR;
-		ranges->data = new_data;
-	}
-	ranges->size = required_size;
-	return JSTR_RET_SUCC;
-}
-
-jstr_ret_ty
-confirm_scan_file(const jstr_twoway_ty *R t,
-                     const jstr_ty *R buf,
-                     const char *R fname,
-                     size_t fname_len,
-                     const char *R find,
-                     size_t find_len,
-                     const char *R rplc,
-                     size_t rplc_len,
-                     size_t *R out_matches)
-{
-	int backref = 0;
-	const unsigned char *rplc_backref1 = NULL;
-	const unsigned char *rplc_backref1_e = NULL;
-	if (G.mode & MODE_USE_REGEX) {
-		rplc_backref1 = (const unsigned char *)jstr_internal_re_rplcbackreffirst(rplc, rplc_len);
-		if (rplc_backref1 != NULL) {
-			backref = 1;
-			rplc_backref1_e = (const unsigned char *)jstr_internal_re_rplcbackreflast(rplc_backref1, rplc_len - JSTR_DIFF(rplc_backref1, rplc));
-			if (rplc_backref1_e == NULL)
-				rplc_backref1_e = rplc_backref1 + 2;
-		}
-	}
-	G.matches.size = 0;
-	const size_t match_budget = (G.max_preview_lines > 0) ? (size_t)G.max_preview_lines * PREVIEW_MATCH_BUDGET_FACTOR : SIZE_MAX;
-	if (G.mode & MODE_USE_REGEX)
-		confirm_scan_regex_matches(buf, find_len, match_budget);
-	else
-		confirm_scan_fixed_matches(t, buf, find, find_len, match_budget);
-	if (G.matches.size > 0) {
-		G.matches_found = 1;
-		/* Merge all matches that lie on the same line into a single block so
-		 * each changed source line is shown once. */
-		line_counter_ty lc;
-		line_counter_init(&lc, buf->data);
-		ptrdiff_t new_shift = 0;
-		size_t i = 0;
-		while (i < G.matches.size) {
-			/* Group consecutive matches that lie on the same line into one block. */
-			size_t j = i;
-			while (j + 1 < G.matches.size && line_get_start(buf->data, buf->size, G.matches.data[j + 1].start) <= match_line_end(buf->data, buf->size, G.matches.data[j].start, G.matches.data[j].end))
-				++j;
-			const size_t block_start = line_get_start(buf->data, buf->size, G.matches.data[i].start);
-			const size_t block_end = match_line_end(buf->data, buf->size, G.matches.data[j].start, G.matches.data[j].end);
-			const size_t line = line_counter_get(&lc, G.matches.data[i].start);
-			/* Build the replacement content for this block into NEW_BUF,
-			 * tracking match ranges for old block and replacement ranges for new block. */
-			jstr_empty_j(&G.new_buf);
-			size_t num_block_matches = j - i + 1;
-			G.old_ranges.size = 0;
-			G.new_ranges.size = 0;
-			ranges_reserve(&G.old_ranges, num_block_matches);
-			ranges_reserve(&G.new_ranges, num_block_matches);
-			size_t p = block_start;
-			for (size_t k = i; k <= j; ++k) {
-				size_t idx = k - i;
-				G.old_ranges.data[idx].start = G.matches.data[k].start - block_start;
-				G.old_ranges.data[idx].end = G.matches.data[k].end - block_start;
-
-				if (G.matches.data[k].start > p)
-					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, buf->data + p, G.matches.data[k].start - p)), "%s", "Out of memory.\n");
-
-				G.new_ranges.data[idx].start = G.new_buf.size;
-
-				if (G.mode & MODE_USE_REGEX && backref) {
-					size_t rplcwbackref_len = jstr_internal_re_rplcbackrefstrlen(G.matches.data[k].rm, rplc_backref1, rplc_backref1_e, rplc_len, JSTR_NMATCH_MAX);
-					jstr_empty_j(&G.rplc_buf);
-					DIE_IF(jstr_chk(jstr_reserve_j(&G.rplc_buf, rplcwbackref_len + 1)), "%s", "Out of memory.\n");
-					DIE_IF(!G.rplc_buf.data, "%s", "Out of memory allocating replacement buffer.\n");
-					const unsigned char *mtc_src = (const unsigned char *)buf->data + G.matches.data[k].start - G.matches.data[k].rm[0].rm_so;
-					jstr_internal_re_rplcbackrefcpy(G.matches.data[k].rm, mtc_src, (unsigned char *)G.rplc_buf.data, (const unsigned char *)rplc, (const unsigned char *)rplc + rplc_len, JSTR_NMATCH_MAX);
-					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, G.rplc_buf.data, rplcwbackref_len)), "%s", "Out of memory.\n");
-				} else {
-					DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, rplc, rplc_len)), "%s", "Out of memory.\n");
-				}
-
-				G.new_ranges.data[idx].end = G.new_buf.size;
-				p = G.matches.data[k].end;
-			}
-			if (block_end > p)
-				DIE_IF(jstr_chk(jstr_append_len_j(&G.new_buf, buf->data + p, block_end - p)), "%s", "Out of memory.\n");
-			/* Old side is the untouched block; new side is the built replacement.
-			 * BLOCK never ends in the last changed line's own terminator: when the
-			 * match consumed that '\n' it is excluded and TRAILING_NL is 0, when it
-			 * survives TRAILING_NL is 1. A replacement that ends in '\n' (or is
-			 * empty) therefore renders the empty line that follows it exactly when
-			 * the block's terminating newline survives, matching how diff counts
-			 * lines. */
-			int trailing_nl;
-			if (G.matches.data[j].end > G.matches.data[j].start && buf->data[G.matches.data[j].end - 1] == '\n')
-				trailing_nl = 0;
-			else
-				trailing_nl = (block_end < buf->size);
-			const size_t old_len = block_end - block_start;
-			const size_t old_count = jstr_countchr_len(buf->data + block_start, '\n', old_len) + 1;
-			size_t new_count = jstr_countchr_len(G.new_buf.data, '\n', G.new_buf.size);
-			if (G.new_buf.size > 0 && G.new_buf.data[G.new_buf.size - 1] != '\n')
-				++new_count;
-			if (trailing_nl && (G.new_buf.size == 0 || G.new_buf.data[G.new_buf.size - 1] == '\n'))
-				++new_count;
-			/* The "+" side's start line numbers the new file, shifted by the
-			 * net change of every previous block. */
-			ptrdiff_t new_line = (ptrdiff_t)line + new_shift;
-			if (new_line < 1)
-				new_line = 1;
-			print_diff_lines(buf->data + block_start, old_len, G.old_ranges.data, num_block_matches, S_LITERAL(TUI_CONFIRM_FILENAME_REMOVED), S_LITERAL(TUI_CONFIRM_LINENUMBER_REMOVED), S_LITERAL(TUI_CONFIRM_MATCHED_REMOVED), fname, fname_len, line, old_len == 0);
-			print_diff_lines(G.new_buf.data, G.new_buf.size, G.new_ranges.data, num_block_matches, S_LITERAL(TUI_CONFIRM_FILENAME_ADDED), S_LITERAL(TUI_CONFIRM_LINENUMBER_ADDED), S_LITERAL(TUI_CONFIRM_MATCHED_ADDED), fname, fname_len, (size_t)new_line, trailing_nl);
-			new_shift += (ptrdiff_t)new_count - (ptrdiff_t)old_count;
-			i = j + 1;
-		}
-	}
-	*out_matches = G.matches.size;
-	return JSTR_RET_SUCC;
-}
-
-
 
 /* Compile the interactive Include/Exclude fields into the global regexes.
  * An empty pattern clears the filter. On invalid regex, report it and return
@@ -1024,7 +357,7 @@ jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
 static void
 confirm_render_field(const field_info_ty *info, const jstr_ty *buf, int is_active)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return;
 	if (is_active)
 		(void)jstr_io_fwrite(info->active_prefix, 1, info->active_prefix_len, stdout);
@@ -1123,6 +456,35 @@ confirm_read_key(char *out_char)
 	return KEY_NONE;
 }
 
+static confirm_key_ty
+confirm_read_key_timeout(char *out_char, int timeout_ms)
+{
+	struct pollfd pfd;
+	pfd.fd = STDIN_FILENO;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	const int ret = poll(&pfd, 1, timeout_ms);
+	if (ret <= 0 || !(pfd.revents & POLLIN))
+		return KEY_NONE;
+	return confirm_read_key(out_char);
+}
+
+static long long
+grep_now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static long long
+grep_now_us(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (long long)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
 static char err_buf[256];
 static char last_err_buf[256];
 
@@ -1139,11 +501,11 @@ render_tui_header_and_stats(size_t start_control_line, size_t total_matches, siz
 
 	/* Statistics line */
 	(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
-	print_size_t(total_matches);
+	ui_print_size_t(total_matches);
 	if (G.preview_full)
 		(void)jstr_io_putchar('+');
 	(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
-	print_size_t(files_matched);
+	ui_print_size_t(files_matched);
 	if (G.preview_full)
 		(void)jstr_io_putchar('+');
 	(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
@@ -1201,7 +563,7 @@ grep_field_affects_recompile(size_t field)
 static int
 grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 {
-	if (jstr_unlikely(!io_ok()))
+	if (jstr_unlikely(!ui_ok()))
 		return 0;
 	(void)jstr_io_fwrite(TUI_GREP_FILENAME, 1, S_LEN(TUI_GREP_FILENAME), stdout);
 	if (is_selected)
@@ -1212,7 +574,7 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(TUI_GREP_LINENUMBER, 1, S_LEN(TUI_GREP_LINENUMBER), stdout);
-	print_size_t(gl->line_num);
+	ui_print_size_t(gl->line_num);
 	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
 	(void)jstr_io_fputc(':', stdout);
 	(void)jstr_io_fwrite(gl->content, 1, gl->match_off, stdout);
@@ -1222,8 +584,8 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 	const size_t after_off = gl->match_off + gl->match_len;
 	const size_t after_len = gl->content_len - after_off;
 	if (term_initialized) {
-		unsigned short col = (unsigned short)(gl->fname_len + get_size_t_width(gl->line_num) + 3 + gl->match_off + gl->match_len);
-		print_diff_line_chars(gl->content + after_off, after_len, cols, &col);
+		unsigned short col = (unsigned short)(gl->fname_len + ui_size_t_width(gl->line_num) + 3 + gl->match_off + gl->match_len);
+		ui_print_diff_line_chars(gl->content + after_off, after_len, cols, &col);
 	} else {
 		(void)jstr_io_fwrite(gl->content + after_off, 1, after_len, stdout);
 	}
@@ -1233,42 +595,145 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 	return 1;
 }
 
-/* Re-scan all cached files and collect matching lines into G.grep_lines. */
-static void
-grep_rescan(jstr_twoway_ty *R t, const jstr_ty *R find_buf,
-            jstr_ty *R files_buf, jstr_ty *R include_buf, jstr_ty *R exclude_buf)
+#define GREP_REDRAW_MS 100
+#define GREP_RESCAN_DEBOUNCE_MS 200
+
+static size_t
+grep_match_cap(void)
 {
-	char ie_err[128];
-	const char *inc = (include_buf && include_buf->size > 0 && include_buf->data) ? include_buf->data : "";
-	const char *exc = (exclude_buf && exclude_buf->size > 0 && exclude_buf->data) ? exclude_buf->data : "";
-	if (interactive_compile_include_exclude(inc, include_buf ? include_buf->size : 0, exc, exclude_buf ? exclude_buf->size : 0, ie_err, sizeof(ie_err)) != JSTR_RET_SUCC) {
-		/* Invalid regex: skip filtering (show all files). */
-		if (G.have_include) {
-			jstr_re_free(&G.include_re);
-			G.have_include = 0;
-		}
-		if (G.have_exclude) {
-			jstr_re_free(&G.exclude_re);
-			G.have_exclude = 0;
+	const unsigned short rows = get_terminal_rows();
+	const size_t control_lines = GREP_FIELD_COUNT + 3;
+	return rows > control_lines ? rows - control_lines : 1;
+}
+
+static void
+grep_emit_selected(void)
+{
+	if (G.grep_lines.size == 0 || G.selected_line >= G.grep_lines.size)
+		return;
+	const grep_line_ty *gl = &G.grep_lines.data[G.selected_line];
+	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
+	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
+	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fputc(':', stdout);
+	(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
+	ui_print_size_t(gl->line_num);
+	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
+	(void)jstr_io_fputc(':', stdout);
+	(void)jstr_io_fwrite(gl->content, 1, gl->content_len, stdout);
+	(void)jstr_io_fputc('\n', stdout);
+}
+
+typedef struct grep_retire_node_ty {
+	grep_lines_ty lines;
+	struct grep_retire_node_ty *next;
+} grep_retire_node_ty;
+
+static grep_retire_node_ty *grep_retire_pending;
+
+static int
+grep_retire_flush(void)
+{
+	while (grep_retire_pending != NULL) {
+		grep_retire_node_ty *const node = grep_retire_pending;
+		grep_retire_node_ty *const next = node->next;
+		if (pipeline_grep_retire_try_send(&node->lines) != 0)
+			break;
+		grep_retire_pending = next;
+	}
+	return grep_retire_pending != NULL;
+}
+
+static void
+grep_lines_discard(grep_lines_ty *R lines)
+{
+	if (lines->data == NULL) {
+		lines->size = 0;
+		lines->cap = 0;
+		return;
+	}
+	grep_retire_node_ty *const node = (grep_retire_node_ty *)malloc(sizeof *node);
+	if (jstr_unlikely(!node)) {
+		for (size_t i = 0; i < lines->size; ++i)
+			free(lines->data[i].owner);
+		free(lines->data);
+	} else {
+		node->lines = *lines;
+		if (pipeline_grep_retire_try_send(&node->lines) != 0) {
+			node->next = grep_retire_pending;
+			grep_retire_pending = node;
 		}
 	}
-	G.grep_lines.size = 0;
-	G.scroll_offset = 0;
-	G.selected_line = 0;
-	const char *ptn = (find_buf->size > 0 && find_buf->data) ? find_buf->data : "";
-	const size_t find_len = find_buf->size;
-	far_compile(t, ptn, find_len, "", 0, 1, NULL, 0);
-	if (!(G.mode & MODE_USE_REGEX) || (G.mode & MODE_COMPILED)) {
-		for (unsigned int k = 0; k < G.files.size; ++k) {
-			file_ty *file = &G.files.data[k];
-			if (!interactive_file_pass(file, files_buf))
-				continue;
-			grep_collect_file(t, &file->content, file->fname, file->fname_len, ptn, find_len);
-		}
+	lines->data = NULL;
+	lines->size = 0;
+	lines->cap = 0;
+}
+
+static void
+grep_lines_reserve(grep_lines_ty *R lines, size_t extra)
+{
+	if (lines->size + extra <= lines->cap)
+		return;
+	size_t cap = lines->cap == 0 ? 32 : lines->cap;
+	while (cap < lines->size + extra)
+		cap *= 2;
+	grep_line_ty *const tmp = (grep_line_ty *)realloc(lines->data, cap * sizeof *tmp);
+	if (jstr_unlikely(!tmp))
+		jstr_errdie("%s", "Out of memory.\n");
+	lines->data = tmp;
+	lines->cap = cap;
+}
+
+static void
+grep_lines_append_batch(grep_lines_ty *R lines, const grep_line_ty *R src, size_t n)
+{
+	grep_lines_reserve(lines, n);
+	memcpy(lines->data + lines->size, src, n * sizeof *src);
+	lines->size += n;
+}
+
+static char *
+grep_dup(const jstr_ty *R buf)
+{
+	if (buf == NULL || buf->size == 0 || buf->data == NULL)
+		return NULL;
+	char *const p = (char *)malloc(buf->size + 1);
+	if (jstr_unlikely(!p))
+		jstr_errdie("%s", "Out of memory.\n");
+	memcpy(p, buf->data, buf->size);
+	p[buf->size] = '\0';
+	return p;
+}
+
+static void
+grep_send_cfg(grep_cfg_kind_ty kind, unsigned long gen, size_t limit,
+              const jstr_ty *R find_buf, const jstr_ty *R files_buf,
+              const jstr_ty *R include_buf, const jstr_ty *R exclude_buf)
+{
+	grep_cfg_ty *const cfg = (grep_cfg_ty *)calloc(1, sizeof *cfg);
+	if (jstr_unlikely(!cfg))
+		jstr_errdie("%s", "Out of memory.\n");
+	cfg->kind = kind;
+	cfg->gen = gen;
+	cfg->limit = limit;
+	cfg->use_regex = (G.mode & MODE_USE_REGEX) != 0;
+	cfg->cflags = G.cflags;
+	cfg->eflags = G.eflags;
+	cfg->find = grep_dup(find_buf);
+	cfg->find_len = cfg->find != NULL ? find_buf->size : 0;
+	cfg->files = grep_dup(files_buf);
+	cfg->files_len = cfg->files != NULL ? files_buf->size : 0;
+	cfg->include = grep_dup(include_buf);
+	cfg->include_len = cfg->include != NULL ? include_buf->size : 0;
+	cfg->exclude = grep_dup(exclude_buf);
+	cfg->exclude_len = cfg->exclude != NULL ? exclude_buf->size : 0;
+	if (pipeline_grep_cfg_send(cfg) != 0) {
+		free(cfg->find);
+		free(cfg->files);
+		free(cfg->include);
+		free(cfg->exclude);
+		free(cfg);
 	}
-	G.total_lines = G.grep_lines.size;
-	if (G.selected_line >= G.total_lines && G.total_lines > 0)
-		G.selected_line = G.total_lines - 1;
 }
 
 jstr_ret_ty
@@ -1276,11 +741,13 @@ grep_interactive_loop(jstr_twoway_ty *R t,
                        jstr_ty *R find_buf,
                        jstr_ty *R files_buf,
                        jstr_ty *R include_buf,
-                       jstr_ty *R exclude_buf)
+                       jstr_ty *R exclude_buf,
+                       root_ctx_ty *R root)
 {
 	setup_terminal();
 	if (jstr_unlikely(!term_initialized))
 		return JSTR_RET_SUCC;
+	(void)t;
 	vim_set_insert_mode(1);
 
 	G.scroll_offset = 0;
@@ -1289,6 +756,20 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 	int needs_redraw = 1;
 	int needs_rescan = 1;
 	int first_draw = 1;
+	int scan_active = 1;
+	int end_requested = 0;
+	int full_mode = 0;
+	int pending_enter = 0;
+	int quit = 0;
+	int rescanning = 0;
+	unsigned long grep_gen = 0;
+	root_ctx_ty *current_root = root;
+	long long last_redraw = grep_now_ms();
+	size_t files_matched = 0;
+	size_t last_match_count = 0;
+	size_t last_files_matched = 0;
+	int visible_dirty = 0;
+	long long rescan_due = 0;
 	size_t active_field = 0;
 	size_t cursors[GREP_FIELD_COUNT];
 	cursors[GREP_FIELD_FIND] = find_buf->size;
@@ -1297,9 +778,98 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 	cursors[GREP_FIELD_EXCLUDE] = exclude_buf->size;
 
 	for (;;) {
-		if (needs_redraw) {
-			if (jstr_unlikely(!io_ok()))
+		(void)grep_retire_flush();
+		far_ui_cmd_ty *ucmd;
+		while ((ucmd = pipeline_ui_cmd_try_recv()) != NULL) {
+			if (ucmd->kind == FAR_UI_ROOT) {
+				current_root = ucmd->root;
+				scan_active = 1;
+				end_requested = 0;
+				needs_redraw = 1;
+			} else if (ucmd->kind == FAR_UI_END) {
+				end_requested = 1;
+				if (!scan_active) {
+					full_mode = 1;
+					needs_rescan = 1;
+					rescan_due = 0;
+				}
+				needs_redraw = 1;
+			} else if (ucmd->kind == FAR_UI_STOP) {
+				ui_stop_requested = 1;
+				quit = 1;
+				if (current_root != NULL)
+					atomic_store_explicit(&current_root->cancel, true, memory_order_release);
+			}
+		}
+		far_grep_msg_ty *msg;
+		int got_match = 0;
+		const long long msg_deadline = grep_now_us() + 1000;
+		for (;;) {
+			msg = pipeline_grep_msg_try_recv();
+			if (msg == NULL)
 				break;
+			if (msg->gen != grep_gen) {
+				for (size_t i = 0; i < msg->count; ++i)
+					free(msg->lines[i].owner);
+				free(msg->lines);
+				free(msg);
+				continue;
+			}
+			if (msg->kind == FAR_GREP_MATCH) {
+				grep_lines_append_batch(&G.grep_lines, msg->lines, msg->count);
+				files_matched += msg->files_matched;
+				got_match = 1;
+				free(msg->lines);
+				free(msg);
+				continue;
+			}
+			if (msg->kind == FAR_GREP_EOS) {
+				scan_active = 0;
+				current_root = NULL;
+				pipeline_ui_ack_send(0);
+				needs_redraw = 1;
+			} else if (msg->kind == FAR_GREP_DONE) {
+				rescanning = 0;
+				needs_redraw = 1;
+			} else if (msg->kind == FAR_GREP_ERROR) {
+				if (current_root != NULL)
+					++current_root->a->err_count;
+			}
+			free(msg);
+			if (grep_now_us() >= msg_deadline)
+				break;
+		}
+		if (got_match) {
+			G.total_lines = G.grep_lines.size;
+			if (G.total_lines > 0 && G.selected_line >= G.total_lines)
+				G.selected_line = G.total_lines - 1;
+			if (G.grep_lines.size != last_match_count || files_matched != last_files_matched)
+				visible_dirty = 1;
+		}
+		if (visible_dirty && grep_now_ms() - last_redraw >= GREP_REDRAW_MS)
+			needs_redraw = 1;
+		if (quit) {
+			if (!scan_active) {
+				pipeline_ui_ack_send(0);
+				break;
+			}
+			continue;
+		}
+		if (pending_enter && !scan_active && !rescanning && !needs_rescan && end_requested) {
+			if (G.grep_lines.size > 0) {
+				restore_terminal();
+				grep_emit_selected();
+				pipeline_ui_ack_send(0);
+				return JSTR_RET_SUCC;
+			}
+			pending_enter = 0;
+		}
+		if (needs_rescan && rescan_due != 0 && grep_now_ms() >= rescan_due)
+			needs_redraw = 1;
+		if (needs_redraw) {
+			if (jstr_unlikely(!ui_ok()))
+				break;
+			last_redraw = grep_now_ms();
 			if (first_draw) {
 				term_clear_and_home();
 				first_draw = 0;
@@ -1307,8 +877,19 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				term_home();
 			}
 
-			if (needs_rescan) {
-				grep_rescan(t, find_buf, files_buf, include_buf, exclude_buf);
+			if (needs_rescan && (rescan_due == 0 || grep_now_ms() >= rescan_due)) {
+				++grep_gen;
+				grep_lines_discard(&G.grep_lines);
+				files_matched = 0;
+				G.total_lines = 0;
+				G.selected_line = 0;
+				G.scroll_offset = 0;
+				rescanning = 1;
+				rescan_due = 0;
+				grep_send_cfg(full_mode ? GREP_CFG_FULL : GREP_CFG_UPDATE,
+				              grep_gen,
+				              full_mode ? (size_t)-1 : grep_match_cap(),
+				              find_buf, files_buf, include_buf, exclude_buf);
 				needs_rescan = 0;
 			}
 
@@ -1345,30 +926,19 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 
 			term_move_cursor(start_control_line, 1);
 
-			if (vim_is_insert_mode())
+			if (vim_is_insert_mode()) {
 				(void)jstr_io_fwrite("-- [INSERT] --", 1, S_LEN("-- [INSERT] --"), stdout);
-			else
+			} else {
 				(void)jstr_io_fwrite("-- [NORMAL] --", 1, S_LEN("-- [NORMAL] --"), stdout);
+			}
 			term_clear_line_end();
 			(void)jstr_io_putchar('\n');
 
 			(void)jstr_io_fwrite("  Stats:    ", 1, S_LEN("  Stats:    "), stdout);
-			print_size_t(G.grep_lines.size);
+			ui_print_size_t(G.grep_lines.size);
 			(void)jstr_io_fwrite(" matches, ", 1, S_LEN(" matches, "), stdout);
-			/* Count unique files. */
-			size_t files_matched = 0;
-			for (unsigned int k = 0; k < G.files.size; ++k) {
-				int found = 0;
-				for (size_t j = 0; j < G.grep_lines.size; ++j) {
-					if (G.grep_lines.data[j].fname == G.files.data[k].fname) {
-						found = 1;
-						break;
-					}
-				}
-				if (found)
-					files_matched++;
-			}
-			print_size_t(files_matched);
+
+			ui_print_size_t(files_matched);
 			(void)jstr_io_fwrite(" files", 1, S_LEN(" files"), stdout);
 			term_clear_line_end();
 			(void)jstr_io_putchar('\n');
@@ -1397,32 +967,31 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			term_show_cursor();
 
 			(void)jstr_unlikely(jstr_io_fflush(stdout) == EOF);
+			last_match_count = G.grep_lines.size;
+			last_files_matched = files_matched;
+			visible_dirty = 0;
 			needs_redraw = 0;
 		}
 
 		char c;
-		confirm_key_ty key = confirm_read_key(&c);
+		confirm_key_ty key = confirm_read_key_timeout(&c, 20);
 		if (key == KEY_NONE)
 			continue;
 
 		jstr_ty *active_buf = grep_field_buf(find_buf, files_buf, include_buf, exclude_buf, active_field);
+		int edit_key = 0;
 
 		switch (key) {
 		case KEY_ENTER:
-			if (G.grep_lines.size > 0 && G.selected_line < G.grep_lines.size) {
-				restore_terminal();
-				const grep_line_ty *gl = &G.grep_lines.data[G.selected_line];
-				(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
-				(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
-				(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				(void)jstr_io_fputc(':', stdout);
-				(void)jstr_io_fwrite(COLOR_GREEN, 1, S_LEN(COLOR_GREEN), stdout);
-				print_size_t(gl->line_num);
-				(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
-				(void)jstr_io_fputc(':', stdout);
-				(void)jstr_io_fwrite(gl->content, 1, gl->content_len, stdout);
-				(void)jstr_io_fputc('\n', stdout);
-				return JSTR_RET_SUCC;
+			pending_enter = 1;
+			if (!scan_active && !rescanning && !needs_rescan && end_requested) {
+				if (G.grep_lines.size > 0) {
+					restore_terminal();
+					grep_emit_selected();
+					pipeline_ui_ack_send(0);
+					return JSTR_RET_SUCC;
+				}
+				pending_enter = 0;
 			}
 			break;
 
@@ -1473,6 +1042,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			break;
 
 		case KEY_DELETE:
+			edit_key = 1;
 			if (active_buf && cursors[active_field] < active_buf->size) {
 				memmove(active_buf->data + cursors[active_field], active_buf->data + cursors[active_field] + 1, active_buf->size - cursors[active_field] - 1);
 				active_buf->size--;
@@ -1497,6 +1067,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			exit(EXIT_FAILURE);
 
 		case KEY_BACKSPACE:
+			edit_key = 1;
 			if (active_buf && cursors[active_field] > 0) {
 				memmove(active_buf->data + cursors[active_field] - 1, active_buf->data + cursors[active_field], active_buf->size - cursors[active_field]);
 				active_buf->size--;
@@ -1509,6 +1080,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			break;
 
 		case KEY_CTRL_U:
+			edit_key = 1;
 			if (active_buf) {
 				jstr_empty_j(active_buf);
 				cursors[active_field] = 0;
@@ -1519,6 +1091,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			break;
 
 		case KEY_CHAR:
+			edit_key = 1;
 			if (vim_is_insert_mode()) {
 				if (active_buf) {
 					DIE_IF(jstr_chk(jstr_reserve_j(active_buf, active_buf->size + 2)), "%s", "Out of memory.\n");
@@ -1542,6 +1115,8 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 		default:
 			break;
 		}
+		if (edit_key && needs_rescan)
+			rescan_due = grep_now_ms() + GREP_RESCAN_DEBOUNCE_MS;
 	}
 
 	restore_terminal();
@@ -1584,7 +1159,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 
 	for (;;) {
 		if (needs_redraw) {
-			if (jstr_unlikely(!io_ok()))
+			if (jstr_unlikely(!ui_ok()))
 				break;
 			jstr_unescape_copy(&G.find_plain, find_buf);
 			jstr_unescape_copy(&G.rplc_plain, rplc_buf);
@@ -1653,7 +1228,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 						continue;
 					size_t file_matches = 0;
 					const char *ptn = (G.find_plain.size > 0 && G.find_plain.data) ? G.find_plain.data : "";
-					confirm_scan_file(t, &file->content, file->fname, file->fname_len, ptn, G.find_plain.size, G.rplc_plain.data ? G.rplc_plain.data : "", G.rplc_plain.size, &file_matches);
+					ui_scan_file(t, &file->content, file->fname, file->fname_len, ptn, G.find_plain.size, G.rplc_plain.data ? G.rplc_plain.data : "", G.rplc_plain.size, &file_matches);
 					if (file_matches > 0) {
 						total_matches += file_matches;
 						files_matched++;
@@ -1840,4 +1415,79 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 done:
 	restore_terminal();
 	return JSTR_RET_SUCC;
+}
+
+
+int
+terminal_active(void)
+{
+	return term_initialized;
+}
+
+unsigned short
+terminal_cols(void)
+{
+	return get_terminal_cols();
+}
+
+unsigned short
+terminal_rows(void)
+{
+	return get_terminal_rows();
+}
+
+static void
+ui_drain_root(root_ctx_ty *R root)
+{
+	if (root != NULL)
+		atomic_store_explicit(&root->cancel, true, memory_order_release);
+	for (;;) {
+		far_result_ty *res = pipeline_done_recv();
+		if (res == NULL)
+			break;
+		const int eos = (res->kind == FAR_RES_EOS);
+		ui_result_free(res);
+		if (eos)
+			break;
+	}
+}
+
+far_thread_ret_ty
+terminal_ui_thread(void *arg)
+{
+	(void)arg;
+	int ui_quit = 0;
+	ui_stop_requested = 0;
+	for (;;) {
+		far_ui_cmd_ty *const cmd = pipeline_ui_cmd_recv();
+		if (cmd == NULL || cmd->kind == FAR_UI_STOP)
+			break;
+		if (cmd->kind == FAR_UI_END) {
+			pipeline_ui_ack_send(0);
+			if (ui_quit)
+				break;
+			continue;
+		}
+		root_ctx_ty *const root = cmd->root;
+		if (ui_quit) {
+			ui_drain_root(root);
+			pipeline_ui_ack_send(0);
+			continue;
+		}
+		jstr_empty_j(&G.interactive_find_buf);
+		jstr_empty_j(&G.interactive_files_buf);
+		jstr_empty_j(&G.interactive_include_buf);
+		jstr_empty_j(&G.interactive_exclude_buf);
+		if (root->a->find_len > 0)
+			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_find_buf, root->a->find, root->a->find_len)), "%s", "Out of memory.\n");
+		if (G.include_pat)
+			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat))), "%s", "Out of memory.\n");
+		if (G.exclude_pat)
+			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_exclude_buf, G.exclude_pat, strlen(G.exclude_pat))), "%s", "Out of memory.\n");
+		grep_interactive_loop(root->t, &G.interactive_find_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf, root);
+		if (ui_stop_requested)
+			break;
+		ui_quit = 1;
+	}
+	return FAR_THREAD_RETURN;
 }

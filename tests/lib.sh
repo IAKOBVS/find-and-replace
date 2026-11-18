@@ -1,4 +1,6 @@
-PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -z "${PROG_DIR:-}" ]; then
+	PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+fi
 PROG="$PROG_DIR/find-and-replace"
 PASS=0
 FAIL=0

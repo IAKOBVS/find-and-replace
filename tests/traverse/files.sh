@@ -1,5 +1,6 @@
 #!/bin/sh
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_multi_file() {
 	td=$1; printf 'abc\n' > "$td/1"; printf 'abc\n' > "$td/2"
@@ -204,6 +205,18 @@ t_dash_stdin_placeholder_inplace_error() {
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -i with - (stdin placeholder) should error (rc=$rc)" > "$td/result"
 }
 
+t_dash_stdin_confirm_error() {
+	td=$1
+	rc=0; printf 'x\n' | "$PROG" x y -c -i - > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -c with - should error (rc=$rc)" > "$td/result"
+}
+
+t_dash_stdin_recursive_error() {
+	td=$1
+	rc=0; printf 'x\n' | "$PROG" x y -r - > /dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -r with - should error (rc=$rc)" > "$td/result"
+}
+
 t_dash_stdin_no_double_read() {
 	td=$1; printf 'only once\n' > "$td/sin"
 	out=$("$PROG" once ONCE - < "$td/sin" 2>/dev/null)
@@ -295,6 +308,8 @@ t_recursive_to_stdout
 t_dash_filename_no_double_dash
 t_dash_stdin_placeholder_replace
 t_dash_stdin_placeholder_inplace_error
+t_dash_stdin_confirm_error
+t_dash_stdin_recursive_error
 t_dash_stdin_no_double_read
 t_single_char_filename
 t_single_char_confirmed_dir

@@ -3,6 +3,10 @@
 
 #include "procfs.h"
 
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 /* Minimal line-based parser for /proc/meminfo-style "Key:   value" records.
  * The buffer is treated as a sequence of newline-terminated lines; each line
  * is split on the first delimiter and both sides are whitespace-trimmed. */
@@ -54,4 +58,33 @@ procfs_iter_next(struct procfs_iter *iter, const char **key, unsigned int *key_l
 		return 1;
 	}
 	return 0;
+}
+
+
+size_t
+procfs_mem_available(void)
+{
+	const size_t fallback = (size_t)1 << 30;
+	const int fd = open("/proc/meminfo", O_RDONLY);
+	if (fd == -1)
+		return fallback;
+	char buf[4096 + 1];
+	const ssize_t nread = read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (nread <= 0)
+		return fallback;
+	buf[nread] = '\0';
+	struct procfs_iter iter;
+	procfs_iter_init(&iter, buf, (unsigned int)nread);
+	const char *key;
+	const char *val;
+	unsigned int key_len;
+	unsigned int val_len;
+	while (procfs_iter_next(&iter, &key, &key_len, &val, &val_len, ':')) {
+		if (key_len == sizeof("MemAvailable") - 1 && memcmp(key, "MemAvailable", key_len) == 0) {
+			const size_t kib = (size_t)strtoul(val, NULL, 10);
+			return kib ? kib * 1024 : fallback;
+		}
+	}
+	return fallback;
 }

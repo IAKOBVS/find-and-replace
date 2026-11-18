@@ -1,5 +1,6 @@
 #!/bin/sh
-. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PROG_DIR/tests/lib.sh"
 
 t_stdin_inplace_err() {
 	td=$1; rc=0; printf 'test' | "$PROG" test ok -i > /dev/null 2>&1 || rc=$?
@@ -116,6 +117,35 @@ t_readonly_dir_backup() {
 	[ "$rc" -ne 0 ] && [ "$now" = 'qq' ] && printf '%s\n' "$msg" | grep -q 'error processing' && echo PASS > "$td/result" || echo "FAIL: rc=$rc now=[$now] msg=[$msg]" > "$td/result"
 }
 
+t_stdin_no_files_stdout_error() {
+	td=$1
+	rc=0; printf 'abc\n' | stdbuf -o0 "$PROG" '' x > /dev/full 2>/dev/null || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: no-files stdin stdout error should exit nonzero (rc=$rc)" > "$td/result"
+}
+
+t_stdin_placeholder_stdout_error() {
+	td=$1
+	rc=0; printf 'abc\n' | stdbuf -o0 "$PROG" a x - > /dev/full 2>/dev/null || rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: stdin placeholder stdout error should exit nonzero (rc=$rc)" > "$td/result"
+}
+
+t_backup_write_failure_enospc() {
+	td=$1
+	python3 - "$PROG" "$td" <<'PYEOF'
+import os, signal, resource, sys
+prog, td = sys.argv[1], sys.argv[2]
+with open(td + "/f", "w") as f:
+    f.write("x" * 2000 + "\n")
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (512, 512))
+errlog = os.open(td + "/errlog", os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+os.dup2(errlog, 2)
+os.execv(prog, [prog, "x", "y", "-i.bak", td + "/f"])
+PYEOF
+	rc=$?
+	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: backup write failure should exit nonzero (rc=$rc)" > "$td/result"
+}
+
 t_temp_write_failure_enospc() {
 	td=$1
 	python3 - "$PROG" "$td" <<'PYEOF'
@@ -189,6 +219,9 @@ t_readonly_file_direct
 t_readonly_file_recursive
 t_readonly_dir_plain_i
 t_readonly_dir_backup
+t_stdin_no_files_stdout_error
+t_stdin_placeholder_stdout_error
+t_backup_write_failure_enospc
 t_temp_write_failure_enospc
 t_closed_stdout_pipe
 t_long_relative_path_mkstemp

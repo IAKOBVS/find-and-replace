@@ -1,9 +1,15 @@
 # find-and-replace
 
-Multi-file C CLI tool (common header `common.h` + `main.c`, `files.c`,
-`process.c`, `confirm.c`, ~1100 lines) for fixed-string or regex
-find-and-replace on files, with optional recursion, regex filtering of
-basenames via `--include`/`--exclude`, and in-place editing with backups.
+Multi-file C CLI tool (`common.h`/`stage.h` + `main.c`, `io.c`, `traverse.c`,
+`process.c`, `ui.c`, `terminal.c`, plus `pipeline.c`/`spsc.c`, `vim.c`,
+`procfs.c`) for fixed-string or regex find-and-replace on files, with optional
+recursion, regex filtering of basenames via `--include`/`--exclude`, and
+in-place editing with backups. Every target kind (explicit files, recursive
+directories, stdin, and the `-c` pass 2) runs through a persistent
+A -> B -> C pipeline (C11 atomics/threads): A traverse, B process, C UI.
+For interactive grep, four workers each have their own thread: A traversal,
+B process, D grep scan/cache, and C UI; main orchestrates. The non-grep path
+still uses main as C. Threads start once and are reused for every root.
 
 ## Setup & build
 
@@ -15,47 +21,61 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 
 - The build system is a **Makefile** (`make`). `./compile` and `./test` are thin
   wrappers that delegate to `make`:
-  - `./compile` → `make` (compiles the 6 TUs with `-MMD/-MP` dependency
-    tracking, links against the globally-installed `/usr/local/lib/libjstr.so`,
-    and builds the C pty test driver `tests/pty_drive` + `tests/test_pty_drive`)
+  - `./compile` → `make` (compiles the 11 TUs with `-MMD/-MP` dependency
+    tracking and `-pthread`, links against the globally-installed
+    `/usr/local/lib/libjstr.so`, and builds the C pty test driver
+    `tests/pty_drive` + `tests/test_pty_drive` and the unit tests under `tests/pipeline/`)
   - `./test [N]` → `make test FZ=[N]` (runs all suites, then `N` fuzz
     iterations; `N` defaults to 250)
   - `make COVERAGE=1` builds with `--coverage` flags for `gcov` analysis; use
     `make clean` to force a rebuild after header changes
+  - `make TSAN=1` builds with `-fsanitize=thread`; TSAN cannot instrument
+    glibc's C11 `thrd_create` here, so the build defines `FAR_USE_PTHREAD=1`
+    and `thread_compat.h` switches to `pthread_create` (the C11 atomics in
+    `spsc.c` are unchanged)
 - `./update` re-clones jstring from upstream and reinstalls it to `/usr/local`
   (update the jstring dependency; run with sudo)
 - `./generate-readme` rebuilds `README.md` from `.README.md` + usage strings in `main.c`
-- `./coverage` builds with coverage, runs all tests, and runs `gcov` on all 4 units
+- `./generate-compile-commands [OUT]` writes `compile_commands.json` from `make -B -n`
+  (default `compile_commands.json`; also `make compile-commands`)
+- `./coverage` builds with coverage, runs all tests, and runs `gcov` on all 11 units
 
 ## Source layout
 
 | File | Purpose |
 |---|---|
-| `common.h` | Includes, shared macros (`DIE_IF`, `S_LEN`, `R`, MODE_* bits), core types (`mode_ty`, `match_ty`, `matches_ty`, `file_ty`, `files_ty`, `global_ty`), `extern global_ty G` |
-| `files.h` | `args_ty`, `matcher_args_ty`, `FILE_CACHE_MAX`/`FILES_CAP_MIN`, prototypes for `xstat`, `file_exists`, `callback_file`, `matcher`, `file_pushback` |
-| `process.h` | Prototypes for `process_buffer`, `process_file` |
-| `confirm.h` | Colors/prompt macros, `MATCHES_CAP_MIN`, prototype for `confirm_scan_file` |
-| `main.c` | `main`, flag/file-argument parsing, `usage`, `compile`, `init_defaults`, `cleanup`; defines `G` |
-| `files.c` | `xstat`, `file_exists`, ftw callbacks (`callback_file`, `matcher`), `ft_ty` |
-| `process.c` | `process_buffer`, `process_file` |
-| `confirm.c` | `-c` scan/preview: `confirm_scan_file`, `match_pushback`, `file_pushback`, line helpers, printers |
+| `common.h` | Shared includes/macros (`DIE_IF`, `S_LEN`, `R`, MODE_* bits), cache types (`mode_ty`, `match_ty`, `matches_ty`, `file_ty`, `files_ty`, `grep_line_ty`), `global_ty`/`extern global_ty G` |
+| `stage.h` | A/B/C contract only: `args_ty`, `process_result_ty`, `far_root_kind_ty`, `far_job_ty`, `far_result_ty`, `root_ctx_ty` |
+| `main.c` | `main`, CLI/flag/file parsing, `usage`, mode dispatch, `-c` pass driver (`run_confirm_mode`), `init_defaults`, `cleanup`; defines `G` |
+| `io.h`/`io.c` | Filesystem layer: `xstat`, `file_exists`, atomic in-place writes (`io_write_inplace_backup`, `io_write_inplace_temp`) |
+| `traverse.h`/`traverse.c` | Stage A (traverse): `traverse_thread`, `traverse_enqueue`, ftw `callback_file`, `--include`/`--exclude` `matcher` |
+| `process.h`/`process.c` | Stage B (process): `far_compile`, `process_thread`, `process_job`, `process_stdin_job`, `process_mem_job`, `process_buffer_compute`, grep scan/format/collect |
+| `ui.h`/`ui.c` | Stage C (UI): `ui_result`/`ui_result_free`, output helpers, `-c` preview scan/render, file/match cache, `ui_print_size_t`, colors |
+| `terminal.h`/`terminal.c` | Interactive terminal layer: raw mode/signals/cursor/size, confirm TUI, grep TUI, and `terminal_ui_thread` (dedicated grep UI thread; no file scanning) |
+| `grep_worker.h`/`grep_worker.c` | Stage D (grep scan): consumes raw file results from B, caches contents up to half `MemAvailable`, scans with the current find/filters, emits owned match records to C, supports generation updates/full rescan |
+| `pipeline.h`/`pipeline.c` | Plumbing only: statically-backed SPSC queues/accessors (cmd/work/done/ui_cmd/ui_ack/grep_work/grep_msg/grep_cfg), `pipeline_start`/`shutdown`/`run`, per-root START/EOS/STOP protocol, UI/scan-thread lifecycle |
+| `spsc.h`/`spsc.c` | Bounded lock-free SPSC queue: caller-provided slot storage (`spsc_chan_init`) or heap wrapper (`spsc_chan_new`), C11 `_Atomic` head/tail/closed, blocking send/recv with backoff |
+| `vim.h`/`vim.c` | Line-editor key handling used by the TUIs |
+| `procfs.h`/`procfs.c` | `/proc/meminfo` line parser used by the UI cache limit |
+| `thread_compat.h` | C11 `<threads.h>` by default; `pthread_create` under `FAR_USE_PTHREAD=1` (TSAN build) |
 
-Related functions share a namespace prefix (`process_*`, `match_*`, `line_*`,
-`print_*`, `file_*`, `confirm_*`); types keep their original names (`mode_ty`,
-`match_ty`, ...) and the global is `global_ty G`. Only functions called across
-TUs are non-static; their prototypes live in the module headers
-(`files.h`/`process.h`/`confirm.h`, all of which include `common.h`).
+Functions are namespaced by owner (`traverse_*`, `process_*`, `ui_*`,
+`terminal_*`, `io_*`, `pipeline_*`, `spsc_*`); shared contract types live in
+`stage.h`, process state/caches in `common.h`, and the global is `global_ty G`.
+Only cross-TU functions are non-static; prototypes live in the owning module
+header. Dependency direction: `main -> pipeline/stages`, `stages -> stage.h/io`,
+`pipeline -> stage.h/spsc`, and no stage includes `pipeline.c`.
 
 ## Key facts
 
-- **Only ANSI C features** - no VLAs, no `//` comments, no C99+ features beyond what POSIX requires
+- **C11 + POSIX** - the pipeline relies on `<stdatomic.h>`/`<threads.h>` and `-pthread`; no VLAs and no `//` comments
 - **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - installed globally, linked via `/usr/local/lib/libjstr.so`
 - **Include path**: `/usr/local/include/` (global install; no local checkout)
 - **Code style**: no comments, SPDX MIT header, `clang-format off/on` around the usage string
 - **Brace style**: a single statement in `if`/`else`/`for`/`while`/`do` needs no wrapping braces (e.g. `if (x) return;`); braces are only used when the block has two or more statements. The statement must go on the **next line** — never on the same line as the condition (`if (x) return;` on one line is disallowed). In an `if`/`else if`/`else` chain, braces must be **uniform**: if one branch needs braces (two or more statements), then every branch gets braces — even the single-statement ones
 - **Interactive TUI pty driver**: the C binary `tests/pty_drive`
   (built from `tests/pty_drive.c`) drives the interactive TUI tests via `pdrive`
-  in `confirm.sh`/`grep.sh`; `tests/test_pty_drive.sh` is its self-test.
+  in `confirm.sh`/`grep.sh`; `tests/terminal/test_pty_drive.sh` is its self-test.
   No Python driver remains (`tests/pty_drive.py` was removed).
 - **Usage strings** are defined with `_(...)` macro calls in `main.c`; `generate-readme` parses these with `grep '_('`
 - `.gitignore` ignores `find-and-replace` binary and `*.o`
@@ -69,36 +89,56 @@ TUs are non-static; their prototypes live in the module headers
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (14 suites, 308 tests)
+./compile && tests/run.sh   # all deterministic suites (15 suites, 352 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
-./tests/basic.sh            # run a single suite independently
+./tests/process/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
 ./coverage                  # build with --coverage, run all tests, report gcov
+```
+
+### Test layout
+
+```
+tests/
+  main/        flags.sh, errors.sh
+  traverse/    files.sh
+  process/     basic.sh, regex.sh, escape.sh, empty.sh, misc.sh,
+               edge-cases.sh, complex.sh, grep.sh
+  ui/          confirm.sh
+  io/          io.sh
+  pipeline/    pipeline.sh, spsc_unit.c, pipeline_unit.c
+  unit/        unit.sh, fake_meminfo.c
+  terminal/    test_pty_drive.sh (driver self-test; not in run.sh)
+  lib.sh       shared runner helpers
+  run.sh       deterministic suite runner
+  fuzz.sh      fuzz runner
+  pty_drive.c  C pty driver source
 ```
 
 ### Test suites
 
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
-| Basic | `tests/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
-| Flags | `tests/flags.sh` | 25 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version`, `-l`, `-q`/`--quiet`, `--exclude` CLI errors |
-| Regex | `tests/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
-| Files | `tests/files.sh` | 33 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
-| Errors | `tests/errors.sh` | 23 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
-| IO | `tests/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
-| Escape | `tests/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
-| Empty | `tests/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
-| Misc | `tests/misc.sh` | 7 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
-| Edge cases | `tests/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
-| Complex regex | `tests/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
-| Confirm | `tests/confirm.sh` | 87 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
-| Grep | `tests/grep.sh` | 28 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
-| Unit | `tests/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
+| Basic | `tests/process/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
+| Flags | `tests/main/flags.sh` | 26 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version`, `-l`, `-q`/`--quiet`, `--exclude` CLI errors |
+| Regex | `tests/process/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
+| Files | `tests/traverse/files.sh` | 35 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
+| Errors | `tests/main/errors.sh` | 26 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
+| IO | `tests/io/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
+| Escape | `tests/process/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
+| Empty | `tests/process/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
+| Misc | `tests/process/misc.sh` | 7 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
+| Edge cases | `tests/process/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
+| Complex regex | `tests/process/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
+| Confirm | `tests/ui/confirm.sh` | 88 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
+| Grep | `tests/process/grep.sh` | 36 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
+| Unit | `tests/unit/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
+| Pipeline | `tests/pipeline/pipeline.sh` | 28 | `spsc`/`pipeline` lifecycle units, all-target pipeline routing, `-r`/file/stdin order/in-place/backup/include-exclude, partial failure + error accumulation, 200-file traversal, recursive grep (fixed/regex/empty/TUI collect), per-root flag changes, pipeline `-c` abort, `/dev/full` stdout/stderr/`-l`/grep/prompt paths |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
 
-The category files partition tests by functionality rather than strict line coverage boundaries. Some overlap exists (e.g., regex used in in-place mode lives in `regex.sh`, not `io.sh`). Representative tests and coverage areas listed in the suites table above.
+The category files partition tests by functionality rather than strict line coverage boundaries. Some overlap exists (e.g., regex used in in-place mode lives in `process/regex.sh`, not `io/io.sh`). Representative tests and coverage areas listed in the suites table above.
 
 ### Test writing conventions
 
@@ -143,7 +183,7 @@ after the whole batch. A trailing `wait` reaps the subshells. `MAX_JOBS` (512
 by default, override with `FAR_MAX_JOBS` for low-`ulimit -n` systems) caps
 concurrency to avoid file descriptor exhaustion.
 
-All 13 deterministic suites run in order via `tests/run.sh`, each suite's
+All 15 deterministic suites run in order via `tests/run.sh`, each suite's
 progressive per-test output streaming straight to the terminal (no log
 capture); each suite keeps its own internal batch-wait jobserver for
 test-level parallelism, and run.sh exits non-zero if any suite failed.
@@ -153,14 +193,16 @@ applies `--winsize` to the slave **before** forking (no race with the child's
 first render), feeds `--phase`/`--tail` keystrokes, and reports the child's
 real exit status (including a non-blocking reap on early marker-miss).
 
-### Coverage: 95.5% of executable lines
+### Coverage: 90.4% of executable lines
 
 Coverage measured via `gcov` (`./coverage`, branch + line) after running all
-308 deterministic tests: 95.5% lines (1389/1454), 99.1% branches executed,
-80.6% of branches taken both ways (6 sources: main, files, process, confirm,
-procfs, vim). The small drop from Session 11's 95.9% comes from the new
-grep/`-`-stdin code paths that need fault injection or tty input to hit
-(e.g. the `-c`/`-r` + `-` conflict errors, ftw-failure exit).
+349 deterministic tests: 86.4% lines (2534/2932), 93.3% branches executed,
+72.4% of branches taken both ways (10 sources: main, io, traverse, process,
+terminal, vim, procfs, spsc, pipeline, ui). Remaining uncovered lines are
+allocation/thread-creation failures and rare write-error branches that need
+fault injection. Individually: `main.c` 98.4%, `io.c` 97.3%, `traverse.c`
+89.1%, `process.c` 86.1%, `terminal.c` 80.3%, `vim.c` 98.2%, `procfs.c` 100%,
+`spsc.c` 97.6%, `ui.c` 89.4%, `pipeline.c` 76.8%.
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -190,6 +232,7 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
 - `--grep` mode: stdin/file/recursive, `FNAME:` line prefixes, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find
 - `-q`/`--quiet` (in-place stderr echo + grep output suppression), `-` stdin placeholder (stdout, grep, and `-c`/`-i`/`-r` conflict errors)
 - `-r` error accumulation: unreadable file mid-tree continues traversal, reports `N file(s) failed during processing.`, non-zero exit (2 in grep)
+- Persistent A/B/C pipeline: threads started once at startup, multi-root FIFO order, per-root flag recompiles, include/exclude filtering in A, 200-file traversal, interactive `-c` abort-on-read-error (A traversal cancel), stdout/stderr/`-l` write errors
 - Unconditional `-c` preview colors (no `isatty` gating)
 
 **Remaining uncovered** (65 lines in the 6 gcov files, mostly OS-level or dead-code paths): signal handler + terminal restore, terminal-width fallbacks (`COLUMNS` env, ioctl failure), preview width-clipping branches, giant-size guards, disk-full, permission-denied, memory allocation failure, signal interrupts during I/O, long backup suffix, stdout write error, temporary file write/close/rename errors, `-c`/`-r` + `-` conflict errors, ftw-failure exit — these require fault injection or special terminal sizes and cannot be exercised in integration tests.
@@ -230,15 +273,15 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
 
 17. **`t_binary_skipped` not in TESTS (same class as #4)** — `tests/run.sh:196` defined `t_binary_skipped` but never listed it, likely because binary detection (`#if 0`) was disabled. Added to TESTS with updated expectation reflecting current no-binary-detection behavior.
 
-26. **Single-character file/dir args treated as the `-` stdin placeholder** — The file-loop check `if (ARG[1] == '\0')` at `main.c:394` never verified `ARG[0] == '-'`, so any one-char argument (`.`, `a`, ...) took the stdin branch: with `-c` it misreported `-c does not work with '-' (stdin).` for a plain `.` directory; in other modes the real file was silently skipped while stdin was read instead. Fixed to `ARG[0] == '-' && ARG[1] == '\0'`. Regression tests `t_single_char_filename`, `t_single_char_confirmed_dir` (the exact `'' 'exp' -r -i -c -g -R .` report) in `tests/files.sh`.
+26. **Single-character file/dir args treated as the `-` stdin placeholder** — The file-loop check `if (ARG[1] == '\0')` at `main.c:394` never verified `ARG[0] == '-'`, so any one-char argument (`.`, `a`, ...) took the stdin branch: with `-c` it misreported `-c does not work with '-' (stdin).` for a plain `.` directory; in other modes the real file was silently skipped while stdin was read instead. Fixed to `ARG[0] == '-' && ARG[1] == '\0'`. Regression tests `t_single_char_filename`, `t_single_char_confirmed_dir` (the exact `'' 'exp' -r -i -c -g -R .` report) in `tests/traverse/files.sh`.
 
-27. **`G.grep_collect` set after file loop — grep TUI never launched** — `G.grep_collect` was assigned at `main.c:608` (after the file-processing loop), so `process_file` never cached files during the loop. By the time `grep_collect` was set, `G.files` was empty and `grep_interactive_loop` had nothing to show. Additionally, `G.interactive_find_buf` was never seeded with `raw_find`, so even if the TUI launched, `grep_rescan` matched against an empty find (matching every line). Fixed by moving the `G.grep_collect` assignment into `parse_long_flag` (when `--grep` is parsed, before any files are processed) and seeding all interactive buffers (`find_buf`, `files_buf`, `include_buf`, `exclude_buf`) before calling `grep_interactive_loop`. Regression test `t_grep_interactive_file_cache` in `tests/grep.sh`.
+27. **`G.grep_collect` set after file loop — grep TUI never launched** — `G.grep_collect` was assigned at `main.c:608` (after the file-processing loop), so `process_file` never cached files during the loop. By the time `grep_collect` was set, `G.files` was empty and `grep_interactive_loop` had nothing to show. Additionally, `G.interactive_find_buf` was never seeded with `raw_find`, so even if the TUI launched, `grep_rescan` matched against an empty find (matching every line). Fixed by moving the `G.grep_collect` assignment into `parse_long_flag` (when `--grep` is parsed, before any files are processed) and seeding all interactive buffers (`find_buf`, `files_buf`, `include_buf`, `exclude_buf`) before calling `grep_interactive_loop`. Regression test `t_grep_interactive_file_cache` in `tests/process/grep.sh`.
 
-28. **Grep TUI missing FIND field; controls not pinned; vim mode broken** — Three related grep TUI deficiencies: (a) the grep TUI only had Files/Include/Exclude fields with no FIND field, so the user could not change the find string interactively; (b) controls were not pinned to the bottom of the terminal — they streamed inline after the preview content, so with a short preview the controls floated near the top; (c) `vim_set_insert_mode(1)` was never called, the `[INSERT]`/`[NORMAL]` label was hardcoded to `[INSERT]`, and the cursor positioning did not account for the field index offset. Fixed by adding GREP_FIELD_FIND as field 0, calling `vim_set_insert_mode(1)`, rendering `[INSERT]`/`[NORMAL]` via `vim_is_insert_mode()`, and using `term_move_cursor(start_control_line, 1)` to anchor controls to the bottom. Regression tests `t_grep_interactive_find_field`, `t_grep_interactive_controls_fixed`, `t_grep_interactive_vim_mode` in `tests/grep.sh`.
+28. **Grep TUI missing FIND field; controls not pinned; vim mode broken** — Three related grep TUI deficiencies: (a) the grep TUI only had Files/Include/Exclude fields with no FIND field, so the user could not change the find string interactively; (b) controls were not pinned to the bottom of the terminal — they streamed inline after the preview content, so with a short preview the controls floated near the top; (c) `vim_set_insert_mode(1)` was never called, the `[INSERT]`/`[NORMAL]` label was hardcoded to `[INSERT]`, and the cursor positioning did not account for the field index offset. Fixed by adding GREP_FIELD_FIND as field 0, calling `vim_set_insert_mode(1)`, rendering `[INSERT]`/`[NORMAL]` via `vim_is_insert_mode()`, and using `term_move_cursor(start_control_line, 1)` to anchor controls to the bottom. Regression tests `t_grep_interactive_find_field`, `t_grep_interactive_controls_fixed`, `t_grep_interactive_vim_mode` in `tests/process/grep.sh`.
 
-29. **Confirm TUI scrolling stopped at vis_end — `G.total_lines` capped** — `print_diff_lines` returned early when `G.preview_lines_printed >= vis_end` (the visible window limit), so `G.total_lines = G.preview_lines_printed` was capped at `vis_end`. After scrolling down, `G.selected_line + 1 < G.total_lines` became false too early, preventing further Ctrl-J scrolling. Fixed by changing the three early `return` statements in `print_diff_lines` to set a `render` flag to 0 and continue counting lines without rendering. Regression test `t_confirm_interactive_scroll_past_visend` in `tests/confirm.sh` (20-line file, 15 Ctrl-J presses past old vis_end).
+29. **Confirm TUI scrolling stopped at vis_end — `G.total_lines` capped** — `print_diff_lines` returned early when `G.preview_lines_printed >= vis_end` (the visible window limit), so `G.total_lines = G.preview_lines_printed` was capped at `vis_end`. After scrolling down, `G.selected_line + 1 < G.total_lines` became false too early, preventing further Ctrl-J scrolling. Fixed by changing the three early `return` statements in `print_diff_lines` to set a `render` flag to 0 and continue counting lines without rendering. Regression test `t_confirm_interactive_scroll_past_visend` in `tests/ui/confirm.sh` (20-line file, 15 Ctrl-J presses past old vis_end).
 
-30. **Grep output did not highlight matched strings** — `grep_scan_file` (non-interactive) printed the full matching line without wrapping the matched portion in red, and `grep_print_line` (interactive TUI) did the same. Fixed by computing `match_off`/`match_len` in `grep_collect_file` (using `jstr_strstr_len` for fixed-string, `regmatch_t.rm_so/rm_eo` for regex) and wrapping the match in `COLOR_RED`/`COLOR_RESET` in both `grep_scan_file` and `grep_print_line`. Regression tests `t_grep_match_highlight` and `t_grep_regex_highlight` in `tests/grep.sh`.
+30. **Grep output did not highlight matched strings** — `grep_scan_file` (non-interactive) printed the full matching line without wrapping the matched portion in red, and `grep_print_line` (interactive TUI) did the same. Fixed by computing `match_off`/`match_len` in `grep_collect_file` (using `jstr_strstr_len` for fixed-string, `regmatch_t.rm_so/rm_eo` for regex) and wrapping the match in `COLOR_RED`/`COLOR_RESET` in both `grep_scan_file` and `grep_print_line`. Regression tests `t_grep_match_highlight` and `t_grep_regex_highlight` in `tests/process/grep.sh`.
 
 ### jstring test file added (session 2)
 
@@ -262,7 +305,7 @@ grep/`-`-stdin code paths that need fault injection or tty input to hit
   basename, BRE by default (`-E`/`-I` cflags in effect at parse time apply).
   `--include` on CLI files has no effect — it only applies during directory
   recursion with `-r`. Use `--exclude` for CLI file filtering.
-- **`tests/test.c`** is a stale stub with a broken include path; use `tests/run.sh` (unified runner) or individual category files like `tests/basic.sh` instead.
+- **`tests/test.c`** is a stale stub with a broken include path; use `tests/run.sh` (unified runner) or individual category files like `tests/process/basic.sh` instead.
 - **`--` end-of-flags**: `find-and-replace foo bar -- file.txt` treats `file.txt` as a filename even if it starts with `-`. This is now fixed — both flag parsing and file parsing loops handle `--`.
 
   **Known limitation**: `--` cannot be followed by flags like `--include`/`--exclude`. The `end_of_flags` flag set by `--` in the flag loop leaks into the file loop, causing ALL remaining arguments (including flags and their arguments) to be treated as filenames. Flags must be placed before `--`:
@@ -329,7 +372,7 @@ became a single `trailing_nl` branch. Verified identical output on a
 | 19 | Block overran into the next line when a match consumed its `\n` | `line_get_end(match.end)` extended the block into the following unchanged line (`b\n` delete previewed `-b -c +c`) | `match_line_end` returns `end-1` when `data[end-1] == '\n'`; used in both the grouping condition and `block_end` | `find-and-replace.c:403-409, 597-601` |
 | 20 | Old-side line count inflated when block ended in `\n` | Old `count_newlines+1` double-counted a block whose last byte was the consumed terminator | With `match_line_end` the block never ends in its own terminator, so `count_newlines + 1` is exact (empty block = 1 empty line) | `find-and-replace.c:638` |
 | 21 | `print_hunk_header` args swapped | `new_line`/`new_count` passed in reverse produced wrong `+` ranges | Passed `(old_line, old_count, new_line, new_count)`; the function was later removed when the format dropped hunk headers | (was line 662) |
-| 22 | Every file >1 KiB silently skipped | `jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size))` passes `sz=1024` while the buffer holds `file_size` bytes, so `strlen(buf) != sz` for any >1024-byte NUL-free file → misclassified as binary → `process_file` returned early | Bound the NUL scan instead of comparing lengths: `memchr(buf->data, '\0', JSTR_MIN(1024, file_size))`. `jstr_io_isbinary` is inherently whole-file (`strlen(buf) != sz`) and cannot express a 1 KiB window. Regression tests `t_large_text_file_processed` (NUL-free >1 KiB processed) and `t_binary_nul_past_kib_processed` (NUL after byte 1024 → still processed) in `tests/io.sh` | `find-and-replace.c:688` |
+| 22 | Every file >1 KiB silently skipped | `jstr_io_isbinary(buf->data, JSTR_MIN(1024, file_size))` passes `sz=1024` while the buffer holds `file_size` bytes, so `strlen(buf) != sz` for any >1024-byte NUL-free file → misclassified as binary → `process_file` returned early | Bound the NUL scan instead of comparing lengths: `memchr(buf->data, '\0', JSTR_MIN(1024, file_size))`. `jstr_io_isbinary` is inherently whole-file (`strlen(buf) != sz`) and cannot express a 1 KiB window. Regression tests `t_large_text_file_processed` (NUL-free >1 KiB processed) and `t_binary_nul_past_kib_processed` (NUL after byte 1024 → still processed) in `tests/io/io.sh` | `find-and-replace.c:688` |
 | 25 | Interactive editor lost files shorter than the initial FIND | `process_file` early-returned `if (file_size < find_len)` for fixed-string finds, so pass 1 never read/cached such files and the editor could not preview or edit them even after shortening FIND | Guard the short-circuit with `!((G.mode & MODE_CONFIRM) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))` | `process.c:147` |
 
 ### Stale test expectations fixed (pre-existing failures, unrelated to preview)
@@ -338,13 +381,13 @@ Confirmed failing on the pre-change binary (jstring behavior drift):
 
 | Test | Was | Now |
 |---|---|---|
-| `tests/complex.sh` `t_regex_greedy` | `.*`→`X` -g on `a---b---c\n` expected `XX\nX\n` | engine writes `X\n` (whole-string match) |
-| `tests/edge-cases.sh` `t_edge_match_empty_lines` | `^$`→`EMPTY` -g on `\n\n` expected 3 EMPTYs | engine writes 2 EMPTYs |
-| `tests/confirm.sh` `t_confirm_regex_preview_dot_star_g` | `expected_file` was `worldworld\nworld` | engine writes `world\n` |
+| `tests/process/complex.sh` `t_regex_greedy` | `.*`→`X` -g on `a---b---c\n` expected `XX\nX\n` | engine writes `X\n` (whole-string match) |
+| `tests/process/edge-cases.sh` `t_edge_match_empty_lines` | `^$`→`EMPTY` -g on `\n\n` expected 3 EMPTYs | engine writes 2 EMPTYs |
+| `tests/ui/confirm.sh` `t_confirm_regex_preview_dot_star_g` | `expected_file` was `worldworld\nworld` | engine writes `world\n` |
 
 ### Tests updated for the diff format
 
-`tests/confirm.sh` assertions now grep the `file:line:`-prefixed `-`/`+`
+`tests/ui/confirm.sh` assertions now grep the `file:line:`-prefixed `-`/`+`
 format: `-- '-hello'`/`-- '+hi'` (multiline + backref), `-- '- b'`/`-- '+b'`
 (skip_newline), `-- '-hello'`/`-- '+world'` (dot_star_g), and
 `grep -c -- '-la la'` == 2 / `+lu lu` == 2 (multi_same_line). No `@@`/`---`
@@ -353,8 +396,8 @@ lines are emitted, asserted by negative greps in multiline_regex.
 ### Files changed
 
 - `find-and-replace.c` — preview rewrite + `scan_size` fix + usage text
-- `tests/confirm.sh` — assertions updated to diff format + stale `expected_file`
-- `tests/complex.sh`, `tests/edge-cases.sh` — stale expectations
+- `tests/ui/confirm.sh` — assertions updated to diff format + stale `expected_file`
+- `tests/process/complex.sh`, `tests/process/edge-cases.sh` — stale expectations
 - `QUIRKS.md` §3 — rewritten for the unified-diff preview
 - `README.md` — regenerated (`./generate-readme`); `.README.md` install line
   `./build` → `./compile` (no `./build` script exists)
@@ -362,7 +405,7 @@ lines are emitted, asserted by negative greps in multiline_regex.
 ### Verification
 
 - `tests/run.sh`: 11 suites, 0 failed
-- `tests/confirm.sh`: 19 passed (14 format tests + 5 line-number tests: `new_shift` across multi-hunk blocks, no-trailing-newline input, empty `-`/`+` lines for deleted regions and line insertions, and a 50-block/5000-line file exercising the incremental `line_counter_ty` and guarding the >1 KiB skip fix)
+- `tests/ui/confirm.sh`: 19 passed (14 format tests + 5 line-number tests: `new_shift` across multi-hunk blocks, no-trailing-newline input, empty `-`/`+` lines for deleted regions and line insertions, and a 50-block/5000-line file exercising the incremental `line_counter_ty` and guarding the >1 KiB skip fix)
 - `tests/fuzz.sh 60`: 0 crashes
 - Hunk headers/line counts manually cross-checked against `diff -u` region-only
   equivalents for: single-line, replacement with embedded `\n`, mid-file /
@@ -383,7 +426,7 @@ lines are emitted, asserted by negative greps in multiline_regex.
   `find-and-replace.c:688` with a length-bounded NUL scan
   (`memchr(buf->data, '\0', JSTR_MIN(1024, file_size))`), regression tests
   `t_large_text_file_processed` and `t_binary_nul_past_kib_processed` in
-  `tests/io.sh`. Now 155 deterministic tests.
+  `tests/io/io.sh`. Now 155 deterministic tests.
 
 ## Bugs found & fixed (17 total)
 
@@ -407,7 +450,7 @@ lines are emitted, asserted by negative greps in multiline_regex.
 
 | # | Bug | Fix | File |
 |---|---|---|---|
-| 4 | `t_edge_special_chars_replace` defined but never executed | Added to TESTS list | `tests/edge-cases.sh` |
+| 4 | `t_edge_special_chars_replace` defined but never executed | Added to TESTS list | `tests/process/edge-cases.sh` |
 | 17 | `t_binary_skipped` defined but never executed | Added to TESTS list | `tests/run.sh` |
 
 ### Library bugs (lib/jstring)
@@ -518,7 +561,7 @@ merged; `-i -- -filename` works) and the regex empty-buffer short-circuit
 | `lib/jstring/include/replace.h` | ~1079 | Integer overflow fix |
 | `lib/jstring/include/regex.h` | ~693 | Empty-buffer regex matching |
 | Category files in `tests/` | Each file's TESTS list | New tests location |
-| `tests/edge-cases.sh` | ~110 | Read-only file + backup test |
+| `tests/process/edge-cases.sh` | ~110 | Read-only file + backup test |
 | `lib/jstring/tests/test-replace-edge.c` | Full file | jstring edge-case tests |
 
 ### Test runner mechanics
@@ -642,14 +685,14 @@ keep the loop free of per-field branches.
 
 ### Tests
 
-- 5 new regex include/exclude tests in `tests/files.sh`:
+- 5 new regex include/exclude tests in `tests/traverse/files.sh`:
   `t_include_regex_suffix` (`\.txt$`), `t_exclude_regex_prefix` (`^i`),
   `t_include_regex_extended` (`-E --include '\.(txt|c)$'`), `t_exclude_regex_cli_files`,
   `t_include_invalid_regex` (invalid pattern → non-zero exit).
 - Existing glob tests converted to regex equivalents (e.g. `'*.txt'` →
   `'\.txt$'`, `'i*'` → `'^i'`). `t_include_cli_file_noop` switched to a valid
   regex (`'*.txt'` is now an invalid regex, leading `*`).
-- 5 new interactive tests in `tests/confirm.sh`:
+- 5 new interactive tests in `tests/ui/confirm.sh`:
   `t_confirm_interactive_include_exclude` (include `\.txt$` + exclude `^b`
   narrow the edit), `t_confirm_interactive_backup` (backup suffix `bak` →
   `fbak`), `t_confirm_interactive_l_flag` (`l` prints the changed path),
@@ -685,9 +728,9 @@ that every `\1`-`\9` in the replace string is within `re_nsub` of the compiled
 find pattern — the CLI path prints an error and exits non-zero (backrefs in the
 replace must be double-escaped: `'\\2 \\1'`, because the unescaper turns `\1`
 into octal byte 0x01). Confirmed working and added standalone coverage in
-`tests/regex.sh` (`t_backref_exceeds_nsub_inplace`, `t_backref_within_nsub_inplace`);
+`tests/process/regex.sh` (`t_backref_exceeds_nsub_inplace`, `t_backref_within_nsub_inplace`);
 the interactive/non-interactive `-c` paths were already tested in
-`tests/confirm.sh`. The library's backref parser is single-digit only and `nmatch`
+`tests/ui/confirm.sh`. The library's backref parser is single-digit only and `nmatch`
 is clipped to `rm[10]`, so the tool's `\1`-`\9` scan matches the library exactly.
 
 ### Bug 23: segfault when flags flip between files
@@ -706,14 +749,14 @@ function stores the mode/cflags it compiled under and re-runs the compile step
 does not affect compilation, so it is intentionally not part of the snapshot.
 
 Tests: `t_flag_between_files_regex` and `t_flag_between_files_fixed` in
-`tests/flags.sh` (TDD: both failed before the fix — the first with rc=139).
+`tests/main/flags.sh` (TDD: both failed before the fix — the first with rc=139).
 
 ### `--version`
 
 `-v`/`--version` prints `find-and-replace 0.1.0` and exits 0. Handled in the
 single-arg preamble (alongside `-h`, since `--version` as argv[1] is otherwise
 consumed as FIND) and in the flag loop for `prog foo bar --version`. Documented
-in the usage string; `t_version` in `tests/flags.sh`.
+in the usage string; `t_version` in `tests/main/flags.sh`.
 
 ### Cleanups
 
@@ -732,7 +775,7 @@ in the usage string; `t_version` in `tests/flags.sh`.
 ### Interactive TUI tests: all inline python replaced by `pdrive`
 
 Every remaining inline `python3 -c` block and heredoc `drive.py` script in
-`tests/confirm.sh` was converted to the shared `pdrive` wrapper (calls
+`tests/ui/confirm.sh` was converted to the shared `pdrive` wrapper (calls
 `tests/pty_drive.py` with `--prog "$PROG" --out "$td/out" --rc "$td/rc"` and an
 auto `--ready '-- [INSERT] --'` unless `--noready`/`--ready` is given). Only the
 `pdrive` wrapper's `python3` invocation remains in confirm.sh. The 6 broken
@@ -782,7 +825,7 @@ mypy clean.
 
 ### Verification
 
-- `tests/confirm.sh`: 79/79 (was 40 at Session 7).
+- `tests/ui/confirm.sh`: 79/79 (was 40 at Session 7).
 - `tests/run.sh`: **13 suites, 265 deterministic tests, 0 failed**; `./test`
   prints full output and exits 0; fuzz 1 iteration 0 crashes.
 - `./coverage`: 95.9% lines (1305/1361), 99.2% branches executed, 80.7% taken
@@ -808,7 +851,7 @@ way they do on the command line. Now:
   exactly what the second pass will write. The copies are rebuilt every redraw
   because REPLACE has `affects_recompile = 0`.
 
-New tests in `tests/confirm.sh`: `t_confirm_interactive_escape_find`
+New tests in `tests/ui/confirm.sh`: `t_confirm_interactive_escape_find`
 (typed `\t` matches a real tab), `t_confirm_interactive_escape_replace`
 (typed `\n` inserts a newline), `t_confirm_interactive_escape_live_preview`
 (live preview renders the tab match). Note: typing `\t` with the pty driver
@@ -884,14 +927,14 @@ the first absolute cursor move, then jump to row 16).
 - **`md/PLAN-IMPROVE.md`** created with a prioritized improvement list and a
   full design plan for a new **grep mode** (read-only, no replace): semantics,
   exit codes (0/1/2), flag conflicts with `-i`/`-c`, shared match-collection
-  extraction from `confirm_scan_file`, and a new `tests/grep.sh` suite.
+  extraction from `confirm_scan_file`, and a new `tests/process/grep.sh` suite.
 
 ## Session 12: --grep mode; -q/--quiet; `-` stdin placeholder; -r error accumulation; idempotent init_defaults
 
 Implemented the grep-mode plan from `md/PLAN-IMPROVE.md` (P4 features) plus the
 P1 `-r` and `init_defaults` items:
 
-- **`--grep`** (new 14th suite `tests/grep.sh`, 17 tests): read-only, prints
+- **`--grep`** (new 14th suite `tests/process/grep.sh`, 17 tests): read-only, prints
   matching lines to stdout and exits **0** (any match) / **1** (no match) /
   **2** (error). Errors exit 2 via a new `err_exit_code()` helper in `main.c`
   (grep mode picks 2, all other modes keep `EXIT_FAILURE`); applied to regex
@@ -985,17 +1028,17 @@ wrapper scripts are thin aliases over it (no parallel-`cc` shell logic, no
 **Async layer removed.** `async.c`, `async.h`, and `tests/async_unit.c` were
 deleted. They were dead code: the only TUs that referenced `async_chan_*` /
 `async_thread_*` were the removed files themselves (`nm -u` on every other TU
-shows no async or `pthread` undefined symbols), and `tests/unit.sh` had already
+shows no async or `pthread` undefined symbols), and `tests/unit/unit.sh` had already
 been rewritten to test the meminfo shim instead of the channel. The Makefile
 dropped `async.c` from `SRCS` and the now-unneeded `-pthread` from `CFLAGS`/
-link. `tests/unit.sh` remains 6 meminfo tests.
+link. `tests/unit/unit.sh` remains 6 meminfo tests.
 
 **C pty driver is the only driver.** All TUI tests now use the C binary
 `tests/pty_drive` (from `tests/pty_drive.c`). The `pdrive()` wrappers in
-`tests/confirm.sh` and `tests/grep.sh` invoke the binary directly
+`tests/ui/confirm.sh` and `tests/process/grep.sh` invoke the binary directly
 (`"$PDRV" ...`), no `python3`. `tests/pty_drive.py` was removed.
 
-`tests/test_pty_drive.sh` (the driver's self-test) was updated to the C
+`tests/terminal/test_pty_drive.sh` (the driver's self-test) was updated to the C
 driver's semantics: after `--prog PROG --`, pass only the **arguments** (the
 driver injects argv[0]=PROG), not a repeated program name; the `--timeout` /
 `--ready-timeout` deadline kills a still-running child with SIGTERM, so the
@@ -1005,7 +1048,7 @@ check the output content (`*ABC*`, `*hello*`) instead of relying on
 "cat exits when stdin closes".
 
 Verification: `make test FZ=60` → 14 suites, 0 failed, 60 fuzz iterations
-0 crashes; `tests/test_pty_drive.sh` → 18/18.
+0 crashes; `tests/terminal/test_pty_drive.sh` → 18/18.
 
 ## Session 20: global jstring; local checkout removed
 
@@ -1034,6 +1077,294 @@ Verification: clean `make`; `ldd ./find-and-replace` → `libjstr.so =>
 /usr/lib/libjstr.so`; `make test FZ=40` → 14 suites, 0 failed, 40 fuzz
 iterations, 0 crashes.
 
+## Session 21: lock-free SPSC `-r` pipeline (traversal -> process -> UI)
+
+**Superseded by Session 22**: the pipeline is now persistent A/B/C with three
+OS threads (main is C). The notes below describe the earlier 2-thread per-root
+implementation.
+
+Recursive directory targets now run through a three-logical-stage SPSC
+pipeline, collapsed onto **two OS threads**:
+
+- **A (traversal thread, C11 `thrd_create`)**: `jstr_io_ftw` enqueues
+  `{path, stat, seq}` jobs into a bounded lock-free ring. Paths are copied;
+  contents are not (reading stays in B). The existing `matcher` still applies
+  `--include`/`--exclude` in A traversal.
+- **B (process, main thread)**: drains the FIFO and calls the existing
+  `process_file` / grep / `-c` cache paths unchanged.
+- **C (UI seam, main thread today)**: `ui.c` owns the stdout/stderr
+  writes (`ui_replaced_buf`, `ui_report_changed`, `ui_grep_line`), so a
+  future third thread can consume a result queue without touching B.
+
+`spsc.c` is a Vyukov-style bounded ring: producer-owned `tail`, consumer-owned
+`head` (monotonic + mask), release/acquire publication of the slot, atomic
+`closed` flag. `send`/`recv` block with spin -> `sched_yield` ->
+`nanosleep(100us)` backoff; `close` wakes both sides, receivers drain queued
+items then see `NULL`. Depth is 128 path jobs (~25 KiB), so backpressure bounds
+memory without holding file contents.
+
+Scope and ordering:
+
+- Only `-r` directory targets are pipelined. Explicit files, stdin, non-
+  recursive dirs, and the non-interactive `-c` dry-run stay sequential (the
+  dry-run streams the full preview and must abort on the first scan error).
+- A pipeline is created/joined **per root** inside `process_target_arg`, so
+  per-file flag changes (`-R dir1 -F dir2`) and root error ordering are
+  preserved without per-job snapshots.
+- Normal `-r` accumulates `err_count` and continues; `-c` scan errors close the
+  queue, cancel the traversal thread, drain, and keep the original `ftw(...) failed.`
+  message/exit code.
+- Exactly one thread writes stdio (main); the traversal thread never calls
+  `jstr_errdie`/`exit`. The TUIs remain barrier consumers: the full `G.files`
+  cache is populated first, then `confirm_interactive_loop`/`grep_interactive_loop`
+  run as before.
+
+TSAN note: ThreadSanitizer on this glibc does not instrument C11
+`thrd_create`-spawned threads (first instrumented call segfaults in
+`__tsan_func_entry`). `thread_compat.h` therefore switches to
+`pthread_create` only under `make TSAN=1` (`FAR_USE_PTHREAD=1`); normal builds
+use `<threads.h>`. The atomics and queue code are identical in both builds.
+
+Tests added: `tests/pipeline/pipeline.sh` (17) plus `tests/pipeline/spsc_unit.c` (FIFO stress,
+wrap-around, close-drain, blocked producer/consumer wakeup, invalid cap,
+close/is_closed). Deterministic total: **15 suites, 325 tests**. Verification:
+`make test FZ=50` -> 15 suites, 0 failed, 0 crashes; `make TSAN=1` ->
+`spsc_unit` + `tests/pipeline/pipeline.sh` clean; coverage 89.6% lines
+(`spsc.c` 98.4%, `ui.c` 93.9%, `pipeline.c` 83.3%). Remaining uncovered
+lines are allocation/thread-creation failures and a producer-cancel race that
+need fault injection.
+
+## Session 22: persistent three-thread A -> B -> C pipeline (started at startup)
+
+**Scope superseded by Session 27**: all target kinds now use the pipeline.
+
+The stage names are **A = traversal**, **B = process**, **C = UI**. The `-r`
+pipeline is exactly **three OS threads**, started once in `main` (after
+`init_defaults`) and reused for every root:
+
+- **A / traversal** (`traversal_thread`, `traversal.c`): blocks on a main -> A control queue. For
+  each root it runs `jstr_io_ftw`, copies `{path, stat}` jobs into the A -> B
+  work queue, then sends one embedded EOS job.
+- **B / process** (`process_thread`, `process.c`): blocks on the work queue, calls
+  `process_job` (reads into a B-local buffer, performs in-place writes, builds
+  stdout/cache payloads), and forwards a result to the B -> C queue followed by
+  EOS. It never writes stdio or touches `G.files`/`G.grep_lines`.
+- **C / UI** (main, `ui.c`): consumes results in FIFO order, calls `ui_result` (stdout,
+  `-i`/`-l` reports, `file_pushback` for `-c`/grep collect), updates
+  `G.grep_matched`/`a->err_count`, then runs the prompt/TUI/pass 2 after the
+  root's EOS barrier.
+
+Queues are persistent lock-free SPSC (`spsc.c`): `cmd` (main -> A, depth 16),
+`work` (A -> B, depth 128), `done` (B -> C, depth 128). `pipeline_shutdown`
+sends NULL to A, which forwards it to B; both threads are joined in
+`cleanup()`. `pipeline_start`/`shutdown` are idempotent.
+
+Per-root state is a stack `root_ctx_ty` owned by C until EOS: atomics `cancel`,
+`total`, `ftw_ret`, `prod_errs`, the A-only `seq`, and the embedded EOS job.
+Cancellation (`-c` read error or a fatal result) stores `cancel`, A stops ftw,
+B sends canceled results for already-queued jobs, and C still drains to EOS.
+Roots are sequential, so main mutates `G` flags/compiled matcher only between
+roots; the queue release/acquire handoff publishes them to A/B (no per-job
+config snapshots).
+
+Buffer ownership: `process_job` transfers its read buffer to the result for
+stdout and collect/`-c` payloads (`*buf = NULL`; B allocates the next one) and
+reuses it for in-place/no-payload jobs; C frees or `file_pushback`-steals it.
+Fatal errors from B-side in-place helpers still use `jstr_errdie` (process
+exit), matching sequential behavior.
+
+Scope unchanged: only `-r` directory targets are pipelined; explicit files,
+stdin, non-recursive dirs, and the non-interactive `-c` dry-run stay
+sequential. `make TSAN=1` still maps thread creation to pthread
+(`FAR_USE_PTHREAD=1`) because TSAN cannot instrument C11 `thrd_create` here.
+
+Verification: `make test FZ=50` -> 15 suites (325 tests), 0 failed, 0 fuzz
+crashes; `make TSAN=1` -> `spsc_unit` + `tests/pipeline/pipeline.sh` clean; ASan run on
+stdin/stdout/in-place/grep/`-c` clean; coverage 87.6% lines (`spsc.c` 98.4%,
+`traversal.c` 82.4%, `ui.c` 80.7%, `pipeline.c` 72.6%).
+
+## Session 23: stage ownership split (A traversal, B process, C UI)
+
+Stage code now lives with its owner instead of under a `pipeline_*` prefix:
+
+- **A / traversal**: `traversal.h`/`traversal.c` own `traversal_thread` and
+  `traversal_enqueue`.
+- **B / process**: `process.h`/`process.c` own `process_thread` and
+  `process_job` (`process_result_ty` is the B->C payload).
+- **C / UI**: `ui.h`/`ui.c` own `ui_result`/`ui_result_free` plus the stdout,
+  `-i`/`-l`, and grep formatting helpers.
+- **`pipeline.*`** is plumbing only: shared `far_job_ty`/`far_result_ty`/
+  `root_ctx_ty`, the three SPSC queues and their accessors
+  (`pipeline_cmd_recv`, `pipeline_work_send/recv`, `pipeline_done_send/recv`),
+  and the per-root `START`/`EOS`/`STOP` lifecycle.
+
+This adds `traversal.c` as the 10th translation unit. Coverage is now 90.4%
+lines (`pipeline.c` 77.8%, `traversal.c` 82.4%, `ui.c` 83.5%). All 15 suites /
+349 tests stay green.
+
+## Session 24: coverage hardening
+
+Added `tests/pipeline/pipeline_unit` (built like the main TUs, minus `main.o`) to cover
+`pipeline_start` idempotency and `pipeline_shutdown` before start / twice.
+New integration tests cover recursive regex grep, recursive grep TUI collect,
+empty-find grep on `-`/file/`-r`, `-c`/`-r` with the `-` placeholder,
+non-tty `-c` strict abort, sequential stdout/`-l` write errors, recursive grep
+stdout errors, prompt write/flush errors, and backup-write `RLIMIT_FSIZE`
+failure. Dead paths removed: the unreachable non-grep empty-find stdin branch,
+the always-ERR `callback_file` fallback, the unused `fatal`/`err_msg` result
+fields, and dead returns after `jstr_errdie`.
+
+Coverage rose from 87.6% to **90.4% lines** (2167/2398), 96.0% branches
+executed, 76.0% taken both ways; deterministic suite total **15 suites, 349
+tests**. Remaining gaps are allocation/thread-creation failures and partial
+write/OOM branches that need allocator or sink fault injection.
+
+## Session 25: module/file structure + test layout
+
+Source ownership is now explicit:
+
+- Removed `files.c/h` (mixed CLI/process/traversal helpers).
+- Added `io.c/h`: `xstat`, `file_exists`, atomic in-place writes.
+- `traversal.*` → `traverse.*`; `matcher`/`callback_file` moved there.
+- `far_compile` moved from `main.c` to `process.c`.
+- `confirm.*` split: `ui.c` now owns `ui_scan_file`, the `-c` preview
+  renderers, `file_pushback`/cache, `ui_print_size_t`, colors, and result
+  emission; `terminal.c` owns raw mode/signals/cursor/size and both TUIs.
+- Added `stage.h` for the A/B/C contract (`args_ty`, `process_result_ty`,
+  `far_job_ty`, `far_result_ty`, `root_ctx_ty`); `pipeline.h` is lifecycle +
+  queue accessors only, and `far_result_ty` embeds `process_result_ty`.
+- `run_confirm_mode` stays in `main.c` as the `-c` pass driver.
+
+Tests now mirror modules by directory: `tests/main/`, `traverse/`, `process/`,
+`ui/`, `io/`, `pipeline/`, `unit/`, `terminal/` (driver self-test), with
+`run.sh` updated to the new paths; unit binaries build under `tests/pipeline/`.
+
+Verification: `make test FZ=50` → 15 suites, 349 tests, 0 failed; `make TSAN=1`
+→ `spsc_unit`, `pipeline_unit`, pipeline suite clean; coverage 90.4% lines
+(2165/2396), 96.0% branches executed, 76.1% both paths.
+
+## Session 26: SPSC storage from a preallocated arena
+
+The bounded queues no longer allocate at startup. `spsc_chan_init` initializes a
+caller-provided `spsc_chan_ty` plus `void *slots[]` array; `spsc_chan_new` is
+kept as a heap wrapper for unit tests and rounds the capacity to a power of two.
+`spsc_chan_free` only frees the slot array when `owned` is set.
+
+`pipeline_state_ty` now embeds the three channels and their slot arrays
+(`cmd` 16, `work` 128, `done` 128, ~2.2 KiB), so `pipeline_start` only calls
+`spsc_chan_init` and `pipeline_shutdown` only joins the threads. The queue
+memory is fixed for the process lifetime and reused for every root.
+
+`tests/pipeline/spsc_unit.c` now also covers static init, invalid capacities
+(non-power-of-two, zero, NULL slots), re-init after close, and close/drain.
+Coverage: 90.5% lines (2165/2391); `spsc.c` 94.6%, `pipeline.c` 83.6%.
+Full suite 15/349, TSAN clean.
+
+## Session 27: unify all targets through the SPSC pipeline
+
+There is no sequential target-processing path anymore. `main` builds a
+`root_ctx_ty` for each target and calls `pipeline_run`:
+
+- `FAR_ROOT_DIR`: A runs ftw.
+- `FAR_ROOT_FILE`: A enqueues one file job.
+- `FAR_ROOT_STDIN`: A enqueues one stdin job; B reads stdin.
+- `FAR_ROOT_MEM`: A enqueues cached `file_ty` entries for the `-c` pass 2.
+
+B switches on `far_job_kind_ty` (`FAR_JOB_FILE`/`STDIN`/`MEM`) and calls
+`process_job`, `process_stdin_job`, or `process_mem_job`. C (`ui_result`) now
+handles non-tty `-c` preview scanning as well as tty caching, and writes
+stdin grep output bare.
+
+The old sequential API (`process_file`, `process_buffer`, `grep_scan_file`),
+the sequential ftw callback, `args_ty.buf`, and `G.content_buf` were removed.
+Explicit-file error messages (`error processing '...'`) are preserved by
+checking `err_count` around the single-file root.
+
+Verification: `make test FZ=50` -> 15 suites, 349 tests, 0 failed; TSAN clean;
+coverage 88.9% lines (2189/2462), 95.7% branches executed, 75.2% both paths.
+
+## Session 28: cache-line layout + structured error paths
+
+Queue hot atomics are padded, rare atomics are not:
+
+- `spsc_chan_ty` puts `slots`, `cap`, `mask`, `closed`, `owned` on the control
+  line; `head` and `tail` are each `alignas(64)` (`<stdalign.h>`).
+- `pipeline_state_ty` aligns the three channels and their slot arrays.
+- `root_ctx_ty`'s `cancel`/`total`/`ftw_ret`/`prod_errs` and `args_ty.err_count`
+  are no longer over-aligned: they are rare/root-boundary traffic.
+- `global_ty` keeps read-only config on the first line; the frequently written
+  UI counters (`matches_found`, `grep_matched`) start a new line.
+
+Error handling in the multi-exit functions is now `goto`-based:
+
+- `process_job`, `process_stdin_job`, `process_mem_job`: `goto err` sets
+  `res->err`, `out:` frees temporary grep output.
+- `traverse_emit`: `goto out` frees a partially built job.
+- `spsc_chan_new`: `goto err` frees `slots`/channel.
+- `io_write_inplace_backup` and `ui_format_grep_line`: single `goto` error exit.
+
+Verification: full suite 15/349, fuzz clean, TSAN clean; coverage 90.0% lines
+(2213/2460), 95.7% branches executed, 75.3% both paths.
+
+## Session 29: dedicated live grep UI thread
+
+Interactive `--grep` now runs its TUI on a dedicated C/UI thread instead of
+waiting for main to drain the whole tree:
+
+- `pipeline_start` also starts `terminal_ui_thread` and creates `ui_cmd`
+  (main -> C) and `ui_ack` (C -> main) SPSC queues.
+- For tty grep, `pipeline_run` sends `FAR_UI_ROOT` to C, sends the root to A,
+  and waits for C's EOS ack. C consumes `done` with `spsc_chan_try_recv` and
+  caches files as they arrive. During the scan it keeps only a terminal-sized
+  snapshot of matches (no growing list, no auto-scroll), redraws only when
+  visible counters change (matches/files), throttled to at most every 100 ms;
+  after the final END + EOS it runs the normal full `grep_rescan` and restores
+  the previous capped TUI.
+- `grep_interactive_loop` is now live-aware: it polls UI commands and done
+  results between 20 ms key timeouts, shows `-- [SCANNING] --` until the final
+  END + EOS, then restores the normal `[INSERT]`/`[NORMAL]` marker.
+- Edits remain available during the scan, but rescans are capped to one
+  terminal screen until END; after the scan they use the full rescan. Uncached
+  files are re-read from disk on rescan.
+- `Enter` during the scan is deferred until the scan completes, so the selected
+  match is still printed.
+- `get_free_ram_size` now falls back to `FREE_RAM_FALLBACK` when
+  `MemAvailable` is absent, so the grep cache cannot become zero-sized.
+- Non-grep modes still use main as C; `-c` TUI/prompt/pass2 remain on main.
+
+Verification: 15 suites / 349 tests pass, fuzz clean, TSAN clean; coverage
+87.8% lines (2347/2672), 94.2% branches executed, 73.3% both paths.
+
+## Session 30: dedicated grep scan worker with content cache
+
+Interactive grep now has a true scan worker (stage D), separate from the UI:
+
+- `pipeline_start` starts `grep_worker_thread` and creates `grep_work` (B -> D),
+  `grep_msg` (D -> C), and `grep_cfg` (C -> D) SPSC queues.
+- B routes raw file results to D when live grep is active; D caches contents up
+  to **half of MemAvailable** (`procfs_mem_available()/2`), scans with the
+  current find/include/exclude/files filters, and sends owned match records to
+  C. Files beyond the cache budget are scanned once and re-read from disk on a
+  later rescan.
+- C no longer scans files. It sends immutable config snapshots (generation,
+  find/filter copies, flags, match limit) to D, appends owned match records to
+  `G.grep_lines`, and renders. Editing FIND/filters bumps the generation; stale
+  D results are discarded.
+- During live scan D is limited to one terminal screenful of matches. Edits
+  build the replacement match list in a separate pending buffer while the old
+  display stays on screen; C swaps only when the new generation has matches (or
+  at the final END/full scan), so an edit never blanks the preview. After the
+  final END C requests a full rescan, D scans the whole cache (re-reading
+  uncached files), and C restores the previous capped TUI with full scrolling.
+- Match records own a copied filename and line, so D cache eviction cannot
+  invalidate anything C renders. `grep_lines_clear()` frees the owners on
+  generation changes.
+- The UI thread keeps the 20 ms key poll and 100 ms visible-change redraw
+  throttle; scanning work cannot block it.
+
+Verification: 15 suites / 349 tests pass, fuzz clean, TSAN clean; coverage
+86.4% lines (2534/2932), 93.3% branches executed, 72.4% both paths.
+
 ## Test-Driven Development (TDD) Guidelines
 
 For every new feature, bug fix, or behavioral change introduced to the codebase:
@@ -1041,3 +1372,86 @@ For every new feature, bug fix, or behavioral change introduced to the codebase:
 - Verify that the test fails as expected.
 - Implement the code change, compile, and run the test suite to ensure the new test passes and no regressions are introduced.
 - Maintain comprehensive coverage of edge cases and input variations.
+
+## Session 31: batch D -> C match records; retire large lists off the UI thread
+
+The remaining control lag came from C doing per-match work after D had already
+scanned the files:
+
+- D sent one `far_grep_msg_ty` allocation per match, and C freed each message
+  individually.
+- C drained the entire message queue before polling keys.
+- `grep_lines_discard()` freed every owner on the UI thread; a full rescan after
+  END (or an edit after one) could free hundreds of thousands/millions of
+  blocks in one UI iteration.
+
+Changes:
+
+- `far_grep_msg_ty` now carries a batch (`lines`, `count`, `files_matched`).
+  D accumulates up to `GREP_BATCH_MAX` (64) matches, flushes before EOS/DONE, and
+  sends one message per batch. A live scan still stops at `C.limit`; a full
+  rescan is unlimited.
+- C processes messages with a **1 ms time budget**, then polls keys. Input is
+  no longer starved while a large full rescan streams in.
+- Match-list storage is reserved per batch (`grep_lines_append_batch`), so a
+  batch causes at most one growth step instead of one per match.
+- Old/pending lists are moved to a C -> D `grep_retire` SPSC queue
+  (`pipeline_grep_retire_try_send`) instead of being freed on the UI thread.
+  D frees them in 4096-owner steps between scan work, so retirement does not
+  block keyboard input.
+- C keeps a small local pending-retire list if the retire queue is full, so
+  discard never blocks the UI. The retire node’s `lines` member is first; D
+  frees the node after the list is drained.
+- Loading feedback: while `scan_active || rescanning || pending_active ||
+  !end_requested`, the marker renders `-- [LOADING <spinner>] --` and the Stats
+  line appends `(loading)`. The spinner advances on the 100 ms redraw throttle,
+  so a slow rescan keeps the old preview visible but visibly in progress.
+- Added `spsc_chan_try_send` and a `test_try_send` unit test.
+
+Bug found during testing: C freed the retire node immediately after sending its
+embedded `grep_lines_ty` to D, so D read a freed node (`free(): invalid
+pointer`; ASan heap-use-after-free in `retire_step`). Fixed by transferring node
+ownership to D and reading `node->next` before the send.
+
+Verification: grep suite 35/35 (new `t_grep_interactive_large_batch`, 200
+matches, and `t_grep_interactive_loading_marker`), confirm 88/88, full 15 suites
+/ 351 tests, `make test FZ=20` clean, TSAN `spsc_unit`/`pipeline_unit` clean.
+
+## Session 32: debounce before blanking; static loading marker
+
+The dirty-preview swap was replaced by a throttled blank because keeping stale
+matches on screen while a rescan ran was more confusing than useful, and the
+animated loading redraw cost an extra full-screen render every 100 ms.
+
+- Field edits set `rescan_due = now + GREP_RESCAN_DEBOUNCE_MS` (100 ms). The
+  rescan does not start until the debounce expires, so fast typing does not
+  issue a scan per keystroke.
+- When the rescan actually starts, `G.grep_lines` is discarded immediately
+  (retired to D), the stats reset to zero, and the preview is blank while the
+  new generation streams in. There is no pending/dirty display list anymore.
+- Loading feedback is static: `-- [LOADING] --` and `Stats: ... (loading)`.
+  The spinner and its forced 100 ms redraws were removed.
+- Enter is deferred while `needs_rescan`/`rescanning`, so the old visible
+  result cannot be emitted during the debounce window.
+- Removed the now-unused `pending_lines`, `pending_active`, `pending_ready`,
+  and `grep_lines_swap`.
+
+Verification: grep suite 36/36 (new `t_grep_interactive_blank_after_debounce`),
+full 15 suites / 352 tests, `make test FZ=10` clean.
+
+## Session 33: 200 ms idle debounce; no loading marker
+
+- `GREP_RESCAN_DEBOUNCE_MS` is **200 ms** and the deadline is reset on every
+  editing key, so the preview is not blanked mid-typing. 200 ms is a reasonable
+  balance: typical keystrokes are 80-150 ms apart, while the rescan still feels
+  immediate after the user stops.
+- Removed the `-- [LOADING] --` marker and the `(loading)` stats suffix.
+- The preview blanks only after the idle debounce expires and the rescan starts;
+  Enter remains deferred while `needs_rescan`/`rescanning`.
+- Replaced the loading-marker test with `t_grep_interactive_no_blank_while_typing`
+  (types five keys 50 ms apart and asserts no `0 matches` frame after the old
+  result) and kept `t_grep_interactive_blank_after_debounce` (300 ms idle, then
+  detached blank stats).
+
+Verification: grep suite 36/36, full 15 suites / 352 tests, `make test FZ=10`
+clean.

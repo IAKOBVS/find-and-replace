@@ -4,6 +4,7 @@
 #ifndef PROCFS_H
 #define PROCFS_H
 
+#include <stddef.h>
 #include <string.h>
 
 struct procfs_iter {
@@ -16,5 +17,8 @@ procfs_iter_init(struct procfs_iter *iter, const char *buf, unsigned int len);
 
 int
 procfs_iter_next(struct procfs_iter *iter, const char **key, unsigned int *key_len, const char **val, unsigned int *val_len, int delimiter);
+
+size_t
+procfs_mem_available(void);
 
 #endif /* PROCFS_H */

@@ -12,6 +12,7 @@ SUITE_MAX_JOBS=${FAR_SUITE_MAX_JOBS:-$((_cpu > 4 ? 4 : _cpu))}
 fail=0
 jobs=""
 count=0
+total=0
 # Suite names contain no ':', so "name:pid" tokens keep both lists in sync.
 wait_suites() {
 	for j in $jobs; do
@@ -28,15 +29,16 @@ wait_suites() {
 	count=0
 }
 
-for suite in basic flags regex files errors io escape empty misc edge-cases complex confirm unit grep; do
+for suite in main/flags main/errors process/basic process/regex process/escape process/empty process/misc process/edge-cases process/complex traverse/files io/io ui/confirm unit/unit process/grep pipeline/pipeline; do
 	"$DIR/${suite}.sh" &
 	jobs="$jobs $suite:$!"
 	count=$((count + 1))
+	total=$((total + 1))
 	if [ "$count" -ge "$SUITE_MAX_JOBS" ]; then
 		wait_suites
 	fi
 done
 [ "$count" -gt 0 ] && wait_suites
 
-printf '\n=== %d suites passed, %d failed ===\n' $((14 - fail)) "$fail"
+printf '\n=== %d suites passed, %d failed ===\n' $((total - fail)) "$fail"
 exit $((fail > 0 ? 1 : 0))

@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#include "files.h"
+#include "stage.h"
+#include "io.h"
+#include "traverse.h"
 #include "process.h"
-#include "confirm.h"
+#include "terminal.h"
+#include "ui.h"
+#include "pipeline.h"
 
 #define IS_REG(x) S_ISREG(x)
 #define IS_DIR(x) S_ISDIR(x)
@@ -104,54 +108,6 @@ err_exit_code()
 	return (G.mode & MODE_GREP) ? 2 : EXIT_FAILURE;
 }
 
-/* Compile FIND (regex or Two-Way fixed-string matcher) into the global
- * state. Recompiles when the regex mode/cflags change between files; the
- * MODE_COMPILED bit alone cannot guard that, since -R/-E/-F may appear
- * anywhere on the command line, even after a file argument. */
-jstr_ret_ty
-far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size)
-{
-	const int want_regex = (G.mode & MODE_USE_REGEX) != 0;
-	if (force_recompile || !(G.mode & MODE_COMPILED) || want_regex != G.compiled_regex || (want_regex && G.cflags != G.compiled_cflags)) {
-		if (G.mode & MODE_COMPILED) {
-			if (G.compiled_regex)
-				jstr_re_free(&G.regex);
-			G.mode &= ~MODE_COMPILED;
-		}
-		if (want_regex) {
-			if (find_len > 0) {
-				const int ret = jstr_re_comp(&G.regex, find, G.cflags);
-				if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
-					if (err_buf && err_size > 0)
-						regerror(ret, &G.regex.reg, err_buf, err_size);
-					return JSTR_RET_ERR;
-				}
-			}
-			/* Validate backreferences */
-			size_t max_backref = 0;
-			for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
-				if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
-					size_t num = rplc[idx+1] - '0';
-					if (num > max_backref)
-						max_backref = num;
-					++idx;
-				}
-			}
-			if (jstr_unlikely(max_backref > G.regex.reg.re_nsub)) {
-				if (err_buf && err_size > 0)
-					snprintf(err_buf, err_size, "Replace backreference \\%zu exceeds find capture groups (%zu)", max_backref, G.regex.reg.re_nsub);
-				return JSTR_RET_ERR;
-			}
-		} else {
-			jstr_memmem_comp(t, find, find_len);
-		}
-		G.compiled_regex = want_regex;
-		G.compiled_cflags = G.cflags;
-		G.mode |= MODE_COMPILED;
-	}
-	return JSTR_RET_SUCC;
-}
-
 /* Default flags. Idempotent: assigns (never ORs) so calling it again cannot
  * leak state from an earlier call. */
 static void
@@ -190,6 +146,7 @@ file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
 static void
 cleanup()
 {
+	pipeline_shutdown();
 #if DO_FREE /* We don't need to free since we're exiting. */
 	for (unsigned int i = 0; i < G.files.size; ++i) {
 		free(G.files.data[i].content.data);
@@ -204,7 +161,6 @@ cleanup()
 		jstr_re_free(&G.exclude_re);
 	jstr_free_j(&G.rplc_buf);
 	jstr_free_j(&G.new_buf);
-	jstr_free_j(&G.content_buf);
 	jstr_free_j(&G.interactive_find_buf);
 	jstr_free_j(&G.interactive_rplc_buf);
 	jstr_free_j(&G.interactive_flags_buf);
@@ -340,7 +296,7 @@ compile_or_die(jstr_twoway_ty *t, const char *find, size_t find_len, const char 
 
 /* Process the stdin target (a single '-' placeholder or missing target). */
 static jstr_ret_ty
-process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
+process_stdin_arg(args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 {
 	if (G.mode & MODE_CONFIRM)
 		jstr_errdie("%s: -c does not work with '-' (stdin).\n", prog_name);
@@ -348,20 +304,25 @@ process_stdin_arg(const args_ty *a, jstr_twoway_ty *t, const char *prog_name)
 		jstr_errdie("%s: -i is meaningless with '-' (stdin).\n", prog_name);
 	if (G.mode & MODE_USE_RECURSIVE)
 		jstr_errdie("%s: -r is meaningless with '-' (stdin).\n", prog_name);
-	if (a->find_len == 0) {
-		if (!(G.mode & MODE_GREP)) {
-			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-			if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
-				return JSTR_RET_ERR;
-		}
+	if (a->find_len == 0)
 		return JSTR_RET_SUCC;
-	}
-	DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
 	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
-	if (G.mode & MODE_GREP)
-		DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
-	else
-		DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
+	root_ctx_ty root;
+	root.kind = FAR_ROOT_STDIN;
+	root.path = NULL;
+	memset(&root.st, 0, sizeof root.st);
+	root.mem_files = NULL;
+	root.mem_count = 0;
+	root.a = a;
+	root.t = t;
+	const size_t before = a->err_count;
+	if (jstr_chk(pipeline_run(&root)) || a->err_count > before) {
+		if (G.mode & MODE_GREP)
+			fprintf(stderr, "%s", "Failed grep on stdin.\n");
+		else
+			fprintf(stderr, "%s", "Failed processing stdin.\n");
+		exit(err_exit_code());
+	}
 	return JSTR_RET_SUCC;
 }
 
@@ -378,23 +339,37 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t)
 	compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
 	if (IS_REG(st.st_mode)) {
 		const size_t fname_len = strlen(arg);
-		if (!G.have_exclude) {
-process_file_label:
-			if (jstr_chk(process_file(t, &G.content_buf, arg, fname_len, &st, a->find, a->find_len, a->rplc, a->rplc_len))) {
-				fprintf(stderr, "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", arg, a->find, a->rplc);
-				exit(err_exit_code());
-			}
-		} else {
+		if (G.have_exclude) {
 			const char *fname = jstr_memrchr(arg, SEP, fname_len);
 			fname = (fname != NULL && *(fname + 1)) ? fname + 1 : arg;
 			const size_t base_len = (size_t)(arg + fname_len - fname);
-			if (jstr_re_match_len(&G.exclude_re, fname, base_len, 0) != JSTR_RE_RET_NOERROR)
-				goto process_file_label;
+			if (jstr_re_match_len(&G.exclude_re, fname, base_len, 0) == JSTR_RE_RET_NOERROR)
+				return;
+		}
+		root_ctx_ty root;
+		root.kind = FAR_ROOT_FILE;
+		root.path = arg;
+		root.st = st;
+		root.mem_files = NULL;
+		root.mem_count = 0;
+		root.a = a;
+		root.t = t;
+		const size_t before = a->err_count;
+		if (jstr_chk(pipeline_run(&root)) || a->err_count > before) {
+			fprintf(stderr, "find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", arg, a->find, a->rplc);
+			exit(err_exit_code());
 		}
 	} else if (IS_DIR(st.st_mode)) {
 		if (G.mode & MODE_USE_RECURSIVE) {
-			a->buf = &G.content_buf;
-			if (jstr_chk(jstr_io_ftw(arg, callback_file, a, JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, (G.have_include || G.have_exclude) ? matcher : NULL, NULL))) {
+			root_ctx_ty root;
+			root.kind = FAR_ROOT_DIR;
+			root.path = arg;
+			memset(&root.st, 0, sizeof root.st);
+			root.mem_files = NULL;
+			root.mem_count = 0;
+			root.a = a;
+			root.t = t;
+			if (jstr_chk(pipeline_run(&root))) {
 				fprintf(stderr, "ftw(directory: %s, callback, func_args, flags: JSTR_IO_FTW_REG | JSTR_IO_FTW_STATREG, matcher: %s, matcher_args) failed.\n", arg, G.have_include ? "1" : "0");
 				exit(err_exit_code());
 			}
@@ -482,7 +457,7 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 			if (!file_filter_pass(file, &G.interactive_files_buf))
 				continue;
 			size_t file_matches = 0;
-			confirm_scan_file(t, &file->content, file->fname, file->fname_len, a->find, a->find_len, a->rplc, a->rplc_len, &file_matches);
+			ui_scan_file(t, &file->content, file->fname, file->fname_len, a->find, a->find_len, a->rplc, a->rplc_len, &file_matches);
 			if (G.preview_full)
 				break;
 		}
@@ -508,21 +483,28 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 		}
 		G.confirm_pass = 0;
 		G.matches_found = 0;
-		struct stat st_file;
+		const file_ty **list = (const file_ty **)malloc(G.files.size * sizeof *list);
+		DIE_IF(!list && G.files.size > 0, "%s", "Out of memory.\n");
+		size_t nfiles = 0;
 		for (i = 0; i < G.files.size; ++i) {
 			file_ty *file = &G.files.data[i];
-			if (!file_filter_pass(file, &G.interactive_files_buf))
-				continue;
-			jstr_ty *const rbuf = (file->content.data == NULL) ? &G.content_buf : &file->content;
-			if (jstr_unlikely(file->content.data == NULL)) {
-				jstr_empty_j(&G.content_buf);
-				DIE_IF(jstr_chk(jstr_reserve_j(&G.content_buf, file->content_size)), "%s", "Out of memory reading a file.\n");
-				DIE_IF(jstr_chk(jstr_io_readfile_len_j(&G.content_buf, file->fname, 0, file->content_size)), "%s", "Can't read a file->\n");
-			}
-			st_file.st_mode = file->st_mode;
-			if (jstr_chk(process_buffer(t, rbuf, file->fname, file->fname_len, &st_file, a->find, a->find_len, a->rplc, a->rplc_len)))
-				jstr_errdie("find-and-replace: error processing '%s' (find=\"%s\", replace=\"%s\").\n", file->fname, a->find, a->rplc);
+			if (file_filter_pass(file, &G.interactive_files_buf))
+				list[nfiles++] = file;
 		}
+		if (nfiles > 0) {
+			root_ctx_ty root;
+			root.kind = FAR_ROOT_MEM;
+			root.path = NULL;
+			memset(&root.st, 0, sizeof root.st);
+			root.mem_files = list;
+			root.mem_count = nfiles;
+			root.a = a;
+			root.t = t;
+			const size_t before = a->err_count;
+			if (jstr_chk(pipeline_run(&root)) || a->err_count > before)
+				jstr_errdie("find-and-replace: error processing cached files (find=\"%s\", replace=\"%s\").\n", a->find, a->rplc);
+		}
+		free(list);
 	}
 }
 
@@ -534,21 +516,27 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 		jstr_errdie("%s: %s", argv[0], "find-and-replace: trying to create a backup file while reading from stdin.");
 	if (jstr_unlikely(G.mode & MODE_USE_RECURSIVE))
 		jstr_errdie("%s: %s", argv[0], "trying to recursively traverse through directories while reading from stdin.");
-	if (a->find_len == 0) {
-		if (!(G.mode & MODE_GREP)) {
-			DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
-			if (jstr_unlikely(jstr_io_fwrite(G.content_buf.data, 1, G.content_buf.size, stdout) != G.content_buf.size))
-				return JSTR_RET_ERR;
-		} else {
-			G.grep_matched = 1;
-		}
-	} else {
-		DIE_IF(jstr_chk(jstr_io_readstdin_j(&G.content_buf)), "%s", "Failed reading stdin.\n");
+	if (a->find_len == 0 && (G.mode & MODE_GREP)) {
+		G.grep_matched = 1;
+		return JSTR_RET_SUCC;
+	}
+	if (a->find_len != 0)
 		compile_or_die(t, a->find, a->find_len, a->rplc, a->rplc_len);
+	root_ctx_ty root;
+	root.kind = FAR_ROOT_STDIN;
+	root.path = NULL;
+	memset(&root.st, 0, sizeof root.st);
+	root.mem_files = NULL;
+	root.mem_count = 0;
+	root.a = a;
+	root.t = t;
+	const size_t before = a->err_count;
+	if (jstr_chk(pipeline_run(&root)) || a->err_count > before) {
 		if (G.mode & MODE_GREP)
-			DIE_IF(jstr_chk(grep_scan_file(t, &G.content_buf, NULL, 0, a->find, a->find_len)), "%s", "Failed grep on stdin.\n");
+			fprintf(stderr, "%s", "Failed grep on stdin.\n");
 		else
-			DIE_IF(jstr_chk(process_buffer(t, &G.content_buf, NULL, 0, NULL, a->find, a->find_len, a->rplc, a->rplc_len)), "%s", "Failed processing stdin.\n");
+			fprintf(stderr, "%s", "Failed processing stdin.\n");
+		return JSTR_RET_ERR;
 	}
 	return JSTR_RET_SUCC;
 }
@@ -590,6 +578,8 @@ main(int argc, char **argv)
 	a.rplc_len = JSTR_DIFF(jstr_unescape_p(RPLC), RPLC);
 	init_defaults();
 	G.confirm_pass = 1;
+	if (jstr_unlikely(pipeline_start() != 0))
+		jstr_errdie("%s", "Can't start the pipeline threads.\n");
 	int end_of_flags = 0;
 	for (i = 3; ARG; ++i) {
 		if (*ARG == '-' && ARG[1] != '\0' && !end_of_flags) {
@@ -618,10 +608,7 @@ main(int argc, char **argv)
 				continue;
 		}
 		if (ARG[0] == '-' && ARG[1] == '\0') {
-			if (jstr_chk(process_stdin_arg(&a, &t, argv[0]))) {
-				cleanup();
-				exit(err_exit_code());
-			}
+			(void)process_stdin_arg(&a, &t, argv[0]);
 			continue;
 		}
 		process_target_arg(ARG, &a, &t);
@@ -647,16 +634,10 @@ main(int argc, char **argv)
 	}
 	if (G.mode & MODE_GREP) {
 		if (G.grep_collect && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
-			jstr_empty_j(&G.interactive_find_buf);
-			jstr_empty_j(&G.interactive_files_buf);
-			jstr_empty_j(&G.interactive_include_buf);
-			jstr_empty_j(&G.interactive_exclude_buf);
-			DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_find_buf, raw_find, strlen(raw_find))), "%s", "Out of memory.\n");
-			if (G.include_pat)
-				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_include_buf, G.include_pat, strlen(G.include_pat))), "%s", "Out of memory.\n");
-			if (G.exclude_pat)
-				DIE_IF(jstr_chk(jstr_append_len_j(&G.interactive_exclude_buf, G.exclude_pat, strlen(G.exclude_pat))), "%s", "Out of memory.\n");
-			grep_interactive_loop(&t, &G.interactive_find_buf, &G.interactive_files_buf, &G.interactive_include_buf, &G.interactive_exclude_buf);
+			if (jstr_unlikely(pipeline_ui_finish() < 0)) {
+				cleanup();
+				return err_exit_code();
+			}
 		}
 		cleanup();
 		return G.grep_matched ? EXIT_SUCCESS : EXIT_FAILURE;

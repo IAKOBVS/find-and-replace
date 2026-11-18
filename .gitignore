@@ -1,4 +1,7 @@
 find-and-replace
+tests/pipeline/spsc_unit
+tests/pipeline/pipeline_unit
+compile_commands.json
 *.gcov
 *.gc*
 # Prerequisites

@@ -2,37 +2,28 @@
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
 #include "process.h"
-#include "files.h"
-#include "confirm.h"
+#include "io.h"
+#include "pipeline.h"
+#include "ui.h"
+
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Number of leading bytes scanned for NULs when deciding a file is binary;
  * covers the usual text/binary header region without reading the whole file. */
 #define BINARY_SCAN_SIZE (JSTR_IO_KIB * 4)
 
-/* Print the "FNAME:LINE:" prefix of a grep line. */
-static jstr_ret_ty
-print_line_prefix(const char *R fname, size_t fname_len, size_t line)
-{
-	if (jstr_likely(fname != NULL)) {
-		(void)jstr_io_fwrite(TUI_GREP_FILENAME, 1, S_LEN(TUI_GREP_FILENAME), stdout);
-		(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
-		(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
-		(void)jstr_io_fputc(':', stdout);
-	}
-	(void)jstr_io_fwrite(TUI_GREP_LINENUMBER, 1, S_LEN(TUI_GREP_LINENUMBER), stdout);
-	print_size_t(line);
-	(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
-	(void)jstr_io_fputc(':', stdout);
-	return JSTR_RET_SUCC;
-}
-
 /* --grep mode: print the whole content of every line that matches FIND.
  * Matching is line-based like grep (a regex can never span newlines here,
  * unlike the replace path which scans the whole buffer). */
-jstr_ret_ty
-grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname, size_t fname_len,
-               const char *R find, size_t find_len)
+static jstr_ret_ty
+grep_scan_to_buf(const jstr_twoway_ty *R t, const jstr_ty *R buf,
+                 const char *R fname, size_t fname_len,
+                 const char *R find, size_t find_len,
+                 jstr_ty *R out, int *R matched_out)
 {
+	*matched_out = 0;
 	if (find_len == 0)
 		return JSTR_RET_SUCC;
 	const char *d = buf->data;
@@ -60,16 +51,9 @@ grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fn
 			}
 		}
 		if (matched) {
-			G.grep_matched = 1;
-			if (!(G.mode & MODE_QUIET)) {
-				print_line_prefix(fname, fname_len, line);
-				(void)jstr_io_fwrite(p, 1, moff, stdout);
-				(void)jstr_io_fwrite(TUI_GREP_MATCHED, 1, S_LEN(TUI_GREP_MATCHED), stdout);
-				(void)jstr_io_fwrite(p + moff, 1, mlen, stdout);
-				(void)jstr_io_fwrite(TUI_GREP_UNMATCHED, 1, S_LEN(TUI_GREP_UNMATCHED), stdout);
-				(void)jstr_io_fwrite(p + moff + mlen, 1, line_len - moff - mlen, stdout);
-				(void)jstr_io_fputc('\n', stdout);
-			}
+			*matched_out = 1;
+			if (jstr_chk(ui_format_grep_line(out, fname, fname_len, line, p, line_len, moff, mlen)))
+				JSTR_RETURN_ERR(JSTR_RET_ERR);
 		}
 		if (nl == NULL)
 			break;
@@ -80,9 +64,9 @@ grep_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fn
 
 /* --grep TUI: collect every matching line into G.grep_lines. */
 void
-grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
-                  size_t fname_len, const char *R find,
-                  size_t find_len)
+grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
+                    size_t fname_len, const char *R find,
+                    size_t find_len, size_t limit)
 {
 	const char *d = buf->data;
 	const size_t n = buf->size;
@@ -124,6 +108,8 @@ grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R
 			G.grep_lines.data[G.grep_lines.size].match_off = moff;
 			G.grep_lines.data[G.grep_lines.size].match_len = mlen;
 			++G.grep_lines.size;
+			if (G.grep_lines.size >= limit)
+				return;
 		}
 		if (nl == NULL)
 			break;
@@ -131,207 +117,344 @@ grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R
 	}
 }
 
-/* Report modified file path to stderr (unless quiet) and stdout (if -l is enabled). */
-static jstr_ret_ty
-report_changed_file(const char *R fname, size_t fname_len)
+void
+grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
+                  size_t fname_len, const char *R find, size_t find_len)
 {
-	if (!(G.mode & MODE_QUIET)) {
-		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stderr) != fname_len))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_unlikely(jstr_io_fputc('\n', stderr) == EOF))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	if (G.mode & MODE_PRINT_CHANGES) {
-		if (jstr_unlikely(jstr_io_fwrite(fname, 1, fname_len, stdout) != fname_len))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		if (jstr_chk(jstr_io_putchar('\n')))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	return JSTR_RET_SUCC;
+	grep_collect_file_n(t, buf, fname, fname_len, find, find_len, (size_t)-1);
 }
 
-/* Write buffer to file with backup suffix (-iSUFFIX). */
 static jstr_ret_ty
-write_inplace_backup(const jstr_ty *R buf, const char *R fname, size_t fname_len, const struct stat *st)
+process_buffer_compute(const jstr_twoway_ty *R t, jstr_ty *R buf,
+                       const char *R find, const size_t find_len,
+                       const char *R rplc, const size_t rplc_len,
+                       size_t *R out_changed)
 {
-	char bak[JSTR_IO_PATH_MAX];
-	if (jstr_unlikely(fname_len + G.bak_suffix_len >= sizeof(bak))) {
-		jstr_errdie("Suffix length is too large to create a backup file (%zu >= %zu).\n", fname_len + G.bak_suffix_len, sizeof(bak));
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	char *p = jstr_mempcpy(bak, fname, fname_len);
-	jstr_strcpy_len(p, G.bak_suffix, G.bak_suffix_len);
-	if (jstr_unlikely(file_exists(bak))) {
-		jstr_errdie("Can't make a backup file because suffixed filename (%s) already exists.\n", bak);
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	if (jstr_unlikely(rename(fname, bak)))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_chk(jstr_io_writefile_len_j(buf, fname, O_CREAT | O_TRUNC | O_WRONLY, st->st_mode & (S_IRWXO | S_IRWXG | S_IRWXU))))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	return JSTR_RET_SUCC;
-}
-
-/* Write buffer atomically using a temporary file (plain -i). */
-static jstr_ret_ty
-write_inplace_temp(const jstr_ty *R buf, const char *R fname, size_t fname_len)
-{
-	int fd_tmp = -1;
-	char *bakp = NULL;
-	char bak[JSTR_IO_PATH_MAX];
-	bakp = bak;
-	if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak))) {
-		jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	char *p = jstr_mempcpy(bak, fname, fname_len);
-	p = jstr_stpcpy_len(p, S_LITERAL(".XXXXXX"));
-	fd_tmp = mkstemp(bak);
-	if (jstr_unlikely(fd_tmp == -1)) {
-		bakp = NULL;
-		jstr_errdie("Can't make a file (%s) to temporarily write replacements to.\n", bak);
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	if (jstr_chk(jstr_io_writefilefd_len_j(buf, fd_tmp))) {
-		jstr_errdie("Can't write replacements to temp file (%s).\n", bak);
-		goto err;
-	}
-	if (jstr_unlikely(close(fd_tmp) == -1)) {
-		fd_tmp = -1;
-		jstr_errdie("Can't close temp file (%s).\n", bak);
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	fd_tmp = -1;
-	if (jstr_unlikely(rename(bak, fname))) {
-		jstr_errdie("Can't rename temp file (%s) to original file (%s).\n", bak, fname);
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
-	return JSTR_RET_SUCC;
-err:
-	if (fd_tmp != -1)
-		if (close(fd_tmp) < 0) {}
-	if (bakp != NULL)
-		if (unlink(bakp) < 0) {}
-	return JSTR_RET_ERR;
-}
-
-jstr_ret_ty
-process_buffer(const jstr_twoway_ty *R t,
-                  jstr_ty *R buf,
-                  const char *R fname,
-                  size_t fname_len,
-                  const struct stat *st,
-                  const char *R find,
-                  const size_t find_len,
-                  const char *R rplc,
-                  const size_t rplc_len)
-{
-	/* Holds the length of the replaced output. As a size_t when the fixed
-	 * and regex paths both store a length; the regex variant returns a
-	 * signed offset type that may hold a negative error code. */
 	union u {
 		size_t zu;
 		jstr_re_off_ty d;
 	} changed;
 	if (G.mode & MODE_USE_REGEX) {
-		/* Temporarily remove trailing newline. */
 		if (buf->size && buf->data[buf->size - 1] == '\n') {
 			buf->data[buf->size - 1] = '\0';
 			--buf->size;
 		}
 		changed.d = jstr_re_rplcn_backref_len_exec_j(&G.regex, buf, rplc, rplc_len, G.eflags, JSTR_NMATCH_MAX, G.n);
-		if (jstr_re_chk(changed.d)) {
+		if (jstr_re_chk(changed.d))
 			jstr_re_errdie(changed.d, &G.regex, "%s", "Regex replacement failed.\n");
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-		}
 		changed.zu = (size_t)changed.d;
 	} else {
-		/* Fixed-string path uses the precompiled Two-Way matcher. */
 		changed.zu = jstr_rplcn_len_exec_j(t, buf, find, find_len, rplc, rplc_len, G.n);
 		if (jstr_unlikely(changed.zu == (size_t)-1))
 			JSTR_RETURN_ERR(JSTR_RET_ERR);
 	}
-	/* Append newline if has space */
-	/* Keep the final buffer newline-terminated so file output ends cleanly. */
 	if (buf->size && buf->data[buf->size - 1] != '\n')
 		DIE_IF(jstr_chk(jstr_pushback_j(buf, '\n')), "%s", "Out of memory.\n");
-	if (G.mode & MODE_PRINT_STDOUT) {
-		/* Default mode: write the (replaced) buffer to stdout. */
-		if (jstr_unlikely(jstr_io_fwrite(buf->data, 1, buf->size, stdout) != buf->size))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-	} else {
-		/* In-place mode (-i): nothing to do if nothing changed. */
-		if (changed.zu == 0)
-			return JSTR_RET_SUCC;
-		if (G.mode & MODE_PRINT_FILE_BACKUP) {
-			if (jstr_chk(write_inplace_backup(buf, fname, fname_len, st)))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-		} else {
-			if (jstr_chk(write_inplace_temp(buf, fname, fname_len)))
-				JSTR_RETURN_ERR(JSTR_RET_ERR);
-		}
-		if (jstr_chk(report_changed_file(fname, fname_len)))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-	}
+	*out_changed = changed.zu;
 	return JSTR_RET_SUCC;
 }
 
 jstr_ret_ty
-process_file(const jstr_twoway_ty *R t,
-                jstr_ty *R buf,
-                const char *R fname,
-                size_t fname_len,
-                const struct stat *st,
-                const char *R find,
-                const size_t find_len,
-                const char *R rplc,
-                const size_t rplc_len)
+process_job(const jstr_twoway_ty *R t, jstr_ty **R buf,
+            const char *R fname, size_t fname_len,
+            const struct stat *st, const char *R find,
+            const size_t find_len, const char *R rplc,
+            const size_t rplc_len, process_result_ty *R res)
 {
+	jstr_ty *tmp = NULL;
+	memset(res, 0, sizeof *res);
+	res->st = *st;
 	const size_t file_size = (size_t)st->st_size;
-	/* A fixed-string find longer than the whole file cannot match. In the
-	 * interactive editor or grep TUI, the find can still be edited to
-	 * something shorter, so keep such files cached there. */
+	const int tty = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 	if (!(G.mode & MODE_USE_REGEX) && file_size < find_len &&
-	    !((G.mode & (MODE_CONFIRM | MODE_GREP)) && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)))
+	    !((G.mode & (MODE_CONFIRM | MODE_GREP)) && tty))
 		return JSTR_RET_SUCC;
-	/* Preallocate the length of the replace string. */
-	/* Worst-case output size = input + (longer replace) + trailing newline. */
+	jstr_ty *b = *buf;
+	if (b == NULL) {
+		b = (jstr_ty *)malloc(sizeof *b);
+		if (jstr_unlikely(!b))
+			goto err;
+		*b = (jstr_ty)JSTR_INIT;
+		*buf = b;
+	}
+	jstr_empty_j(b);
 	if (rplc_len > find_len && !(G.mode & MODE_USE_REGEX))
-		if (jstr_chk(jstr_reserve_j(buf, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
-			JSTR_RETURN_ERR(JSTR_RET_ERR);
-	if (jstr_chk(jstr_io_readfile_len_j(buf, fname, 0, file_size)))
-		JSTR_RETURN_ERR(JSTR_RET_ERR);
-	/* Skip files with NUL bytes in the first BINARY_SCAN_SIZE bytes. */
-	if (jstr_io_isbinary_atleast(buf->data, file_size, BINARY_SCAN_SIZE))
+		if (jstr_chk(jstr_reserve_j(b, file_size + rplc_len - find_len + S_LEN("\n") + 1)))
+			goto err;
+	if (jstr_chk(jstr_io_readfile_len_j(b, fname, 0, file_size)))
+		goto err;
+	if (jstr_io_isbinary_atleast(b->data, file_size, BINARY_SCAN_SIZE))
 		return JSTR_RET_SUCC;
-	/* --grep mode: cache files for the TUI, or print matching lines directly. */
 	if (G.mode & MODE_GREP) {
 		if (G.grep_collect) {
-			file_pushback(&G.files, fname, fname_len, st, buf);
+			res->out = b;
+			*buf = NULL;
 			return JSTR_RET_SUCC;
 		}
-		return grep_scan_file(t, buf, fname, fname_len, find, find_len);
+		tmp = (jstr_ty *)malloc(sizeof *tmp);
+		if (jstr_unlikely(!tmp))
+			goto err;
+		*tmp = (jstr_ty)JSTR_INIT;
+		if (jstr_chk(grep_scan_to_buf(t, b, fname, fname_len, find, find_len, tmp, &res->matched)))
+			goto err;
+		if (res->matched) {
+			res->out = tmp;
+			tmp = NULL;
+		}
+		jstr_empty_j(b);
+		goto out;
 	}
-	/* During the -c dry-run pass, only scan and preview; the real edit
-	 * happens on the second pass after the user confirms. The file's content
-	 * is recorded so pass 2 edits it from memory without re-reading disk. */
 	if (G.confirm_pass && (G.mode & MODE_CONFIRM)) {
-		/* Interactive mode: pass 1 only caches files. The confirm TUI scans
-		 * each cached buffer live (bounded to the preview budget) on every
-		 * redraw, so a pre-scan here would both dump the whole diff to stdout
-		 * before the editor opens and, with -g on a large tree, stall the
-		 * startup on an unbounded match collection. */
-		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
-			file_pushback(&G.files, fname, fname_len, st, buf);
-			return JSTR_RET_SUCC;
-		}
-		size_t matches = 0;
-		jstr_ret_ty ret = confirm_scan_file(t, buf, fname, fname_len, find, find_len, rplc, rplc_len, &matches);
-		/* Only files with matches need editing on pass 2; steal their buffer. */
-		if (matches > 0)
-			file_pushback(&G.files, fname, fname_len, st, buf);
-		return ret;
+		res->out = b;
+		*buf = NULL;
+		return JSTR_RET_SUCC;
 	}
-	jstr_ret_ty ret = process_buffer(t, buf, fname, fname_len, st, find, find_len, rplc, rplc_len);
-	return ret;
+	size_t changed = 0;
+	if (jstr_chk(process_buffer_compute(t, b, find, find_len, rplc, rplc_len, &changed)))
+		goto err;
+	if (G.mode & MODE_PRINT_STDOUT) {
+		res->out = b;
+		*buf = NULL;
+		return JSTR_RET_SUCC;
+	}
+	if (changed == 0) {
+		jstr_empty_j(b);
+		return JSTR_RET_SUCC;
+	}
+	if (G.mode & MODE_PRINT_FILE_BACKUP) {
+		if (jstr_chk(io_write_inplace_backup(b, fname, fname_len, st)))
+			goto err;
+	} else {
+		io_write_inplace_temp(b, fname, fname_len);
+	}
+	res->report = 1;
+	jstr_empty_j(b);
+	return JSTR_RET_SUCC;
+err:
+	res->err = 1;
+out:
+	if (tmp != NULL) {
+		jstr_free_j(tmp);
+		free(tmp);
+	}
+	return JSTR_RET_SUCC;
 }
+
+static jstr_ret_ty
+process_stdin_job(const jstr_twoway_ty *R t, jstr_ty **R bufp,
+                  const char *R find, size_t find_len,
+                  const char *R rplc, size_t rplc_len,
+                  process_result_ty *R res)
+{
+	jstr_ty *tmp = NULL;
+	memset(res, 0, sizeof *res);
+	if (find_len == 0 && (G.mode & MODE_GREP))
+		return JSTR_RET_SUCC;
+	jstr_ty *b = *bufp;
+	if (b == NULL) {
+		b = (jstr_ty *)malloc(sizeof *b);
+		if (jstr_unlikely(!b))
+			goto err;
+		*b = (jstr_ty)JSTR_INIT;
+		*bufp = b;
+	}
+	jstr_empty_j(b);
+	if (jstr_chk(jstr_io_readstdin_j(b)))
+		goto err;
+	if (G.mode & MODE_GREP) {
+		tmp = (jstr_ty *)malloc(sizeof *tmp);
+		if (jstr_unlikely(!tmp))
+			goto err;
+		*tmp = (jstr_ty)JSTR_INIT;
+		if (jstr_chk(grep_scan_to_buf(t, b, NULL, 0, find, find_len, tmp, &res->matched)))
+			goto err;
+		if (res->matched) {
+			res->out = tmp;
+			tmp = NULL;
+		}
+		jstr_empty_j(b);
+		goto out;
+	}
+	if (find_len != 0) {
+		size_t changed = 0;
+		if (jstr_chk(process_buffer_compute(t, b, find, find_len, rplc, rplc_len, &changed)))
+			goto err;
+	}
+	res->out = b;
+	*bufp = NULL;
+	goto out;
+err:
+	res->err = 1;
+out:
+	if (tmp != NULL) {
+		jstr_free_j(tmp);
+		free(tmp);
+	}
+	return JSTR_RET_SUCC;
+}
+
+static jstr_ret_ty
+process_mem_job(const jstr_twoway_ty *R t, jstr_ty **R bufp,
+                const file_ty *R file, const char *R find, size_t find_len,
+                const char *R rplc, size_t rplc_len, process_result_ty *R res)
+{
+	memset(res, 0, sizeof *res);
+	res->st.st_mode = file->st_mode;
+	res->st.st_size = (off_t)file->content_size;
+	const int borrowed = file->content.data != NULL;
+	jstr_ty *b = borrowed ? (jstr_ty *)(void *)&file->content : *bufp;
+	if (!borrowed) {
+		if (b == NULL) {
+			b = (jstr_ty *)malloc(sizeof *b);
+			if (jstr_unlikely(!b))
+				goto err;
+			*b = (jstr_ty)JSTR_INIT;
+			*bufp = b;
+		}
+		jstr_empty_j(b);
+		if (jstr_chk(jstr_reserve_j(b, file->content_size)) ||
+		    jstr_chk(jstr_io_readfile_len_j(b, file->fname, 0, file->content_size)))
+			goto err;
+	}
+	size_t changed = 0;
+	if (jstr_chk(process_buffer_compute(t, b, find, find_len, rplc, rplc_len, &changed)))
+		goto err;
+	if (changed == 0) {
+		if (!borrowed)
+			jstr_empty_j(b);
+		goto out;
+	}
+	if (G.mode & MODE_PRINT_FILE_BACKUP) {
+		if (jstr_chk(io_write_inplace_backup(b, file->fname, file->fname_len, &res->st)))
+			goto err;
+	} else {
+		io_write_inplace_temp(b, file->fname, file->fname_len);
+	}
+	res->report = 1;
+	if (!borrowed)
+		jstr_empty_j(b);
+	goto out;
+err:
+	res->err = 1;
+out:
+	return JSTR_RET_SUCC;
+}
+
+far_thread_ret_ty
+process_thread(void *arg)
+{
+	(void)arg;
+	jstr_ty *buf = NULL;
+	for (;;) {
+		far_job_ty *const job = pipeline_work_recv();
+		if (job == NULL)
+			break;
+		far_result_ty *const res = (far_result_ty *)calloc(1, sizeof *res);
+		if (jstr_unlikely(!res))
+			jstr_errdie("%s", "Out of memory.\n");
+		if (job->kind == FAR_JOB_EOS) {
+			res->kind = FAR_RES_EOS;
+			const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
+			                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+			const int send_ret = grep_live ? pipeline_grep_work_send(res) : pipeline_done_send(res);
+			if (send_ret != 0)
+				free(res);
+			continue;
+		}
+		res->seq = job->seq;
+		res->kind = FAR_RES_DATA;
+		res->path = job->path;
+		res->path_len = job->path_len;
+		if (jstr_unlikely(atomic_load_explicit(&job->root->cancel, memory_order_acquire))) {
+			res->canceled = 1;
+		} else {
+			switch (job->kind) {
+			case FAR_JOB_FILE:
+				process_job(job->root->t, &buf, job->path, job->path_len, &job->st,
+				            job->root->a->find, job->root->a->find_len,
+				            job->root->a->rplc, job->root->a->rplc_len, &res->pr);
+				break;
+			case FAR_JOB_STDIN:
+				process_stdin_job(job->root->t, &buf, job->root->a->find,
+				                  job->root->a->find_len, job->root->a->rplc,
+				                  job->root->a->rplc_len, &res->pr);
+				break;
+			case FAR_JOB_MEM:
+				process_mem_job(job->root->t, &buf, job->mem_file,
+				                job->root->a->find, job->root->a->find_len,
+				                job->root->a->rplc, job->root->a->rplc_len, &res->pr);
+				break;
+			default:
+				res->pr.err = 1;
+				break;
+			}
+			if (buf == NULL) {
+				buf = (jstr_ty *)malloc(sizeof *buf);
+				if (jstr_unlikely(!buf))
+					jstr_errdie("%s", "Out of memory.\n");
+				*buf = (jstr_ty)JSTR_INIT;
+			}
+		}
+		free(job);
+		const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
+		                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+		const int send_ret = grep_live ? pipeline_grep_work_send(res) : pipeline_done_send(res);
+		if (send_ret != 0) {
+			ui_result_free(res);
+			break;
+		}
+	}
+	if (buf != NULL)
+		jstr_free_j(buf);
+	free(buf);
+	return FAR_THREAD_RETURN;
+}
+
+/* Compile FIND (regex or Two-Way fixed-string matcher) into the global
+ * state. Recompiles when the regex mode/cflags change between files; the
+ * MODE_COMPILED bit alone cannot guard that, since -R/-E/-F may appear
+ * anywhere on the command line, even after a file argument. */
+jstr_ret_ty
+far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size)
+{
+	const int want_regex = (G.mode & MODE_USE_REGEX) != 0;
+	if (force_recompile || !(G.mode & MODE_COMPILED) || want_regex != G.compiled_regex || (want_regex && G.cflags != G.compiled_cflags)) {
+		if (G.mode & MODE_COMPILED) {
+			if (G.compiled_regex)
+				jstr_re_free(&G.regex);
+			G.mode &= ~MODE_COMPILED;
+		}
+		if (want_regex) {
+			if (find_len > 0) {
+				const int ret = jstr_re_comp(&G.regex, find, G.cflags);
+				if (jstr_unlikely(ret != JSTR_RE_RET_NOERROR)) {
+					if (err_buf && err_size > 0)
+						regerror(ret, &G.regex.reg, err_buf, err_size);
+					return JSTR_RET_ERR;
+				}
+			}
+			/* Validate backreferences */
+			size_t max_backref = 0;
+			for (size_t idx = 0; idx + 1 < rplc_len; ++idx) {
+				if (rplc[idx] == '\\' && rplc[idx+1] >= '1' && rplc[idx+1] <= '9') {
+					size_t num = rplc[idx+1] - '0';
+					if (num > max_backref)
+						max_backref = num;
+					++idx;
+				}
+			}
+			if (jstr_unlikely(max_backref > G.regex.reg.re_nsub)) {
+				if (err_buf && err_size > 0)
+					snprintf(err_buf, err_size, "Replace backreference \\%zu exceeds find capture groups (%zu)", max_backref, G.regex.reg.re_nsub);
+				return JSTR_RET_ERR;
+			}
+		} else {
+			jstr_memmem_comp(t, find, find_len);
+		}
+		G.compiled_regex = want_regex;
+		G.compiled_cflags = G.cflags;
+		G.mode |= MODE_COMPILED;
+	}
+	return JSTR_RET_SUCC;
+}
+

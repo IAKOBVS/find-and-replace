@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#include "../../spmc.h"
+#include "../../include/spmc.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../../thread_compat.h"
+#include "../../include/thread_compat.h"
 
 #define N_CONSUMERS 4
 #define N_PER       5000

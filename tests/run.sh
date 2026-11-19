@@ -30,6 +30,9 @@ wait_suites() {
 }
 
 for suite in main/flags main/errors process/basic process/regex process/escape process/empty process/misc process/edge-cases process/complex traverse/files io/io ui/confirm unit/unit process/grep pipeline/pipeline; do
+	if [ "$suite" = unit/unit ] && [ "${FAR_SKIP_UNIT_SHELL:-0}" = 1 ]; then
+		continue
+	fi
 	"$DIR/${suite}.sh" &
 	jobs="$jobs $suite:$!"
 	count=$((count + 1))

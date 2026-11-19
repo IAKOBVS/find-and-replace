@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#include "../../spsc.h"
+#include "../../include/spsc.h"
 
 #include <stdint.h>
 #include <stdio.h>
-#include "../../thread_compat.h"
+#include "../../include/thread_compat.h"
 #include <time.h>
 
 #define N_ITEMS 200000

@@ -1,5 +1,5 @@
 #!/bin/sh
-SOURCE=main.c
+SOURCE=src/main.c
 README_SRC=.README.md
 README_DST=README.md
 cat "$README_SRC" > "$README_DST"

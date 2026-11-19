@@ -144,6 +144,12 @@ t_stdin_large_regex() {
 	[ "$out" = "$expected" ] && echo PASS > "$td/result" || echo "FAIL: large regex size mismatch (outlen=${#out} explen=${#expected})" > "$td/result"
 }
 
+t_backup_flag_last_wins() {
+	td=$1; printf 'x\n' > "$td/f"
+	"$PROG" x y -ibak -i "$td/f" > /dev/null 2>&1
+	[ "$(cat "$td/f")" = 'y' ] && [ ! -e "$td/f.bak" ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")] bak=$([ -e "$td/f.bak" ] && echo yes || echo no)" > "$td/result"
+}
+
 t_stdout_multi_file() {
 	td=$1; printf 'hello\n' > "$td/f1"; printf 'world\n' > "$td/f2"
 	out=$("$PROG" hello hi "$td/f1" "$td/f2" 2>/dev/null)
@@ -176,6 +182,7 @@ t_readonly_dir_inplace
 t_inplace_readonly_file_nobackup
 t_stdin_large
 t_stdin_large_regex
+t_backup_flag_last_wins
 t_stdout_multi_file
 t_long_line
 "

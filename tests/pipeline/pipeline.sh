@@ -1,14 +1,15 @@
 #!/bin/sh
 PROG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$PROG_DIR/tests/lib.sh"
+TEST_BIN_DIR=${PIPELINE_TEST_BIN_DIR:-"$PROG_DIR/tests/pipeline"}
 
 t_pipeline_spsc_unit() {
 	td=$1
-	if [ ! -x "$PROG_DIR/tests/pipeline/spsc_unit" ]; then
+	if [ ! -x "$TEST_BIN_DIR/spsc_unit" ]; then
 		echo "FAIL: tests/pipeline/spsc_unit missing (run make)" > "$td/result"
 		return
 	fi
-	if "$PROG_DIR/tests/pipeline/spsc_unit" > "$td/out" 2>&1; then
+	if "$TEST_BIN_DIR/spsc_unit" > "$td/out" 2>&1; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: spsc unit: $(cat "$td/out")" > "$td/result"
@@ -17,11 +18,11 @@ t_pipeline_spsc_unit() {
 
 t_pipeline_spmc_unit() {
 	td=$1
-	if [ ! -x "$PROG_DIR/tests/pipeline/spmc_unit" ]; then
+	if [ ! -x "$TEST_BIN_DIR/spmc_unit" ]; then
 		echo "FAIL: tests/pipeline/spmc_unit missing (run make)" > "$td/result"
 		return
 	fi
-	if "$PROG_DIR/tests/pipeline/spmc_unit" > "$td/out" 2>&1; then
+	if "$TEST_BIN_DIR/spmc_unit" > "$td/out" 2>&1; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: spmc unit: $(cat "$td/out")" > "$td/result"
@@ -225,11 +226,11 @@ t_pipeline_l_write_error() {
 
 t_pipeline_lifecycle_unit() {
 	td=$1
-	if [ ! -x "$PROG_DIR/tests/pipeline/pipeline_unit" ]; then
+	if [ ! -x "$TEST_BIN_DIR/pipeline_unit" ]; then
 		echo "FAIL: tests/pipeline/pipeline_unit missing (run make)" > "$td/result"
 		return
 	fi
-	if "$PROG_DIR/tests/pipeline/pipeline_unit" > "$td/out" 2>&1; then
+	if "$TEST_BIN_DIR/pipeline_unit" > "$td/out" 2>&1; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: pipeline unit: $(cat "$td/out")" > "$td/result"

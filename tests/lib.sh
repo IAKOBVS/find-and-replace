@@ -1,7 +1,9 @@
 if [ -z "${PROG_DIR:-}" ]; then
 	PROG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 fi
-PROG="$PROG_DIR/find-and-replace"
+if [ -z "${PROG:-}" ]; then
+	PROG="$PROG_DIR/find-and-replace"
+fi
 FAR_THREADS=${FAR_THREADS:-1}
 export FAR_THREADS
 PASS=0
@@ -34,6 +36,9 @@ run_tests() {
 	launched=""
 	count=0
 	for t in $1; do
+		case " ${FAR_SKIP_TESTS:-} " in
+		*" $t "*) printf 'SKIP %s (sanitizer-incompatible)\n' "$t"; continue ;;
+		esac
 		(
 			mkdir -p "$td_root/$t"
 			if ! "$t" "$td_root/$t"; then

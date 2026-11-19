@@ -1,8 +1,6 @@
 # find-and-replace
 
-Multi-file C CLI tool (`common.h`/`stage.h` + `main.c`, `io.c`, `traverse.c`,
-`process.c`, `ui.c`, `terminal.c`, plus `pipeline.c`/`spsc.c`/`spmc.c`, `vim.c`,
-`procfs.c`) for fixed-string or regex find-and-replace on files, with optional
+Multi-file C CLI tool (`include/` headers + `src/*.c`) for fixed-string or regex find-and-replace on files, with optional
 recursion, regex filtering of basenames via `--include`/`--exclude`, and
 in-place editing with backups. Every target kind (explicit files, recursive
 directories, stdin, and the `-c` pass 2) runs through a persistent
@@ -92,8 +90,13 @@ header. Dependency direction: `main -> pipeline/stages`, `stages -> stage.h/io`,
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (15 suites, 363 tests)
+./compile && tests/run.sh   # all deterministic suites (15 suites, 366 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
+make unit                   # compile/run generated per-function unit tests
+./test-tsan                 # TSAN+UBSAN C unit tests in build-tsan/
+./test-asan                 # ASAN+UBSAN C unit tests in build-asan/
+./test-integration-sanitized [tsan|asan|all]  # integration suites under sanitizers
+./test-all [N]              # normal suite + all sanitizer unit/integration runs
 ./tests/process/basic.sh            # run a single suite independently
 ./tests/fuzz.sh [N]         # fuzz tests only (default 500)
 ./coverage                  # build with --coverage, run all tests, report gcov
@@ -110,6 +113,8 @@ tests/
   ui/          confirm.sh
   io/          io.sh
   pipeline/    pipeline.sh, spsc_unit.c, spmc_unit.c, pipeline_unit.c
+  unit/        harness.h, run.sh, src/<file>/<func>.c, include/<header>/<func>.c
+  sanitizer.sh shared helpers for the top-level sanitizer scripts
   unit/        unit.sh, fake_meminfo.c
   terminal/    test_pty_drive.sh (driver self-test; not in run.sh)
   lib.sh       shared runner helpers
@@ -127,14 +132,14 @@ tests/
 | Regex | `tests/process/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
 | Files | `tests/traverse/files.sh` | 35 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
 | Errors | `tests/main/errors.sh` | 26 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
-| IO | `tests/io/io.sh` | 21 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
+| IO | `tests/io/io.sh` | 22 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
 | Escape | `tests/process/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
 | Empty | `tests/process/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
 | Misc | `tests/process/misc.sh` | 7 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
 | Edge cases | `tests/process/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
 | Complex regex | `tests/process/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
-| Confirm | `tests/ui/confirm.sh` | 88 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
-| Grep | `tests/process/grep.sh` | 39 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
+| Confirm | `tests/ui/confirm.sh` | 89 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
+| Grep | `tests/process/grep.sh` | 40 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
 | Unit | `tests/unit/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
 | Pipeline | `tests/pipeline/pipeline.sh` | 33 | `spsc`/`spmc`/`pipeline` lifecycle units, all-target pipeline routing, multi-worker `-j`, explicit-file batching, `-r`/file/stdin order/in-place/backup/include-exclude, partial failure + error accumulation, 200-file traversal, recursive grep (fixed/regex/empty/TUI collect), per-root flag changes, pipeline `-c` abort, `/dev/full` stdout/stderr/`-l`/grep/prompt paths |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
@@ -1516,6 +1521,9 @@ Fix:
 - `ui_format_grep_line` rejects out-of-range offsets defensively.
 - `send_one_match` clamps invalid match offsets instead of allowing an
   out-of-bounds render.
+- `spsc_chan_new` now rejects slot-array multiplication overflow before
+  `calloc`, so the intentional huge-cap test returns NULL under ASan instead of
+  aborting in the allocator.
 
 Regression tests added in `tests/process/grep.sh`:
 
@@ -1525,3 +1533,86 @@ Regression tests added in `tests/process/grep.sh`:
 
 Verification: grep suite 39/39; full 15 suites / 363 tests; `make test FZ=20`
 clean; ASan run of `-R -r --grep .` over a fixture with empty lines clean.
+
+## Session 37: src/include layout, function specs, architecture doc, per-function units
+
+- Moved all C sources to `src/` and headers to `include/`; updated Makefile,
+  coverage, README generation, tests, build dirs, and sanitizer scripts.
+- Regenerated `compile_commands.json` with 12 entries for `src/*.c`.
+- Added `docs/FUNCTION_INVENTORY.md` (pre-spec function/behavior analysis) and
+  `docs/ARCHITECTURE.md` (normative integration-test specification).
+- Added Doxygen contract comments to every function definition in `src/` and
+  public declaration in `include/`, covering inputs, outputs, preconditions,
+  postconditions, side effects, return semantics, and thread ownership.
+- Added generated per-function tests under
+  `tests/unit/src/<file>/<func>.c` and
+  `tests/unit/include/<header>/<func>.c`. Each test has positive, negative,
+  edge, and fuzz sections; key pure APIs have behavioral checks.
+- Added `make unit` / `tests/unit/run.sh`; `test-all` now runs these units.
+
+## Session 36: sanitizer test scripts
+
+Added top-level scripts:
+
+- `test-tsan` — builds `build-tsan/` with TSAN + UBSAN and runs the three C
+  unit binaries (`spsc_unit`, `spmc_unit`, `pipeline_unit`).
+- `test-asan` — builds `build-asan/` with ASAN + UBSAN and runs the same units.
+- `test-integration-sanitized [tsan|asan|all]` — builds the selected sanitizer
+  tree and runs the integration suites against its binary.
+- `test-all [N]` — runs the normal `./test N`, both sanitizer unit suites, and
+  both sanitized integration suites.
+
+Supporting changes:
+
+- `Makefile`: `TEST_BIN_DIR` places unit binaries under the chosen build dir.
+- `tests/lib.sh`: `PROG` can be overridden for sanitized integration runs.
+- `tests/run.sh`: `FAR_SKIP_UNIT_SHELL=1` skips the fake-meminfo shell suite,
+  whose `LD_PRELOAD` shim conflicts with sanitizer runtimes.
+- `tests/pipeline/pipeline.sh`: `PIPELINE_TEST_BIN_DIR` selects the sanitized
+  unit binaries.
+- `tests/lib.sh`: `FAR_SKIP_TESTS` supports documented sanitizer-specific
+  skips.
+
+TSAN integration skips two timing/Simd-sensitive confirm tests and the vim TUI
+test; ASAN integration skips the `stdbuf` prompt-write test. The skipped cases
+still run in the normal suite.
+
+Verification: `./test-tsan`, `./test-asan`, both integration modes, and
+`./test-all 1` pass.
+
+## Session 38: confirmed contradiction fixes
+
+Fixed the reachable contradictions from `docs/STATE_MACHINES.md`:
+
+- output mode transitions now clear all output-mode bits via `MODE_OUTPUT_MASK`
+  (`include/common.h:67`, `src/main.c:761-765`, `944-948`);
+- grep FILES field now requests a D rescan (`src/terminal.c:918`);
+- confirm FLAGS reset clears `MODE_PRINT_CHANGES` (`src/terminal.c:460`);
+- grep control messages (EOS/ERROR) are no longer discarded by generation
+  filtering (`src/terminal.c:1389-1418`);
+- vim pending operators are cancelled on field changes (`src/vim.c:56-59`,
+  `src/terminal.c:1594`, `1611`, `1916`, `1933`);
+- ESC followed by a printable byte now returns that byte as a normal-mode key
+  instead of swallowing it (`src/terminal.c:756-762`);
+- grep STOP breaks the TUI loop unconditionally, avoiding join hangs
+  (`src/terminal.c:1432-1435`).
+
+Regression tests added: `t_backup_flag_last_wins`,
+`t_grep_files_field_rescan`, `t_confirm_l_flag_leak`.
+
+Verification: 15 suites / 366 tests, fuzz clean.
+
+## Session 39: explicit state conversions
+
+Converted recommended implicit states to explicit enums:
+
+- `output_mode_ty`, `vim_state_ty`, terminal lifecycle, pipeline lifecycle,
+  CLI parser phase, `confirm_phase_ty`, `grep_ui_phase_ty`, `root_phase_ty`,
+  grep cache-entry state, key-parser ESC/CSI states, and retire ownership.
+- Removed output-mode bits from `G.mode`; consumers use `G.output_mode`.
+- Confirm phase now travels with `args_ty`; workers no longer read
+  `G.confirm_pass`.
+- Root phase, B worker send-failure completion, and `(current_root, epoch)`
+  revalidation were hardened.
+
+Verification: full suites, per-function units, TSAN+UBSAN and ASAN+UBSAN.

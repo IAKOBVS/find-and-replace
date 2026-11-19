@@ -61,3 +61,7 @@ dkms.conf
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Sanitizer build directories
+/build-tsan/
+/build-asan/

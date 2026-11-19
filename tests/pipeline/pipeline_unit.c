@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
-#include "../../pipeline.h"
-#include "../../common.h"
+#include "../../include/pipeline.h"
+#include "../../include/common.h"
 
 #include <stdio.h>
 
-global_ty G = { .mode = MODE_PRINT_STDOUT };
+global_ty G = { .output_mode = OUT_STDOUT };
 
 int
 main(void)

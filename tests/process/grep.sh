@@ -431,6 +431,19 @@ t_grep_regex_empty_line_anchor() {
 	fi
 }
 
+t_grep_files_field_rescan() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'hit\n' > "$td/sub/a.txt"
+	printf 'hit\n' > "$td/sub/b.txt"
+	pdrive --phase 0a --phase 15@50 --phase 61@50 --phase 2e@50 --phase 74@50 --phase 78@50 --phase 74@50 \
+	       --phase 0d@400 --tail '' -- hit x --grep -r "$td/sub"
+	out=$(strip_ansi < "$td/out")
+	case "$out" in
+	*"1 matches, 1 files"*) echo PASS > "$td/result" ;;
+	*) echo "FAIL: out=[$out]" > "$td/result" ;;
+	esac
+}
+
 t_grep_interactive_regex_empty_lines() {
 	td=$1
 	mkdir -p "$td/sub"
@@ -517,6 +530,7 @@ t_grep_nonexistent_file
 t_grep_interactive_regex
 t_grep_regex_empty_lines
 t_grep_regex_empty_line_anchor
+t_grep_files_field_rescan
 t_grep_interactive_regex_empty_lines
 t_grep_interactive_recursive
 t_grep_interactive_basic

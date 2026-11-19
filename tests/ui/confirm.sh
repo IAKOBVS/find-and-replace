@@ -490,6 +490,18 @@ t_confirm_interactive_backup() {
 	[ "$(cat "$td/f")" = 'HI' ] && [ "$(cat "$td/fbak")" = 'hello' ] && echo PASS > "$td/result" || echo "FAIL: f=[$(cat "$td/f")] fbak=[$(cat "$td/fbak" 2>/dev/null)]" > "$td/result"
 }
 
+t_confirm_l_flag_leak() {
+	td=$1; printf 'hello\n' > "$td/f"
+	pdrive --tail '\t\t\x15l\x7f' --tail '\r' --tail 'y\n' -- hello HI -c -i -q "$td/f"
+	out=$(strip_ansi < "$td/out")
+	after=$(printf '%s\n' "$out" | awk 'p { print } /Confirm changes\?/ { p = 1 }')
+	if [ "$(cat "$td/f")" = 'HI' ] && ! printf '%s\n' "$after" | grep -qF "$td/f"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: f=[$(cat "$td/f")] path-printed-after-prompt" > "$td/result"
+	fi
+}
+
 t_confirm_interactive_l_flag() {
 	td=$1; printf 'hello\n' > "$td/f"
 	# 2 tabs to Flags, clear, set to "l"
@@ -1096,6 +1108,7 @@ t_confirm_vim_delete_dd
 t_confirm_vim_change_cw
 t_confirm_interactive_include_exclude
 t_confirm_interactive_backup
+t_confirm_l_flag_leak
 t_confirm_interactive_l_flag
 t_confirm_interactive_clear_filters
 t_confirm_interactive_invalid_exclude

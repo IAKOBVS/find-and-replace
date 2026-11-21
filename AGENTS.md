@@ -53,7 +53,7 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 | `ui.h`/`ui.c` | Stage C (UI): `ui_result`/`ui_result_free`, output helpers, `-c` preview scan/render, file/match cache, `ui_print_size_t`, colors |
 | `terminal.h`/`terminal.c` | Interactive terminal layer: raw mode/signals/cursor/size, confirm TUI, grep TUI, and `terminal_ui_thread` (dedicated grep UI thread; no file scanning) |
 | `grep_worker.h`/`grep_worker.c` | Stage D (grep scan): consumes raw file results from B, caches contents up to half `MemAvailable`, scans with the current find/filters, emits owned match records to C, supports generation updates/full rescan |
-| `pipeline.h`/`pipeline.c` | Plumbing only: shared SPMC work queue, per-worker SPSC result queues, accessors, N-worker start/shutdown, per-root epoch/EOS protocol, UI/scan-thread lifecycle |
+| `pipeline.h`/`pipeline.c` | Plumbing only: shared SPMC work queue, per-worker SPSC result queues, accessors, N-worker start/shutdown with static storage for up to `PIPELINE_STATIC_WORKERS` (8) workers and heap arrays above that, `pipeline_uses_static_workers()`, per-root epoch/EOS protocol, UI/scan-thread lifecycle |
 | `spsc.h`/`spsc.c` | Bounded lock-free SPSC queue: caller-provided slot storage (`spsc_chan_init`) or heap wrapper (`spsc_chan_new`), C11 `_Atomic` head/tail/closed, blocking send/recv with backoff |
 | `spmc.h`/`spmc.c` | Bounded lock-free SPMC work queue: one producer, N consumers, per-slot ticket/sequence publication, blocking recv and non-blocking try_recv |
 | `vim.h`/`vim.c` | Line-editor key handling used by the TUIs |
@@ -65,11 +65,14 @@ Functions are namespaced by owner (`traverse_*`, `process_*`, `ui_*`,
 `stage.h`, process state/caches in `common.h`, and the global is `global_ty G`.
 Only cross-TU functions are non-static; prototypes live in the owning module
 header. Dependency direction: `main -> pipeline/stages`, `stages -> stage.h/io`,
-`pipeline -> stage.h/spsc`, and no stage includes `pipeline.c`.
+`pipeline -> stage.h/spsc`, and no stage includes `pipeline.c`. Pipeline state
+and its static worker arrays are private to `pipeline.c`; stages reach them
+only through `pipeline_*` accessors.
 
 ## Key facts
 
 - **C11 + POSIX** - the pipeline relies on `<stdatomic.h>`/`<threads.h>` and `-pthread`; no VLAs and no `//` comments
+- **Static worker storage**: `PIPELINE_STATIC_WORKERS = 8`. Worker counts up to 8 use module-static arrays in `pipeline.c` for `b_worker_ty` records, B thread handles, and SPMC work slots (~38 KiB of fixed BSS); counts above 8 use heap allocation with no cap. `pipeline_uses_static_workers()` reports which storage is active, and every `pipeline_start()` reinitializes all channels over the selected storage.
 - **Dependency**: [jstring](https://github.com/IAKOBVS/jstring) - installed globally, linked via `/usr/local/lib/libjstr.so`
 - **Include path**: `/usr/local/include/` (global install; no local checkout)
 - **Code style**: no comments, SPDX MIT header, `clang-format off/on` around the usage string
@@ -1686,3 +1689,57 @@ Verification: full suites, per-function units, TSAN+UBSAN and ASAN+UBSAN.
 - Enabled leak detection for ASAN integration and documented timing-sensitive skips.
 - Corrected spec text that incorrectly placed the 200 ms debounce in confirm mode.
 - Verification: 16 suites / 396 tests, 257 per-function units, doc-check, all sanitizers.
+
+## Session 46: result-object recycling
+
+- Added per-worker SPSC result-return queues and `result_alloc()` so fixed-size
+  `far_result_ty` objects are recycled instead of allocated/freed per job.
+- `ui_result_free()` returns result objects to the owning worker after payload
+  ownership is resolved; return queues are drained at shutdown.
+- Added `bench/throughput.py` and `bench/malloc_count.c` for before/after proof.
+- Measured 5k-file grep allocations: calloc 10020 -> 5795, free 25125 -> 20900.
+  Throughput improved substantially across grep/stdout workloads; warm cache
+  is a caveat, so compare within the same session.
+- Verification: 16 suites / 396 tests, 257 per-function units, doc-check,
+  `test-all`, TSAN/ASAN integration, and fuzz all pass.
+
+## Session 47: 8-worker static storage cache
+
+- Added `PIPELINE_STATIC_WORKERS = 8` in `src/pipeline.c`. When the requested
+  worker count is at most 8, `pipeline_start()` points `P.workers`,
+  `P.b_threads`, and `P.work_slots` at module-static arrays (`static_workers`,
+  `static_b_threads`, `static_work_slots`) for the `b_worker_ty` records, B
+  thread handles, and SPMC work slots; no heap allocation is needed for them.
+- Worker counts above 8 fall back to `calloc` for the same three arrays with no
+  cap, so `-j N` / `FAR_THREADS` remain fully runtime-configurable.
+- New public API `pipeline_uses_static_workers(void)` reports whether the
+  active (or last-started, or default pre-start) pipeline uses static storage,
+  via `!P.workers_heap_owned`.
+- Motivation: the common `nproc <= 8` case avoids startup heap allocations while
+  preserving unlimited configurable worker counts. The static arrays occupy
+  ~38 KiB of fixed BSS.
+- All channels (including each worker's `done`, `grep_work`, and `res_return`
+  queues) are reinitialized with `spsc_chan_init`/`spmc_chan_init` on every
+  `pipeline_start()`, whether the backing slots are static or heap-allocated.
+- Documentation-only change: `AGENTS.md`, `docs/ARCHITECTURE.md`, and
+  `docs/FUNCTION_INVENTORY.md` updated; no build or test commands were run.
+
+Validation: static cache keeps grep/stdout throughput neutral within noise,
+saves startup heap allocations for nproc<=8, and passes 16 suites / 396 tests,
+258 per-function units, doc-check, TSAN/ASAN integration, ASAN fuzz, and
+`./test-all 1`.
+
+## Session 48: grep message and retire-node pooling
+
+- Moved `FAR_GREP_BATCH_MAX` into `include/stage.h` and embedded the batch
+  array directly in `far_grep_msg_ty`.
+- Added a C→D `grep_msg_return` SPSC queue; D reuses message objects with
+  `memset`, and C returns them after copying/freeing owned match records.
+- Added a D→C `retire_node_return` SPSC queue; C reuses retire nodes and D
+  returns them after freeing owners/data.
+- Added Doxygen anchors and drained both return queues at shutdown.
+- Deferred A job/path pooling, config snapshot pooling, and generation arenas.
+- Verification: 16 suites / 396 tests, 258 per-function units, doc-check
+  (187 anchors), `./test-all 1`, TSAN/ASAN integration, ASAN fuzz.
+- Bench proof: `bench/throughput-pools.json` vs `bench/throughput-static2.json`;
+  read-only workloads improved slightly, in-place static noise normalized.

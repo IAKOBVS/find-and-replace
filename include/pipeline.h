@@ -41,6 +41,25 @@ void pipeline_set_workers(size_t count);
  */
 size_t pipeline_worker_count(void);
 /**
+ * @brief Report whether the active or last-started pipeline uses static worker storage.
+ *
+ * @details Contract for the public declaration in pipeline.h. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          Pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @return Nonzero when the active or last-started B worker and work-slot arrays are static;
+ *         zero when they were heap-allocated. Before any start, the default static
+ *         choice is reported.
+ * @post On success, documented outputs, ownership transfers, and counters are updated;
+ *       on failure, caller-owned inputs remain valid.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage or main as documented in docs/ARCHITECTURE.md.
+ */
+int pipeline_uses_static_workers(void);
+/**
  * @brief Publish the current root and increment its epoch.
  *
  * @details Contract for the public declaration in pipeline.h. It reads only
@@ -513,3 +532,13 @@ int pipeline_ui_ack_recv(void);
 int pipeline_ui_finish(void);
 
 #endif /* PIPELINE_H */
+
+/* Result-object recycling between C/D consumers and B workers. */
+int pipeline_result_return_try_send(size_t worker, far_result_ty *res);
+far_result_ty *pipeline_result_return_try_recv(size_t worker);
+
+int pipeline_grep_msg_return_try_send(far_grep_msg_ty *msg);
+far_grep_msg_ty *pipeline_grep_msg_return_try_recv(void);
+
+int pipeline_retire_node_return_try_send(void *node);
+void *pipeline_retire_node_return_try_recv(void);

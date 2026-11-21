@@ -3,6 +3,7 @@
 
 #include "ui.h"
 #include "terminal.h"
+#include "pipeline.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -310,7 +311,8 @@ ui_result_free(far_result_ty *R res)
 		free(res->pr.out);
 	}
 	free(res->path);
-	free(res);
+	if (pipeline_result_return_try_send(res->worker, res) != 0)
+		free(res);
 }
 
 /**

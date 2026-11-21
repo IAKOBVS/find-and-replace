@@ -4,6 +4,8 @@
 #ifndef STAGE_H
 #define STAGE_H
 
+#define FAR_GREP_BATCH_MAX 64
+
 #include "common.h"
 
 #include <stdalign.h>
@@ -72,7 +74,7 @@ typedef enum {
 typedef struct far_grep_msg_ty {
 	far_grep_msg_kind_ty kind;
 	unsigned long gen;
-	grep_line_ty *lines;
+	grep_line_ty lines[FAR_GREP_BATCH_MAX];
 	size_t count;
 	size_t files_matched;
 } far_grep_msg_ty;
@@ -128,6 +130,7 @@ struct far_job_ty {
 };
 
 struct far_result_ty {
+	size_t worker;
 	unsigned long seq;
 	size_t total;
 	far_res_kind_ty kind;

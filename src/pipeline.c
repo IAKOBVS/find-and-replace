@@ -20,18 +20,24 @@
 #include <unistd.h>
 
 #define PIPELINE_DEPTH 256
+#define PIPELINE_STATIC_WORKERS 8
 #define PIPELINE_DONE_DEPTH 128
 #define PIPELINE_CMD_DEPTH 16
 #define PIPELINE_UI_DEPTH 16
 #define PIPELINE_GREP_WORK_DEPTH 64
 #define PIPELINE_GREP_MSG_DEPTH 64
+#define PIPELINE_GREP_MSG_RETURN_DEPTH 64
 #define PIPELINE_GREP_RETIRE_DEPTH 8
+#define PIPELINE_RETIRE_NODE_RETURN_DEPTH 8
+#define PIPELINE_RESULT_RETURN_DEPTH 128
 
 typedef struct b_worker_ty {
 	alignas(64) spsc_chan_ty done;
 	alignas(64) void *done_slots[PIPELINE_DONE_DEPTH];
 	alignas(64) spsc_chan_ty grep_work;
 	alignas(64) void *grep_work_slots[PIPELINE_GREP_WORK_DEPTH];
+	alignas(64) spsc_chan_ty res_return;
+	alignas(64) void *res_return_slots[PIPELINE_RESULT_RETURN_DEPTH];
 } b_worker_ty;
 
 typedef struct pipeline_state_ty {
@@ -45,14 +51,19 @@ typedef struct pipeline_state_ty {
 	alignas(64) void *ui_ack_slots[PIPELINE_UI_DEPTH];
 	alignas(64) spsc_chan_ty grep_msg;
 	alignas(64) void *grep_msg_slots[PIPELINE_GREP_MSG_DEPTH];
+	alignas(64) spsc_chan_ty grep_msg_return;
+	alignas(64) void *grep_msg_return_slots[PIPELINE_GREP_MSG_RETURN_DEPTH];
 	alignas(64) spsc_chan_ty grep_cfg;
 	alignas(64) void *grep_cfg_slots[PIPELINE_UI_DEPTH];
 	alignas(64) spsc_chan_ty grep_retire;
 	alignas(64) void *grep_retire_slots[PIPELINE_GREP_RETIRE_DEPTH];
+	alignas(64) spsc_chan_ty retire_node_return;
+	alignas(64) void *retire_node_return_slots[PIPELINE_RETIRE_NODE_RETURN_DEPTH];
 	b_worker_ty *workers;
 	far_thread_ty *b_threads;
 	size_t worker_count;
 	size_t requested_workers;
+	int workers_heap_owned;
 	far_thread_ty a_thread;
 	far_thread_ty c_thread;
 	far_thread_ty d_thread;
@@ -69,6 +80,10 @@ static pipeline_state_ty P;
 static _Atomic(root_ctx_ty *) current_root;
 static atomic_ulong root_epoch;
 static atomic_int pipe_life;
+
+static alignas(64) b_worker_ty static_workers[PIPELINE_STATIC_WORKERS];
+static alignas(64) far_thread_ty static_b_threads[PIPELINE_STATIC_WORKERS];
+static alignas(64) spmc_slot_ty static_work_slots[PIPELINE_DEPTH];
 
 /**
  * @anchor spec_parse_env_workers
@@ -185,6 +200,31 @@ pipeline_worker_count(void)
 }
 
 /**
+ * @anchor spec_pipeline_uses_static_workers
+ * @brief Report whether the active or last-started pipeline uses static worker storage.
+ *
+ * @details This function is part of the pipeline.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @return Nonzero when the active or last-started B worker and work-slot arrays are static;
+ *         zero when they were heap-allocated. Before any start, the default static
+ *         choice is reported.
+ * @post On success, all documented outputs, ownership transfers, and counters are updated;
+ *       on failure, the caller retains ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
+ */
+int
+pipeline_uses_static_workers(void)
+{
+	return !P.workers_heap_owned;
+}
+
+/**
  * @anchor spec_pipeline_root_set
  * @brief Publish the current root and increment its epoch.
  *
@@ -275,6 +315,121 @@ int
 pipeline_stopping(void)
 {
 	return atomic_load_explicit(&pipe_life, memory_order_acquire) == PIPE_STOPPING;
+}
+
+/**
+ * @anchor spec_pipeline_retire_node_return_try_send
+ * @brief Return a retire node to Stage C for reuse.
+ * @param node Retire node pointer.
+ * @return Zero on successful handoff; nonzero if the queue is full/invalid.
+ * @par Side Effects:
+ *   Publishes one pointer into the retire-node return queue.
+ * @par Threading and Reentrancy:
+ *   Called by Stage D; consumed by Stage C.
+ */
+int
+pipeline_retire_node_return_try_send(void *node)
+{
+	if (node == NULL)
+		return -1;
+	return spsc_chan_try_send(&P.retire_node_return, node);
+}
+
+/**
+ * @anchor spec_pipeline_retire_node_return_try_recv
+ * @brief Try to reclaim a returned retire node.
+ * @return Retire node pointer, or NULL if none is available.
+ * @par Side Effects:
+ *   Consumes one pointer from the retire-node return queue.
+ * @par Threading and Reentrancy:
+ *   Called only by Stage C.
+ */
+void *
+pipeline_retire_node_return_try_recv(void)
+{
+	return spsc_chan_try_recv(&P.retire_node_return);
+}
+
+/**
+ * @anchor spec_pipeline_grep_msg_return_try_send
+ * @brief Return a consumed grep message to the producer.
+ * @details Non-blocking SPSC handoff. On success ownership transfers to Stage D.
+ * @pre MSG is a fully processed grep message.
+ * @param msg Message object to recycle.
+ * @return Zero on successful handoff; nonzero if the queue is full/invalid.
+ * @post On success the caller must not access MSG.
+ * @par Side Effects:
+ *   Publishes one pointer into the grep-message return queue.
+ * @par Threading and Reentrancy:
+ *   Called by Stage C; consumed by Stage D.
+ */
+int
+pipeline_grep_msg_return_try_send(far_grep_msg_ty *msg)
+{
+	if (msg == NULL)
+		return -1;
+	return spsc_chan_try_send(&P.grep_msg_return, msg);
+}
+
+/**
+ * @anchor spec_pipeline_grep_msg_return_try_recv
+ * @brief Try to reclaim a recycled grep message.
+ * @details Non-blocking SPSC receive. Caller owns the returned object.
+ * @return Recycled message object, or NULL if none is available.
+ * @post Caller must clear the object before reuse.
+ * @par Side Effects:
+ *   Consumes one pointer from the grep-message return queue.
+ * @par Threading and Reentrancy:
+ *   Called only by Stage D.
+ */
+far_grep_msg_ty *
+pipeline_grep_msg_return_try_recv(void)
+{
+	return (far_grep_msg_ty *)spsc_chan_try_recv(&P.grep_msg_return);
+}
+
+/**
+ * @anchor spec_pipeline_result_return_try_send
+ * @brief Return a processed result object to its owning B worker.
+ * @details Non-blocking SPSC handoff. On success ownership transfers to the
+ *          worker; on failure the caller keeps ownership.
+ * @pre WORKER is a valid active worker index and RES is a finished result.
+ * @param worker Owning B worker index.
+ * @param res Result object to recycle.
+ * @return Zero on successful handoff; nonzero when the queue is full/invalid.
+ * @post On success RES must not be accessed by the caller.
+ * @par Side Effects:
+ *   Publishes one pointer into the worker return queue.
+ * @par Threading and Reentrancy:
+ *   Called by Stage C or D; one producer per queue.
+ */
+int
+pipeline_result_return_try_send(size_t worker, far_result_ty *res)
+{
+	if (worker >= P.worker_count || res == NULL)
+		return -1;
+	return spsc_chan_try_send(&P.workers[worker].res_return, res);
+}
+
+/**
+ * @anchor spec_pipeline_result_return_try_recv
+ * @brief Try to reclaim a recycled result object for one B worker.
+ * @details Non-blocking SPSC receive. Caller owns the returned object.
+ * @pre WORKER is a valid active worker index.
+ * @param worker Owning B worker index.
+ * @return Recycled result object, or NULL if none is available.
+ * @post Caller must clear the object before reuse.
+ * @par Side Effects:
+ *   Consumes one pointer from the worker return queue.
+ * @par Threading and Reentrancy:
+ *   Called only by the owning Stage B worker.
+ */
+far_result_ty *
+pipeline_result_return_try_recv(size_t worker)
+{
+	if (worker >= P.worker_count)
+		return NULL;
+	return (far_result_ty *)spsc_chan_try_recv(&P.workers[worker].res_return);
 }
 
 /**
@@ -783,9 +938,28 @@ pipeline_ui_finish(void)
 static void
 free_state(void)
 {
-	free(P.workers);
-	free(P.b_threads);
-	free(P.work_slots);
+	{
+		far_grep_msg_ty *msg;
+		while ((msg = pipeline_grep_msg_return_try_recv()) != NULL)
+			free(msg);
+	}
+	{
+		void *node;
+		while ((node = pipeline_retire_node_return_try_recv()) != NULL)
+			free(node);
+	}
+	if (P.workers != NULL) {
+		for (size_t i = 0; i < P.worker_count; ++i) {
+			far_result_ty *res;
+			while ((res = pipeline_result_return_try_recv(i)) != NULL)
+				free(res);
+		}
+	}
+	if (P.workers_heap_owned) {
+		free(P.workers);
+		free(P.b_threads);
+		free(P.work_slots);
+	}
 	P.workers = NULL;
 	P.b_threads = NULL;
 	P.work_slots = NULL;
@@ -854,28 +1028,39 @@ pipeline_start(void)
 	P.worker_count = P.requested_workers;
 	atomic_init(&current_root, NULL);
 	atomic_init(&root_epoch, 0);
-	P.workers = (b_worker_ty *)calloc(P.worker_count, sizeof *P.workers);
-	P.b_threads = (far_thread_ty *)calloc(P.worker_count, sizeof *P.b_threads);
-	P.work_slots = (spmc_slot_ty *)calloc(PIPELINE_DEPTH, sizeof *P.work_slots);
-	if (jstr_unlikely(!P.workers || !P.b_threads || !P.work_slots)) {
-		free_state();
-		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
-		return -1;
+	if (P.worker_count <= PIPELINE_STATIC_WORKERS) {
+		P.workers = static_workers;
+		P.b_threads = static_b_threads;
+		P.work_slots = static_work_slots;
+		P.workers_heap_owned = 0;
+	} else {
+		P.workers = (b_worker_ty *)calloc(P.worker_count, sizeof *P.workers);
+		P.b_threads = (far_thread_ty *)calloc(P.worker_count, sizeof *P.b_threads);
+		P.work_slots = (spmc_slot_ty *)calloc(PIPELINE_DEPTH, sizeof *P.work_slots);
+		P.workers_heap_owned = 1;
+		if (jstr_unlikely(!P.workers || !P.b_threads || !P.work_slots)) {
+			free_state();
+			atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
+			return -1;
+		}
 	}
 	if (jstr_unlikely(spsc_chan_init(&P.cmd, P.cmd_slots, PIPELINE_CMD_DEPTH) != 0 ||
 	                 spmc_chan_init(&P.work, P.work_slots, PIPELINE_DEPTH) != 0 ||
 	                 spsc_chan_init(&P.ui_cmd, P.ui_cmd_slots, PIPELINE_UI_DEPTH) != 0 ||
 	                 spsc_chan_init(&P.ui_ack, P.ui_ack_slots, PIPELINE_UI_DEPTH) != 0 ||
 	                 spsc_chan_init(&P.grep_msg, P.grep_msg_slots, PIPELINE_GREP_MSG_DEPTH) != 0 ||
+	                 spsc_chan_init(&P.grep_msg_return, P.grep_msg_return_slots, PIPELINE_GREP_MSG_RETURN_DEPTH) != 0 ||
 	                 spsc_chan_init(&P.grep_cfg, P.grep_cfg_slots, PIPELINE_UI_DEPTH) != 0 ||
-	                 spsc_chan_init(&P.grep_retire, P.grep_retire_slots, PIPELINE_GREP_RETIRE_DEPTH) != 0)) {
+	                 spsc_chan_init(&P.grep_retire, P.grep_retire_slots, PIPELINE_GREP_RETIRE_DEPTH) != 0 ||
+	                 spsc_chan_init(&P.retire_node_return, P.retire_node_return_slots, PIPELINE_RETIRE_NODE_RETURN_DEPTH) != 0)) {
 		free_state();
 		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 		return -1;
 	}
 	for (size_t i = 0; i < P.worker_count; ++i) {
 		if (jstr_unlikely(spsc_chan_init(&P.workers[i].done, P.workers[i].done_slots, PIPELINE_DONE_DEPTH) != 0 ||
-		                 spsc_chan_init(&P.workers[i].grep_work, P.workers[i].grep_work_slots, PIPELINE_GREP_WORK_DEPTH) != 0)) {
+		                 spsc_chan_init(&P.workers[i].grep_work, P.workers[i].grep_work_slots, PIPELINE_GREP_WORK_DEPTH) != 0 ||
+		                 spsc_chan_init(&P.workers[i].res_return, P.workers[i].res_return_slots, PIPELINE_RESULT_RETURN_DEPTH) != 0)) {
 			free_state();
 			return -1;
 		}

@@ -540,6 +540,33 @@ out:
  * @par Threading and Reentrancy:
  *   Stage B workers; far_compile is called by main or Stage C.
  */
+/**
+ * @anchor spec_result_alloc
+ * @brief Allocate or recycle a Stage-B result object.
+ * @details Prefers the worker's return queue; falls back to calloc. The returned
+ *          object is zeroed and tagged with its owning worker.
+ * @pre WORKER is the active worker index.
+ * @param worker Owning B worker index.
+ * @return Zeroed result object; terminates on allocation failure.
+ * @post Caller owns the object and must publish or free it.
+ * @par Side Effects:
+ *   Consumes a recycled object if available; may allocate memory.
+ * @par Threading and Reentrancy:
+ *   Called only by the owning Stage B worker.
+ */
+static far_result_ty *
+result_alloc(size_t worker)
+{
+	far_result_ty *res = pipeline_result_return_try_recv(worker);
+	if (res == NULL)
+		res = (far_result_ty *)calloc(1, sizeof *res);
+	if (jstr_unlikely(!res))
+		jstr_errdie("%s", "Out of memory.\n");
+	memset(res, 0, sizeof *res);
+	res->worker = worker;
+	return res;
+}
+
 static void
 maybe_send_eos(root_ctx_ty *R root, size_t worker)
 {
@@ -554,9 +581,7 @@ maybe_send_eos(root_ctx_ty *R root, size_t worker)
 	if (atomic_exchange_explicit(&root->eos_sent, true, memory_order_acq_rel))
 		return;
 	atomic_store_explicit(&root->phase, ROOT_EOS, memory_order_release);
-	far_result_ty *const eos = (far_result_ty *)calloc(1, sizeof *eos);
-	if (jstr_unlikely(!eos))
-		jstr_errdie("%s", "Out of memory.\n");
+	far_result_ty *const eos = result_alloc(worker);
 	eos->kind = FAR_RES_EOS;
 	eos->total = atomic_load_explicit(&root->total, memory_order_acquire);
 	const int send_ret = root->grep_live ? pipeline_grep_work_send(worker, eos) : pipeline_done_send(worker, eos);
@@ -649,9 +674,7 @@ process_thread(void *arg)
 				finish_worker(root, worker);
 				break;
 			}
-			far_result_ty *const res = (far_result_ty *)calloc(1, sizeof *res);
-			if (jstr_unlikely(!res))
-				jstr_errdie("%s", "Out of memory.\n");
+			far_result_ty *const res = result_alloc(worker);
 			res->seq = job->seq;
 			res->kind = FAR_RES_DATA;
 			res->path = job->path;

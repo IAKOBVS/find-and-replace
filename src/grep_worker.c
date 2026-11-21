@@ -215,6 +215,51 @@ batch_discard(void)
 }
 
 /**
+ * @anchor spec_grep_msg_alloc
+ * @brief Allocate or recycle a grep message object.
+ * @details Prefers the Stage C return queue; falls back to calloc. The returned
+ *          object is zeroed before use.
+ * @return Zeroed grep message object; terminates on allocation failure.
+ * @post Caller owns the object and must publish or return it.
+ * @par Side Effects:
+ *   Consumes a recycled object if available; may allocate memory.
+ * @par Threading and Reentrancy:
+ *   Called only by Stage D.
+ */
+static far_grep_msg_ty *
+grep_msg_alloc(void)
+{
+	far_grep_msg_ty *msg = pipeline_grep_msg_return_try_recv();
+	if (msg == NULL)
+		msg = (far_grep_msg_ty *)calloc(1, sizeof *msg);
+	if (jstr_unlikely(msg == NULL))
+		jstr_errdie("%s", "Out of memory.\n");
+	memset(msg, 0, sizeof *msg);
+	return msg;
+}
+
+/**
+ * @anchor spec_grep_msg_release
+ * @brief Return a grep message object for reuse.
+ * @details Best-effort non-blocking return to Stage D; falls back to free.
+ * @pre MSG is no longer referenced by the caller.
+ * @param msg Message object to release.
+ * @post Caller must not access MSG.
+ * @par Side Effects:
+ *   Publishes a pointer or frees it.
+ * @par Threading and Reentrancy:
+ *   Called by Stage C or D.
+ */
+static void
+grep_msg_release(far_grep_msg_ty *msg)
+{
+	if (msg == NULL)
+		return;
+	if (pipeline_grep_msg_return_try_send(msg) != 0)
+		free(msg);
+}
+
+/**
  * @anchor spec_batch_flush
  * @brief Publish the current D match batch to C.
  *
@@ -235,25 +280,16 @@ batch_flush(void)
 {
 	if (batch_n == 0)
 		return;
-	far_grep_msg_ty *const msg = (far_grep_msg_ty *)calloc(1, sizeof *msg);
-	grep_line_ty *const lines = (grep_line_ty *)malloc(batch_n * sizeof *lines);
-	if (jstr_unlikely(!msg || !lines)) {
-		free(msg);
-		free(lines);
-		batch_discard();
-		return;
-	}
-	memcpy(lines, batch, batch_n * sizeof *lines);
+	far_grep_msg_ty *const msg = grep_msg_alloc();
 	msg->kind = FAR_GREP_MATCH;
 	msg->gen = batch_gen;
-	msg->lines = lines;
+	memcpy(msg->lines, batch, batch_n * sizeof *msg->lines);
 	msg->count = batch_n;
 	msg->files_matched = batch_files;
 	if (pipeline_grep_msg_send(msg) != 0) {
 		for (size_t i = 0; i < batch_n; ++i)
 			free(batch[i].owner);
-		free(lines);
-		free(msg);
+		grep_msg_release(msg);
 	}
 	batch_n = 0;
 	batch_files = 0;
@@ -402,13 +438,11 @@ static void
 send_kind(far_grep_msg_kind_ty kind)
 {
 	batch_flush();
-	far_grep_msg_ty *const msg = (far_grep_msg_ty *)calloc(1, sizeof *msg);
-	if (jstr_unlikely(!msg))
-		return;
+	far_grep_msg_ty *const msg = grep_msg_alloc();
 	msg->kind = kind;
 	msg->gen = C.gen;
 	if (pipeline_grep_msg_send(msg) != 0)
-		free(msg);
+		grep_msg_release(msg);
 }
 
 /**
@@ -614,9 +648,11 @@ retire_step(void)
 		free(retire_cur->data[i].owner);
 	retire_at = end;
 	if (retire_at >= retire_cur->size) {
-		free(retire_cur->data);
-		free(retire_cur);
+		grep_lines_ty *const done = retire_cur;
 		retire_cur = NULL;
+		free(done->data);
+		if (pipeline_retire_node_return_try_send(done) != 0)
+			free(done);
 	}
 	return 1;
 }
@@ -679,6 +715,11 @@ grep_worker_thread(void *arg)
 			spsc_backoff(&spin);
 	}
 out:
+	{
+		far_grep_msg_ty *msg;
+		while ((msg = pipeline_grep_msg_return_try_recv()) != NULL)
+			free(msg);
+	}
 	if (retire_cur != NULL)
 		retire_free_all(retire_cur);
 	{

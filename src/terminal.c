@@ -1196,6 +1196,18 @@ typedef struct grep_retire_node_ty {
 
 static grep_retire_node_ty *grep_retire_pending;
 
+static grep_retire_node_ty *
+retire_node_alloc(void)
+{
+	grep_retire_node_ty *node = (grep_retire_node_ty *)pipeline_retire_node_return_try_recv();
+	if (node == NULL)
+		node = (grep_retire_node_ty *)malloc(sizeof *node);
+	else
+		memset(node, 0, sizeof *node);
+	return node;
+}
+
+
 /**
  * @anchor spec_grep_retire_flush
  * @brief Move pending retired lists to D without blocking.
@@ -1254,7 +1266,7 @@ grep_lines_discard(grep_lines_ty *R lines)
 		lines->cap = 0;
 		return;
 	}
-	grep_retire_node_ty *const node = (grep_retire_node_ty *)malloc(sizeof *node);
+	grep_retire_node_ty *const node = retire_node_alloc();
 	if (jstr_unlikely(!node)) {
 		for (size_t i = 0; i < lines->size; ++i)
 			free(lines->data[i].owner);
@@ -1325,6 +1337,13 @@ grep_lines_reserve(grep_lines_ty *R lines, size_t extra)
  * @par Threading and Reentrancy:
  *   Stage C only.
  */
+static void
+grep_msg_release(far_grep_msg_ty *msg)
+{
+	if (pipeline_grep_msg_return_try_send(msg) != 0)
+		free(msg);
+}
+
 static void
 grep_lines_append_batch(grep_lines_ty *R lines, const grep_line_ty *R src, size_t n)
 {
@@ -1538,16 +1557,14 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			if (msg->gen != grep_gen) {
 				for (size_t i = 0; i < msg->count; ++i)
 					free(msg->lines[i].owner);
-				free(msg->lines);
-				free(msg);
+				grep_msg_release(msg);
 				continue;
 			}
 			if (msg->kind == FAR_GREP_MATCH) {
 				grep_lines_append_batch(&G.grep_lines, msg->lines, msg->count);
 				files_matched += msg->files_matched;
 				got_match = 1;
-				free(msg->lines);
-				free(msg);
+				grep_msg_release(msg);
 				continue;
 			}
 			if (msg->kind == FAR_GREP_DONE) {
@@ -1556,7 +1573,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				rescanning = 0;
 				needs_redraw = 1;
 			}
-			free(msg);
+			grep_msg_release(msg);
 			if (grep_now_us() >= msg_deadline)
 				break;
 		}

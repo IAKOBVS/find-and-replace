@@ -3,24 +3,37 @@
 int
 main(void)
 {
-	/* positive: function satisfies its documented public contract. */
 	SPEC_SYMBOL(pipeline_start);
-	SECTION("positive");
 
-	/* negative: invalid inputs must be rejected or safely ignored. */
-	SPEC_SYMBOL(pipeline_start);
-	SECTION("negative");
-	CHECK(unit_rng_next() != 0UL);
-	/* edge: zero/empty/boundary inputs are representable. */
-	SPEC_SYMBOL(pipeline_start);
-	SECTION("edge");
-	CHECK(unit_rng_next() != 0UL);
-	/* fuzz: deterministic pseudo-random inputs must not crash the contract. */
-	SPEC_SYMBOL(pipeline_start);
-	SECTION("fuzz");
-	for (int i = 0; i < 64; ++i) {
-		unsigned long v = unit_rng_next();
-		CHECK(v == v);
+	SECTION("start with 4 workers uses static storage");
+	pipeline_set_workers(4);
+	CHECK(pipeline_start() == 0);
+	CHECK(pipeline_worker_count() == 4);
+	CHECK(pipeline_uses_static_workers() != 0);
+	pipeline_shutdown();
+
+	SECTION("start with 12 workers uses heap storage");
+	pipeline_set_workers(12);
+	CHECK(pipeline_start() == 0);
+	CHECK(pipeline_worker_count() == 12);
+	CHECK(pipeline_uses_static_workers() == 0);
+	pipeline_shutdown();
+
+	SECTION("start with 8 workers stays on the static threshold");
+	pipeline_set_workers(8);
+	CHECK(pipeline_start() == 0);
+	CHECK(pipeline_worker_count() == 8);
+	CHECK(pipeline_uses_static_workers() != 0);
+	pipeline_shutdown();
+
+	SECTION("shutdown resets state so repeated starts work");
+	for (int i = 0; i < 3; ++i) {
+		pipeline_set_workers(4);
+		CHECK(pipeline_start() == 0);
+		CHECK(pipeline_worker_count() == 4);
+		CHECK(pipeline_uses_static_workers() != 0);
+		pipeline_shutdown();
 	}
+
 	UNIT_DONE();
 }

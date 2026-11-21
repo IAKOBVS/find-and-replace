@@ -5,6 +5,7 @@
 #include "spsc.h"
 
 /**
+ * @anchor spec_spmc_chan_init
  * @brief Initialize a caller-owned bounded SPMC channel.
  *
  * @details This function is part of the spmc.c contract. It reads only
@@ -18,8 +19,10 @@
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A produces; only B workers consume.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; only B workers consume.
  */
 int
 spmc_chan_init(spmc_chan_ty *c, spmc_slot_ty *slots, size_t cap)
@@ -38,6 +41,7 @@ spmc_chan_init(spmc_chan_ty *c, spmc_slot_ty *slots, size_t cap)
 }
 
 /**
+ * @anchor spec_spmc_chan_send
  * @brief Publish one item from the single producer to any consumer.
  *
  * @details This function is part of the spmc.c contract. It reads only
@@ -50,8 +54,10 @@ spmc_chan_init(spmc_chan_ty *c, spmc_slot_ty *slots, size_t cap)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A produces; only B workers consume.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; only B workers consume.
  */
 int
 spmc_chan_send(spmc_chan_ty *c, void *v)
@@ -73,6 +79,7 @@ spmc_chan_send(spmc_chan_ty *c, void *v)
 }
 
 /**
+ * @anchor spec_spmc_chan_recv
  * @brief Claim the next available item, blocking while empty.
  *
  * @details This function is part of the spmc.c contract. It reads only
@@ -81,11 +88,12 @@ spmc_chan_send(spmc_chan_ty *c, void *v)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A produces; only B workers consume.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; only B workers consume.
  */
 void *
 spmc_chan_recv(spmc_chan_ty *c)
@@ -107,6 +115,7 @@ spmc_chan_recv(spmc_chan_ty *c)
 }
 
 /**
+ * @anchor spec_spmc_chan_try_recv
  * @brief Attempt to claim the next available item without blocking.
  *
  * @details This function is part of the spmc.c contract. It reads only
@@ -115,11 +124,12 @@ spmc_chan_recv(spmc_chan_ty *c)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A produces; only B workers consume.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; only B workers consume.
  */
 void *
 spmc_chan_try_recv(spmc_chan_ty *c)
@@ -141,6 +151,7 @@ spmc_chan_try_recv(spmc_chan_ty *c)
 }
 
 /**
+ * @anchor spec_spmc_chan_close
  * @brief Close an SPMC channel.
  *
  * @details This function is part of the spmc.c contract. It reads only
@@ -149,11 +160,12 @@ spmc_chan_try_recv(spmc_chan_ty *c)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A produces; only B workers consume.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; only B workers consume.
  */
 void
 spmc_chan_close(spmc_chan_ty *c)
@@ -162,6 +174,7 @@ spmc_chan_close(spmc_chan_ty *c)
 }
 
 /**
+ * @anchor spec_spmc_chan_is_closed
  * @brief Report whether an SPMC channel is closed.
  *
  * @details This function is part of the spmc.c contract. It reads only
@@ -173,8 +186,10 @@ spmc_chan_close(spmc_chan_ty *c)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A produces; only B workers consume.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; only B workers consume.
  */
 int
 spmc_chan_is_closed(spmc_chan_ty *c)

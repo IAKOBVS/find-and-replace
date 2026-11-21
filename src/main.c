@@ -80,7 +80,7 @@ static const char *usage =
 	_("  -v, --version\n")
 	_("    Print version information and exit.\n")
 	_("  -j N\n")
-	_("    Use N file-processing worker threads (default: 2 * nproc).\n")
+	_("    Use N file-processing worker threads (default: nproc).\n")
 	_("  -q, --quiet\n")
 	_("    Suppress status output: the per-file stderr echo from -i and the\n")
 	_("    matching lines in --grep mode (the exit code is still returned).\n")
@@ -113,6 +113,7 @@ static const char *usage =
 /* Exit code on error: --grep follows grep's convention of 2 for errors
  * (distinct from 1 = no match); every other mode keeps EXIT_FAILURE. */
 /**
+ * @anchor spec_err_exit_code
  * @brief Return the mode-specific error exit code.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -123,8 +124,10 @@ static const char *usage =
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static int
 err_exit_code()
@@ -135,6 +138,7 @@ err_exit_code()
 /* Default flags. Idempotent: assigns (never ORs) so calling it again cannot
  * leak state from an earlier call. */
 /**
+ * @anchor spec_init_defaults
  * @brief Initialize global defaults idempotently.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -142,11 +146,12 @@ err_exit_code()
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 init_defaults()
@@ -162,6 +167,7 @@ init_defaults()
  * substring filter, the --include regex and the --exclude regex (both
  * compiled into the global state by the flag parser or the confirm TUI). */
 /**
+ * @anchor spec_file_filter_pass
  * @brief Apply the interactive Files substring filter to a cached file.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -174,8 +180,10 @@ init_defaults()
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static int
 file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
@@ -198,6 +206,7 @@ file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
 }
 
 /**
+ * @anchor spec_cleanup
  * @brief Free or intentionally retain reusable global buffers before exit.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -205,11 +214,12 @@ file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 cleanup()
@@ -245,6 +255,7 @@ cleanup()
 
 /* Handle single-character combined flags (e.g., -EI, -gR). */
 /**
+ * @anchor spec_parse_single_flags
  * @brief Parse one combined short-flag argument.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -253,11 +264,12 @@ cleanup()
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param arg parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 parse_single_flags(const char *arg)
@@ -317,6 +329,7 @@ parse_single_flags(const char *arg)
 
 /* Handle double-dash flags (e.g. --include, --exclude, --grep). */
 /**
+ * @anchor spec_parse_long_flag
  * @brief Parse one long flag and its optional value.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -330,8 +343,10 @@ parse_single_flags(const char *arg)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static int
 parse_long_flag(char **argv, unsigned int *i_ptr, parser_state_ty *state)
@@ -385,6 +400,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, parser_state_ty *state)
 }
 
 /**
+ * @anchor spec_compile_or_die
  * @brief Compile the matcher or exit with the mode-specific code.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -397,11 +413,12 @@ parse_long_flag(char **argv, unsigned int *i_ptr, parser_state_ty *state)
  * @param find_len FIND byte length.
  * @param rplc replacement string.
  * @param rplc_len REPLACE byte length.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 compile_or_die(jstr_twoway_ty *t, const char *find, size_t find_len, const char *rplc, size_t rplc_len)
@@ -415,6 +432,7 @@ compile_or_die(jstr_twoway_ty *t, const char *find, size_t find_len, const char 
 
 /* Process the stdin target (a single '-' placeholder or missing target). */
 /**
+ * @anchor spec_process_stdin_arg
  * @brief Run stdin as a target root using CLI rules.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -428,8 +446,10 @@ compile_or_die(jstr_twoway_ty *t, const char *find, size_t find_len, const char 
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static jstr_ret_ty
 process_stdin_arg(args_ty *a, jstr_twoway_ty *t, const char *prog_name)
@@ -470,6 +490,7 @@ typedef struct file_batch_ty {
 } file_batch_ty;
 
 /**
+ * @anchor spec_parse_workers_value
  * @brief Parse and validate a -j worker count value.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -482,8 +503,10 @@ typedef struct file_batch_ty {
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static size_t
 parse_workers_value(const char *prog, const char *s)
@@ -503,6 +526,7 @@ parse_workers_value(const char *prog, const char *s)
 }
 
 /**
+ * @anchor spec_preparse_workers
  * @brief Scan argv for -j before pipeline startup.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -512,11 +536,12 @@ parse_workers_value(const char *prog, const char *s)
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param argc argument count.
  * @param argv argument vector.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 preparse_workers(int argc, char **argv)
@@ -542,6 +567,7 @@ preparse_workers(int argc, char **argv)
 }
 
 /**
+ * @anchor spec_batch_add
  * @brief Append a regular-file target to the pending batch.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -552,11 +578,12 @@ preparse_workers(int argc, char **argv)
  * @param batch pending explicit-file target batch.
  * @param path target path.
  * @param st file status.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 batch_add(file_batch_ty *R batch, const char *path, const struct stat *st)
@@ -575,6 +602,7 @@ batch_add(file_batch_ty *R batch, const char *path, const struct stat *st)
 }
 
 /**
+ * @anchor spec_flush_file_batch
  * @brief Run one FAR_ROOT_FILES root and clear the batch.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -585,11 +613,12 @@ batch_add(file_batch_ty *R batch, const char *path, const struct stat *st)
  * @param a parsed CLI arguments.
  * @param t compiled fixed-string matcher.
  * @param batch pending explicit-file target batch.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 flush_file_batch(args_ty *a, jstr_twoway_ty *t, file_batch_ty *R batch)
@@ -622,6 +651,7 @@ flush_file_batch(args_ty *a, jstr_twoway_ty *t, file_batch_ty *R batch)
 
 /* Process a target regular file or directory argument. */
 /**
+ * @anchor spec_process_target_arg
  * @brief Classify one CLI target and dispatch it.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -633,11 +663,12 @@ flush_file_batch(args_ty *a, jstr_twoway_ty *t, file_batch_ty *R batch)
  * @param a parsed CLI arguments.
  * @param t compiled fixed-string matcher.
  * @param batch pending explicit-file target batch.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t, file_batch_ty *batch)
@@ -686,6 +717,7 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t, file_batch_ty
 
 /* Handle confirm mode passes (TUI editing, confirmation prompt, and second-pass writing). */
 /**
+ * @anchor spec_run_confirm_mode
  * @brief Drive confirm pass 1, TUI, prompt, and pass 2.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -698,11 +730,12 @@ process_target_arg(const char *arg, args_ty *a, jstr_twoway_ty *t, file_batch_ty
  * @param raw_find unescaped FIND before interactive editing.
  * @param raw_rplc unescaped REPLACE before interactive editing.
  * @param argv argument vector.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static void
 run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char *raw_rplc, char **argv)
@@ -834,6 +867,7 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
 
 /* Process stdin fallback when no file argument was passed. */
 /**
+ * @anchor spec_process_no_files_stdin
  * @brief Run the implicit stdin target when no files were given.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -847,8 +881,10 @@ run_confirm_mode(args_ty *a, jstr_twoway_ty *t, const char *raw_find, const char
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 static jstr_ret_ty
 process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
@@ -884,6 +920,7 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
 }
 
 /**
+ * @anchor spec_main
  * @brief Program entry point: parse, dispatch, and return the final exit code.
  *
  * @details This function is part of the main.c contract. It reads only
@@ -896,8 +933,10 @@ process_no_files_stdin(args_ty *a, jstr_twoway_ty *t, char **argv)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Main thread only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
  */
 int
 main(int argc, char **argv)

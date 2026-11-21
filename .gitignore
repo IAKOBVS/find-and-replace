@@ -65,3 +65,6 @@ __pycache__/
 # Sanitizer build directories
 /build-tsan/
 /build-asan/
+
+# Doxygen output
+/docs/doxygen/

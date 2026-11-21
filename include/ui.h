@@ -134,8 +134,10 @@
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 jstr_ret_ty ui_replaced_buf(const char *R data, size_t size);
 /**
@@ -151,8 +153,10 @@ jstr_ret_ty ui_replaced_buf(const char *R data, size_t size);
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 jstr_ret_ty ui_report_changed(const char *R fname, size_t fname_len);
 void ui_grep_line(const char *R fname, size_t fname_len, size_t line,
@@ -175,8 +179,10 @@ jstr_ret_ty ui_format_grep_line(jstr_ty *R out, const char *R fname,
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 jstr_ret_ty ui_result(far_result_ty *R res, const args_ty *R a);
 /**
@@ -188,11 +194,12 @@ jstr_ret_ty ui_result(far_result_ty *R res, const args_ty *R a);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param res result object produced by Stage B.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 void ui_result_free(far_result_ty *R res);
 
@@ -207,8 +214,10 @@ void ui_result_free(far_result_ty *R res);
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int ui_ok(void);
 /**
@@ -223,8 +232,10 @@ int ui_ok(void);
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 unsigned short ui_size_t_width(size_t val);
 /**
@@ -239,11 +250,12 @@ unsigned short ui_size_t_width(size_t val);
  * @param len valid byte count.
  * @param cols parameter defined by the owning contract.
  * @param col_ptr parameter defined by the owning contract.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 void ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr);
 /**
@@ -255,11 +267,12 @@ void ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, un
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param val value to format.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 void ui_print_size_t(size_t val);
 jstr_ret_ty ui_scan_file(const jstr_twoway_ty *R t, const jstr_ty *R buf,

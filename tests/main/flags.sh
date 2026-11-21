@@ -216,6 +216,20 @@ t_grep_omit_replace() {
 	fi
 }
 
+t_j_invalid_value() {
+	td=$1
+	rc=0; "$PROG" a b -j nope > /dev/null 2> "$td/err" || rc=$?
+	[ "$rc" -ne 0 ] && grep -q 'invalid worker count' "$td/err" && \
+		echo PASS > "$td/result" || echo "FAIL: rc=$rc err=[$(cat "$td/err")]" > "$td/result"
+}
+
+t_j_missing_value() {
+	td=$1
+	rc=0; "$PROG" a b -j > /dev/null 2> "$td/err" || rc=$?
+	[ "$rc" -ne 0 ] && grep -q 'no argument after -j' "$td/err" && \
+		echo PASS > "$td/result" || echo "FAIL: rc=$rc err=[$(cat "$td/err")]" > "$td/result"
+}
+
 t_j_workers() {
 	td=$1
 	out=$(printf 'hello\n' | "$PROG" hello hi -j 2 2>/dev/null)
@@ -261,6 +275,8 @@ t_quiet_inplace
 t_quiet_long_flag
 t_exclude_long_relative_path
 t_grep_omit_replace
+t_j_invalid_value
+t_j_missing_value
 t_j_workers
 t_j_attached
 t_j_invalid

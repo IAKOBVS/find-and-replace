@@ -11,6 +11,7 @@
 #include <string.h>
 
 /**
+ * @anchor spec_traverse_emit
  * @brief Allocate and publish one work job.
  *
  * @details This function is part of the traverse.c contract. It reads only
@@ -27,8 +28,10 @@
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A only.
  */
 static int
 traverse_emit(root_ctx_ty *R root, const char *R path, size_t path_len,
@@ -76,11 +79,17 @@ out:
 static JSTR_IO_FTW_FUNC(traverse_enqueue, ftw, args)
 {
 	root_ctx_ty *const root = (root_ctx_ty *)(void *)args;
+	const char *base = jstr_memrchr(ftw->dirpath, '/', (size_t)ftw->dirpath_len);
+	base = (base != NULL && *(base + 1)) ? base + 1 : ftw->dirpath;
+	const size_t base_len = (size_t)(ftw->dirpath + ftw->dirpath_len - base);
+	if (jstr_strstr_len(base, base_len, FAR_TEMP_MARKER, S_LEN(FAR_TEMP_MARKER)) != NULL)
+		return 0;
 	return traverse_emit(root, ftw->dirpath, (size_t)ftw->dirpath_len,
 	                     ftw->st, FAR_JOB_FILE, NULL);
 }
 
 /**
+ * @anchor spec_traverse_thread
  * @brief Stage-A traversal loop.
  *
  * @details This function is part of the traverse.c contract. It reads only
@@ -92,8 +101,10 @@ static JSTR_IO_FTW_FUNC(traverse_enqueue, ftw, args)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage A only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A only.
  */
 far_thread_ret_ty
 traverse_thread(void *arg)

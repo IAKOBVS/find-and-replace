@@ -29,7 +29,8 @@ echo "=== gcov line + branch coverage ==="
 (
     cd "$TMPDIR"
     for src in $SRCS; do
-        gcov -b -o "$TMPDIR" "$DIR/$src" 2>/dev/null | tee "gcov.$src.out" | grep -E "^File .*${src}'|Lines executed:|Branches executed:|Taken at least once:"
+        safe=$(printf '%s' "$src" | tr '/' '_')
+        gcov -b -o "$TMPDIR" "$DIR/$src" 2>/dev/null | tee "gcov.$safe.out" | grep -E "^File .*${src}'|Lines executed:|Branches executed:|Taken at least once:"
     done
 )
 
@@ -82,13 +83,15 @@ br_total=0
 br_exec=0
 br_taken=0
 for src in $SRCS; do
-    gc="$TMPDIR/${src%.c}.c.gcov"
+    base=$(basename "$src")
+    safe=$(printf '%s' "$src" | tr '/' '_')
+    gc="$TMPDIR/${base%.c}.c.gcov"
     [ -f "$gc" ] || continue
     le=$(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$gc" || true)
     lm=$(grep -c '^    #####:' "$gc" || true)
     line_total=$((line_total + le + lm))
     line_miss=$((line_miss + lm))
-    stats=$(branch_stats "$src" "$TMPDIR/gcov.$src.out")
+    stats=$(branch_stats "$base" "$TMPDIR/gcov.$safe.out")
     set -- $stats
     bt=$1
     be=$2
@@ -106,11 +109,13 @@ echo "  Both-paths coverage : $btpct% ($br_taken/$br_total branches taken both w
 echo ""
 echo "=== Per-file ==="
 for src in $SRCS; do
-    gc="$TMPDIR/${src%.c}.c.gcov"
+    base=$(basename "$src")
+    safe=$(printf '%s' "$src" | tr '/' '_')
+    gc="$TMPDIR/${base%.c}.c.gcov"
     [ -f "$gc" ] || continue
     le=$(grep -cE '^[[:space:]]*[0-9]+[*]?:' "$gc" || true)
     lm=$(grep -c '^    #####:' "$gc" || true)
-    stats=$(branch_stats "$src" "$TMPDIR/gcov.$src.out")
+    stats=$(branch_stats "$base" "$TMPDIR/gcov.$safe.out")
     set -- $stats
     bt=$1
     be=$2
@@ -128,4 +133,5 @@ grep '^    #####' "$TMPDIR"/*.c.gcov | head -60 || true
 # Rebuild production binary
 echo ""
 echo "=== Rebuilding production binary ==="
+rm -f "$DIR/$PROG"
 ./compile

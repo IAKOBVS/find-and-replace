@@ -12,6 +12,7 @@
  * is split on the first delimiter and both sides are whitespace-trimmed. */
 
 /**
+ * @anchor spec_procfs_iter_init
  * @brief Open /proc/meminfo and initialize an iterator.
  *
  * @details This function is part of the procfs.c contract. It reads only
@@ -22,11 +23,12 @@
  * @param iter parameter defined by the owning module contract.
  * @param buf growable byte buffer.
  * @param len valid byte count.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Any stage that owns the iterator/state.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any stage that owns the iterator/state.
  */
 void
 procfs_iter_init(struct procfs_iter *iter, const char *buf, unsigned int len)
@@ -36,6 +38,7 @@ procfs_iter_init(struct procfs_iter *iter, const char *buf, unsigned int len)
 }
 
 /**
+ * @anchor spec_procfs_iter_next
  * @brief Read the next line from an open procfs iterator.
  *
  * @details This function is part of the procfs.c contract. It reads only
@@ -52,8 +55,10 @@ procfs_iter_init(struct procfs_iter *iter, const char *buf, unsigned int len)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Any stage that owns the iterator/state.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any stage that owns the iterator/state.
  */
 int
 procfs_iter_next(struct procfs_iter *iter, const char **key, unsigned int *key_len, const char **val, unsigned int *val_len, int delimiter)
@@ -99,6 +104,7 @@ procfs_iter_next(struct procfs_iter *iter, const char **key, unsigned int *key_l
 
 
 /**
+ * @anchor spec_procfs_mem_available
  * @brief Return MemAvailable in bytes with a documented fallback.
  *
  * @details This function is part of the procfs.c contract. It reads only
@@ -109,8 +115,10 @@ procfs_iter_next(struct procfs_iter *iter, const char **key, unsigned int *key_l
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Any stage that owns the iterator/state.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any stage that owns the iterator/state.
  */
 size_t
 procfs_mem_available(void)

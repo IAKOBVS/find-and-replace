@@ -21,6 +21,7 @@
  * Matching is line-based like grep (a regex can never span newlines here,
  * unlike the replace path which scans the whole buffer). */
 /**
+ * @anchor spec_grep_scan_to_buf
  * @brief Scan a buffer line-by-line and append grep output.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -39,8 +40,10 @@
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 static jstr_ret_ty
 grep_scan_to_buf(const jstr_twoway_ty *R t, const jstr_ty *R buf,
@@ -90,6 +93,7 @@ grep_scan_to_buf(const jstr_twoway_ty *R t, const jstr_ty *R buf,
 
 /* --grep TUI: collect every matching line into G.grep_lines. */
 /**
+ * @anchor spec_grep_collect_file_n
  * @brief Collect grep matches into the legacy global list.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -104,11 +108,12 @@ grep_scan_to_buf(const jstr_twoway_ty *R t, const jstr_ty *R buf,
  * @param find find string.
  * @param find_len FIND byte length.
  * @param limit maximum number of emitted matches.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 void
 grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
@@ -166,6 +171,7 @@ grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char 
 }
 
 /**
+ * @anchor spec_grep_collect_file
  * @brief Collect all grep matches from one buffer.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -179,11 +185,12 @@ grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char 
  * @param fname_len FNAME byte length.
  * @param find find string.
  * @param find_len FIND byte length.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 void
 grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R fname,
@@ -193,6 +200,7 @@ grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R
 }
 
 /**
+ * @anchor spec_process_buffer_compute
  * @brief Apply FIX/REPLACE to an in-memory buffer.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -210,8 +218,10 @@ grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 static jstr_ret_ty
 process_buffer_compute(const jstr_twoway_ty *R t, jstr_ty *R buf,
@@ -244,6 +254,7 @@ process_buffer_compute(const jstr_twoway_ty *R t, jstr_ty *R buf,
 }
 
 /**
+ * @anchor spec_process_job
  * @brief Process one file job from Stage A.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -260,12 +271,15 @@ process_buffer_compute(const jstr_twoway_ty *R t, jstr_ty *R buf,
  * @param find_len FIND byte length.
  * @param rplc replacement string.
  * @param rplc_len REPLACE byte length.
+ * @param confirm_phase confirm workflow phase for this root.
  * @param res result object produced by Stage B.
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 jstr_ret_ty
 process_job(const jstr_twoway_ty *R t, jstr_ty **R buf,
@@ -355,6 +369,7 @@ out:
 }
 
 /**
+ * @anchor spec_process_stdin_job
  * @brief Process the stdin job from Stage A.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -368,12 +383,15 @@ out:
  * @param find_len FIND byte length.
  * @param rplc replacement string.
  * @param rplc_len REPLACE byte length.
+ * @param confirm_phase confirm workflow phase for this root.
  * @param res result object produced by Stage B.
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 static jstr_ret_ty
 process_stdin_job(const jstr_twoway_ty *R t, jstr_ty **R bufp,
@@ -394,8 +412,11 @@ process_stdin_job(const jstr_twoway_ty *R t, jstr_ty **R bufp,
 		*bufp = b;
 	}
 	jstr_empty_j(b);
-	if (jstr_chk(jstr_io_readstdin_j(b)))
-		goto err;
+	if (jstr_chk(jstr_io_readstdin_j(b))) {
+		if (jstr_unlikely(b->size != 0))
+			goto err;
+		jstr_empty_j(b);
+	}
 	if (G.mode & MODE_GREP) {
 		tmp = (jstr_ty *)malloc(sizeof *tmp);
 		if (jstr_unlikely(!tmp))
@@ -429,6 +450,7 @@ out:
 }
 
 /**
+ * @anchor spec_process_mem_job
  * @brief Process one cached pass-2 file job.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -443,12 +465,15 @@ out:
  * @param find_len FIND byte length.
  * @param rplc replacement string.
  * @param rplc_len REPLACE byte length.
+ * @param confirm_phase confirm workflow phase for this root.
  * @param res result object produced by Stage B.
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 static jstr_ret_ty
 process_mem_job(const jstr_twoway_ty *R t, jstr_ty **R bufp,
@@ -498,6 +523,7 @@ out:
 }
 
 /**
+ * @anchor spec_maybe_send_eos
  * @brief Send the single logical EOS when root completion conditions hold.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -507,15 +533,15 @@ out:
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param root per-root pipeline context.
  * @param worker zero-based B worker index.
- * @param grep_live parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 static void
-maybe_send_eos(root_ctx_ty *R root, size_t worker, int grep_live)
+maybe_send_eos(root_ctx_ty *R root, size_t worker)
 {
 	if (!atomic_load_explicit(&root->eos_taken, memory_order_acquire))
 		return;
@@ -533,12 +559,13 @@ maybe_send_eos(root_ctx_ty *R root, size_t worker, int grep_live)
 		jstr_errdie("%s", "Out of memory.\n");
 	eos->kind = FAR_RES_EOS;
 	eos->total = atomic_load_explicit(&root->total, memory_order_acquire);
-	const int send_ret = grep_live ? pipeline_grep_work_send(worker, eos) : pipeline_done_send(worker, eos);
+	const int send_ret = root->grep_live ? pipeline_grep_work_send(worker, eos) : pipeline_done_send(worker, eos);
 	if (send_ret != 0)
-		free(eos);
+		jstr_errdie("%s", "Can't publish root EOS.\n");
 }
 
 /**
+ * @anchor spec_finish_worker
  * @brief Record one worker completion and test the EOS barrier.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -548,21 +575,22 @@ maybe_send_eos(root_ctx_ty *R root, size_t worker, int grep_live)
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param root per-root pipeline context.
  * @param worker zero-based B worker index.
- * @param grep_live parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 static void
-finish_worker(root_ctx_ty *R root, size_t worker, int grep_live)
+finish_worker(root_ctx_ty *R root, size_t worker)
 {
 	atomic_fetch_add_explicit(&root->workers_done, 1, memory_order_acq_rel);
-	maybe_send_eos(root, worker, grep_live);
+	maybe_send_eos(root, worker);
 }
 
 /**
+ * @anchor spec_process_thread
  * @brief Stage-B worker loop.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -574,8 +602,10 @@ finish_worker(root_ctx_ty *R root, size_t worker, int grep_live)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 far_thread_ret_ty
 process_thread(void *arg)
@@ -608,9 +638,7 @@ process_thread(void *arg)
 				spin = 0;
 			if (job == NULL) {
 				if (atomic_load_explicit(&root->eos_taken, memory_order_acquire)) {
-					const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
-					                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-					finish_worker(root, worker, grep_live);
+					finish_worker(root, worker);
 					break;
 				}
 				spsc_backoff(&spin);
@@ -618,9 +646,7 @@ process_thread(void *arg)
 			}
 			if (job->kind == FAR_JOB_EOS) {
 				atomic_store_explicit(&root->eos_taken, true, memory_order_release);
-				const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
-				                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-				finish_worker(root, worker, grep_live);
+				finish_worker(root, worker);
 				break;
 			}
 			far_result_ty *const res = (far_result_ty *)calloc(1, sizeof *res);
@@ -662,17 +688,11 @@ process_thread(void *arg)
 				}
 			}
 			free(job);
-			const int grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
-			                      isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-			const int send_ret = grep_live ? pipeline_grep_work_send(worker, res) : pipeline_done_send(worker, res);
-			if (send_ret != 0) {
-				ui_result_free(res);
-				atomic_fetch_add_explicit(&root->jobs_done, 1, memory_order_acq_rel);
-				finish_worker(root, worker, grep_live);
-				break;
-			}
+			const int send_ret = root->grep_live ? pipeline_grep_work_send(worker, res) : pipeline_done_send(worker, res);
+			if (send_ret != 0)
+				jstr_errdie("%s", "Can't publish processing result.\n");
 			atomic_fetch_add_explicit(&root->jobs_done, 1, memory_order_acq_rel);
-			maybe_send_eos(root, worker, grep_live);
+			maybe_send_eos(root, worker);
 		}
 	}
 	if (buf != NULL)
@@ -686,6 +706,7 @@ process_thread(void *arg)
  * MODE_COMPILED bit alone cannot guard that, since -R/-E/-F may appear
  * anywhere on the command line, even after a file argument. */
 /**
+ * @anchor spec_far_compile
  * @brief Compile or recompile the global find matcher.
  *
  * @details This function is part of the process.c contract. It reads only
@@ -704,8 +725,10 @@ process_thread(void *arg)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B workers; far_compile is called by main or Stage C.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; far_compile is called by main or Stage C.
  */
 jstr_ret_ty
 far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size)

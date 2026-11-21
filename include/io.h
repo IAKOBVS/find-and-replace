@@ -15,8 +15,10 @@
  * @param buf Destination for the struct stat result.
  * @return `JSTR_RET_SUCC` on success; `JSTR_RET_ERR` when stat(2) fails.
  * @post On success BUF contains the stat result; on failure BUF is unspecified.
- * @sideeffects One stat(2) syscall; no global state is modified.
- * @thread Any thread; no shared mutable state.
+ * @par Side Effects:
+ *   One stat(2) syscall; no global state is modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; no shared mutable state.
  */
 jstr_ret_ty xstat(const char *R file, struct stat *R buf);
 
@@ -27,8 +29,10 @@ jstr_ret_ty xstat(const char *R file, struct stat *R buf);
  * @param fname Path to test.
  * @return Nonzero when the path exists; zero otherwise.
  * @post No state is modified.
- * @sideeffects One access(2) syscall.
- * @thread Any thread; no shared mutable state.
+ * @par Side Effects:
+ *   One access(2) syscall.
+ * @par Threading and Reentrancy:
+ *   Any thread; no shared mutable state.
  */
 int file_exists(const char *R fname);
 
@@ -43,8 +47,10 @@ int file_exists(const char *R fname);
  * @param st Original file status used to restore permissions.
  * @return `JSTR_RET_SUCC` on success; `JSTR_RET_ERR` on rename/write failure.
  * @post On success FNAME contains BUF and the backup contains the original file.
- * @sideeffects Renames FNAME, writes FNAME, may call jstr_errdie on invalid input.
- * @thread Stage B worker.
+ * @par Side Effects:
+ *   Renames FNAME, writes FNAME, may call jstr_errdie on invalid input.
+ * @par Threading and Reentrancy:
+ *   Stage B worker.
  */
 jstr_ret_ty io_write_inplace_backup(const jstr_ty *R buf, const char *R fname,
                                     size_t fname_len, const struct stat *st);
@@ -57,10 +63,11 @@ jstr_ret_ty io_write_inplace_backup(const jstr_ty *R buf, const char *R fname,
  * @param buf Complete replacement content.
  * @param fname Destination path.
  * @param fname_len Byte length of FNAME.
- * @return None.
  * @post On success FNAME contains BUF and the temp file no longer exists.
- * @sideeffects Creates, writes, and renames a temporary file; may exit on failure.
- * @thread Stage B worker.
+ * @par Side Effects:
+ *   Creates, writes, and renames a temporary file; may exit on failure.
+ * @par Threading and Reentrancy:
+ *   Stage B worker.
  */
 void io_write_inplace_temp(const jstr_ty *R buf, const char *R fname,
                            size_t fname_len);

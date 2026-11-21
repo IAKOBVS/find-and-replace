@@ -32,6 +32,7 @@ static int esc_char_pending;
 #define TERM_COLS_FALLBACK 80
 
 /**
+ * @anchor spec_restore_terminal
  * @brief Restore the terminal from raw mode.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -39,11 +40,12 @@ static int esc_char_pending;
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 restore_terminal(void)
@@ -58,6 +60,7 @@ restore_terminal(void)
 }
 
 /**
+ * @anchor spec_handle_signal
  * @brief Signal handler that requests TUI shutdown.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -66,11 +69,12 @@ restore_terminal(void)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param sig parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 handle_signal(int sig)
@@ -81,6 +85,7 @@ handle_signal(int sig)
 }
 
 /**
+ * @anchor spec_term_clear_screen
  * @brief Clear the terminal screen.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -88,11 +93,12 @@ handle_signal(int sig)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_clear_screen(void)
@@ -103,6 +109,7 @@ term_clear_screen(void)
 }
 
 /**
+ * @anchor spec_term_home
  * @brief Move the cursor to the home position.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -110,11 +117,12 @@ term_clear_screen(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_home(void)
@@ -125,6 +133,7 @@ term_home(void)
 }
 
 /**
+ * @anchor spec_term_clear_and_home
  * @brief Clear the screen and home the cursor.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -132,11 +141,12 @@ term_home(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_clear_and_home(void)
@@ -146,6 +156,7 @@ term_clear_and_home(void)
 }
 
 /**
+ * @anchor spec_term_clear_line_end
  * @brief Clear from the cursor to end of line.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -153,11 +164,12 @@ term_clear_and_home(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_clear_line_end(void)
@@ -168,6 +180,7 @@ term_clear_line_end(void)
 }
 
 /**
+ * @anchor spec_term_clear_down
  * @brief Clear from the cursor to end of screen.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -175,11 +188,12 @@ term_clear_line_end(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_clear_down(void)
@@ -190,6 +204,7 @@ term_clear_down(void)
 }
 
 /**
+ * @anchor spec_term_show_cursor
  * @brief Make the terminal cursor visible.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -197,11 +212,12 @@ term_clear_down(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_show_cursor(void)
@@ -212,6 +228,7 @@ term_show_cursor(void)
 }
 
 /**
+ * @anchor spec_term_hide_cursor
  * @brief Hide the terminal cursor.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -219,11 +236,12 @@ term_show_cursor(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_hide_cursor(void)
@@ -234,6 +252,7 @@ term_hide_cursor(void)
 }
 
 /**
+ * @anchor spec_term_move_cursor
  * @brief Move the cursor to a 1-based row and column.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -243,11 +262,12 @@ term_hide_cursor(void)
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param line destination line buffer or worker queue index.
  * @param col parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 term_move_cursor(size_t line, size_t col)
@@ -262,6 +282,7 @@ term_move_cursor(size_t line, size_t col)
 }
 
 /**
+ * @anchor spec_setup_terminal
  * @brief Enable raw mode and install terminal state.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -269,11 +290,12 @@ term_move_cursor(size_t line, size_t col)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 setup_terminal(void)
@@ -311,6 +333,7 @@ setup_terminal(void)
 }
 
 /**
+ * @anchor spec_get_terminal_cols
  * @brief Return the terminal width with documented fallbacks.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -321,8 +344,10 @@ setup_terminal(void)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static unsigned short
 get_terminal_cols(void)
@@ -348,6 +373,7 @@ get_terminal_cols(void)
  * An empty pattern clears the filter. On invalid regex, report it and return
  * JSTR_RET_ERR so the caller treats the whole session as invalid. */
 /**
+ * @anchor spec_interactive_compile_include_exclude
  * @brief Recompile live include/exclude filters.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -364,8 +390,10 @@ get_terminal_cols(void)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static jstr_ret_ty
 interactive_compile_include_exclude(const char *include, size_t include_len,
@@ -408,6 +436,7 @@ interactive_compile_include_exclude(const char *include, size_t include_len,
 /* Return 1 if FILE passes the interactive filters: the Files substring
  * filter and the Include/Exclude basename regexes (in the global state). */
 /**
+ * @anchor spec_interactive_file_pass
  * @brief Apply the interactive Files substring filter.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -420,8 +449,10 @@ interactive_compile_include_exclude(const char *include, size_t include_len,
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static int
 interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
@@ -444,6 +475,7 @@ interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
 }
 
 /**
+ * @anchor spec_parse_interactive_flags
  * @brief Parse the confirm TUI FLAGS field into G.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -453,11 +485,12 @@ interactive_file_pass(const file_ty *R file, const jstr_ty *R files_buf)
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param flags flags buffer.
  * @param len valid byte count.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 parse_interactive_flags(const char *flags, size_t len)
@@ -508,6 +541,7 @@ parse_interactive_flags(const char *flags, size_t len)
 }
 
 /**
+ * @anchor spec_get_terminal_rows
  * @brief Return the terminal height with documented fallbacks.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -518,8 +552,10 @@ parse_interactive_flags(const char *flags, size_t len)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static unsigned short
 get_terminal_rows(void)
@@ -562,6 +598,7 @@ static const field_info_ty field_info_table[FIELD_COUNT] = {
 
 /* Return the interactive buffer for a field, or NULL for out-of-range. */
 /**
+ * @anchor spec_field_buf
  * @brief Return the editable buffer for a confirm field index.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -580,8 +617,10 @@ static const field_info_ty field_info_table[FIELD_COUNT] = {
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static jstr_ty *
 field_buf(jstr_ty *R find_buf, jstr_ty *R rplc_buf, jstr_ty *R flags_buf,
@@ -602,6 +641,7 @@ field_buf(jstr_ty *R find_buf, jstr_ty *R rplc_buf, jstr_ty *R flags_buf,
 
 /* Fields whose edits require recompiling the find/include/exclude regexes. */
 /**
+ * @anchor spec_field_affects_recompile
  * @brief Report whether editing a field requires recompile.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -613,8 +653,10 @@ field_buf(jstr_ty *R find_buf, jstr_ty *R rplc_buf, jstr_ty *R flags_buf,
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static int
 field_affects_recompile(size_t field)
@@ -628,6 +670,7 @@ field_affects_recompile(size_t field)
  * live compile and preview see the same strings the CLI path would produce.
  * DST's size is set to the unescaped length. */
 /**
+ * @anchor spec_jstr_unescape_copy
  * @brief Copy and unescape an interactive field into a scratch buffer.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -637,11 +680,12 @@ field_affects_recompile(size_t field)
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param dst parameter defined by the owning module contract.
  * @param src source bytes.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
@@ -654,6 +698,7 @@ jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
 }
 
 /**
+ * @anchor spec_confirm_render_field
  * @brief Render one editable confirm field.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -664,11 +709,12 @@ jstr_unescape_copy(jstr_ty *R dst, const jstr_ty *R src)
  * @param info parameter defined by the owning module contract.
  * @param buf growable byte buffer.
  * @param is_active parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 confirm_render_field(const field_info_ty *info, const jstr_ty *buf, int is_active)
@@ -685,6 +731,7 @@ confirm_render_field(const field_info_ty *info, const jstr_ty *buf, int is_activ
 }
 
 /**
+ * @anchor spec_confirm_read_key
  * @brief Read one decoded key from stdin.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -696,8 +743,10 @@ confirm_render_field(const field_info_ty *info, const jstr_ty *buf, int is_activ
  * @return Function result as defined by the return type.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static confirm_key_ty
 confirm_read_key(char *out_char)
@@ -794,6 +843,7 @@ confirm_read_key(char *out_char)
 }
 
 /**
+ * @anchor spec_confirm_read_key_timeout
  * @brief Read one key with a bounded wait.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -806,8 +856,10 @@ confirm_read_key(char *out_char)
  * @return Function result as defined by the return type.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static confirm_key_ty
 confirm_read_key_timeout(char *out_char, int timeout_ms)
@@ -823,6 +875,7 @@ confirm_read_key_timeout(char *out_char, int timeout_ms)
 }
 
 /**
+ * @anchor spec_grep_now_ms
  * @brief Return a monotonic millisecond timestamp.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -833,8 +886,10 @@ confirm_read_key_timeout(char *out_char, int timeout_ms)
  * @return Function result as defined by the return type.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static long long
 grep_now_ms(void)
@@ -845,6 +900,7 @@ grep_now_ms(void)
 }
 
 /**
+ * @anchor spec_grep_now_us
  * @brief Return a monotonic microsecond timestamp.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -855,8 +911,10 @@ grep_now_ms(void)
  * @return Function result as defined by the return type.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static long long
 grep_now_us(void)
@@ -870,6 +928,7 @@ static char err_buf[256];
 static char last_err_buf[256];
 
 /**
+ * @anchor spec_render_tui_header_and_stats
  * @brief Render the TUI marker and Stats line.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -880,11 +939,12 @@ static char last_err_buf[256];
  * @param start_control_line parameter defined by the owning module contract.
  * @param total_matches parameter defined by the owning module contract.
  * @param files_matched parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 render_tui_header_and_stats(size_t start_control_line, size_t total_matches, size_t files_matched)
@@ -944,6 +1004,7 @@ static const grep_field_info_ty grep_field_info_table[GREP_FIELD_COUNT] = {
 };
 
 /**
+ * @anchor spec_grep_field_buf
  * @brief Return the editable buffer for a grep field index.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -959,8 +1020,10 @@ static const grep_field_info_ty grep_field_info_table[GREP_FIELD_COUNT] = {
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static jstr_ty *
 grep_field_buf(jstr_ty *R find_buf, jstr_ty *R files_buf, jstr_ty *R include_buf, jstr_ty *R exclude_buf, size_t field)
@@ -975,6 +1038,7 @@ grep_field_buf(jstr_ty *R find_buf, jstr_ty *R files_buf, jstr_ty *R include_buf
 }
 
 /**
+ * @anchor spec_grep_field_affects_recompile
  * @brief Report whether editing a grep field requires rescan.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -986,8 +1050,10 @@ grep_field_buf(jstr_ty *R find_buf, jstr_ty *R files_buf, jstr_ty *R include_buf
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static int
 grep_field_affects_recompile(size_t field)
@@ -1001,6 +1067,7 @@ grep_field_affects_recompile(size_t field)
  * colored prefix as non-interactive grep. If IS_SELECTED, wrap in inverse
  * video. Returns 1 if the line was printed, 0 if budget exhausted. */
 /**
+ * @anchor spec_grep_print_line
  * @brief Render one grep match line in the capped TUI.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1014,8 +1081,10 @@ grep_field_affects_recompile(size_t field)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static int
 grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
@@ -1056,6 +1125,7 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 #define GREP_RESCAN_DEBOUNCE_MS 200
 
 /**
+ * @anchor spec_grep_match_cap
  * @brief Return the live grep match limit for the terminal height.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1066,8 +1136,10 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static size_t
 grep_match_cap(void)
@@ -1078,6 +1150,7 @@ grep_match_cap(void)
 }
 
 /**
+ * @anchor spec_grep_emit_selected
  * @brief Emit the selected grep match after the TUI exits.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1085,11 +1158,12 @@ grep_match_cap(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 grep_emit_selected(void)
@@ -1123,6 +1197,7 @@ typedef struct grep_retire_node_ty {
 static grep_retire_node_ty *grep_retire_pending;
 
 /**
+ * @anchor spec_grep_retire_flush
  * @brief Move pending retired lists to D without blocking.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1133,8 +1208,10 @@ static grep_retire_node_ty *grep_retire_pending;
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static int
 grep_retire_flush(void)
@@ -1153,6 +1230,7 @@ grep_retire_flush(void)
 }
 
 /**
+ * @anchor spec_grep_lines_discard
  * @brief Retire all owned match records in a list.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1161,11 +1239,12 @@ grep_retire_flush(void)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param lines match list to modify or retire.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 grep_lines_discard(grep_lines_ty *R lines)
@@ -1195,6 +1274,7 @@ grep_lines_discard(grep_lines_ty *R lines)
 }
 
 /**
+ * @anchor spec_grep_lines_reserve
  * @brief Reserve capacity in a match list.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1204,11 +1284,12 @@ grep_lines_discard(grep_lines_ty *R lines)
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param lines match list to modify or retire.
  * @param extra parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 grep_lines_reserve(grep_lines_ty *R lines, size_t extra)
@@ -1226,6 +1307,7 @@ grep_lines_reserve(grep_lines_ty *R lines, size_t extra)
 }
 
 /**
+ * @anchor spec_grep_lines_append_batch
  * @brief Append one D batch to a match list.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1236,11 +1318,12 @@ grep_lines_reserve(grep_lines_ty *R lines, size_t extra)
  * @param lines match list to modify or retire.
  * @param src source bytes.
  * @param n requested capacity.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 grep_lines_append_batch(grep_lines_ty *R lines, const grep_line_ty *R src, size_t n)
@@ -1251,6 +1334,7 @@ grep_lines_append_batch(grep_lines_ty *R lines, const grep_line_ty *R src, size_
 }
 
 /**
+ * @anchor spec_grep_dup
  * @brief Duplicate an editable buffer into an owned C string.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1262,8 +1346,10 @@ grep_lines_append_batch(grep_lines_ty *R lines, const grep_line_ty *R src, size_
  * @return Owned or borrowed string pointer; `NULL` on failure/EOF where documented.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static char *
 grep_dup(const jstr_ty *R buf)
@@ -1279,6 +1365,7 @@ grep_dup(const jstr_ty *R buf)
 }
 
 /**
+ * @anchor spec_grep_send_cfg
  * @brief Build and publish a grep configuration snapshot.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1293,11 +1380,12 @@ grep_dup(const jstr_ty *R buf)
  * @param files_buf Files substring buffer.
  * @param include_buf include regex buffer.
  * @param exclude_buf exclude regex buffer.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 grep_send_cfg(grep_cfg_kind_ty kind, unsigned long gen, size_t limit,
@@ -1331,6 +1419,7 @@ grep_send_cfg(grep_cfg_kind_ty kind, unsigned long gen, size_t limit,
 }
 
 /**
+ * @anchor spec_grep_interactive_loop
  * @brief Run the live grep TUI until quit or completion.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1347,8 +1436,10 @@ grep_send_cfg(grep_cfg_kind_ty kind, unsigned long gen, size_t limit,
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 jstr_ret_ty
 grep_interactive_loop(jstr_twoway_ty *R t,
@@ -1760,6 +1851,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 }
 
 /**
+ * @anchor spec_confirm_interactive_loop
  * @brief Run the confirm TUI until selection or quit.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -1778,8 +1870,10 @@ grep_interactive_loop(jstr_twoway_ty *R t,
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 jstr_ret_ty
 confirm_interactive_loop(jstr_twoway_ty *R t,
@@ -2083,6 +2177,7 @@ done:
 
 
 /**
+ * @anchor spec_terminal_active
  * @brief Report whether terminal raw mode is active.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -2093,8 +2188,10 @@ done:
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int
 terminal_active(void)
@@ -2103,6 +2200,7 @@ terminal_active(void)
 }
 
 /**
+ * @anchor spec_terminal_cols
  * @brief Return the cached terminal column count.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -2113,8 +2211,10 @@ terminal_active(void)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 unsigned short
 terminal_cols(void)
@@ -2123,6 +2223,7 @@ terminal_cols(void)
 }
 
 /**
+ * @anchor spec_terminal_rows
  * @brief Return the cached terminal row count.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -2133,8 +2234,10 @@ terminal_cols(void)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 unsigned short
 terminal_rows(void)
@@ -2143,6 +2246,7 @@ terminal_rows(void)
 }
 
 /**
+ * @anchor spec_ui_drain_root
  * @brief Cancel and wait for a stale live-grep root.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -2151,11 +2255,12 @@ terminal_rows(void)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param root per-root pipeline context.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 ui_drain_root(root_ctx_ty *R root)
@@ -2176,6 +2281,7 @@ ui_drain_root(root_ctx_ty *R root)
 }
 
 /**
+ * @anchor spec_terminal_ui_thread
  * @brief Dedicated Stage-C UI thread.
  *
  * @details This function is part of the terminal.c contract. It reads only
@@ -2187,8 +2293,10 @@ ui_drain_root(root_ctx_ty *R root)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 far_thread_ret_ty
 terminal_ui_thread(void *arg)
@@ -2226,6 +2334,14 @@ terminal_ui_thread(void *arg)
 		if (ui_stop_requested)
 			break;
 		ui_quit = 1;
+	}
+	while (grep_retire_pending != NULL) {
+		grep_retire_node_ty *const node = grep_retire_pending;
+		grep_retire_pending = node->next;
+		for (size_t i = 0; i < node->lines.size; ++i)
+			free(node->lines.data[i].owner);
+		free(node->lines.data);
+		free(node);
 	}
 	return FAR_THREAD_RETURN;
 }

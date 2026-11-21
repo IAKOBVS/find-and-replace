@@ -37,8 +37,10 @@ typedef struct spmc_chan_ty {
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A produces; B workers consume.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; B workers consume.
  */
 int spmc_chan_init(spmc_chan_ty *c, spmc_slot_ty *slots, size_t cap);
 /**
@@ -54,8 +56,10 @@ int spmc_chan_init(spmc_chan_ty *c, spmc_slot_ty *slots, size_t cap);
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A produces; B workers consume.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; B workers consume.
  */
 int spmc_chan_send(spmc_chan_ty *c, void *v);
 /**
@@ -67,11 +71,12 @@ int spmc_chan_send(spmc_chan_ty *c, void *v);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A produces; B workers consume.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; B workers consume.
  */
 void *spmc_chan_recv(spmc_chan_ty *c);
 /**
@@ -83,11 +88,12 @@ void *spmc_chan_recv(spmc_chan_ty *c);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A produces; B workers consume.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; B workers consume.
  */
 void *spmc_chan_try_recv(spmc_chan_ty *c);
 /**
@@ -99,11 +105,12 @@ void *spmc_chan_try_recv(spmc_chan_ty *c);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A produces; B workers consume.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; B workers consume.
  */
 void spmc_chan_close(spmc_chan_ty *c);
 /**
@@ -118,8 +125,10 @@ void spmc_chan_close(spmc_chan_ty *c);
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A produces; B workers consume.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A produces; B workers consume.
  */
 int spmc_chan_is_closed(spmc_chan_ty *c);
 

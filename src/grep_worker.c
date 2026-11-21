@@ -2,6 +2,7 @@
 /* Copyright (c) 2023-2026 James Tirta Halim <tirtajames45 at gmail dot com> */
 
 #include "grep_worker.h"
+#include "io.h"
 #include "pipeline.h"
 #include "procfs.h"
 #include "ui.h"
@@ -71,6 +72,7 @@ static size_t retire_at;
 static void batch_discard(void);
 
 /**
+ * @anchor spec_cfg_clear
  * @brief Free all D-local configuration state.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -78,11 +80,12 @@ static void batch_discard(void);
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 cfg_clear(void)
@@ -101,6 +104,7 @@ cfg_clear(void)
 }
 
 /**
+ * @anchor spec_cfg_compile
  * @brief Install a new D configuration snapshot.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -109,11 +113,12 @@ cfg_clear(void)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param msg owned message object.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 cfg_compile(grep_cfg_ty *R msg)
@@ -151,6 +156,7 @@ cfg_compile(grep_cfg_ty *R msg)
 }
 
 /**
+ * @anchor spec_cfg_accept
  * @brief Test a file against D-local find/filter configuration.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -163,8 +169,10 @@ cfg_compile(grep_cfg_ty *R msg)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static int
 cfg_accept(const char *R fname, size_t fname_len)
@@ -182,6 +190,7 @@ cfg_accept(const char *R fname, size_t fname_len)
 }
 
 /**
+ * @anchor spec_batch_discard
  * @brief Free a partially built D match batch.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -189,11 +198,12 @@ cfg_accept(const char *R fname, size_t fname_len)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 batch_discard(void)
@@ -205,6 +215,7 @@ batch_discard(void)
 }
 
 /**
+ * @anchor spec_batch_flush
  * @brief Publish the current D match batch to C.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -212,11 +223,12 @@ batch_discard(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 batch_flush(void)
@@ -248,6 +260,7 @@ batch_flush(void)
 }
 
 /**
+ * @anchor spec_send_one_match
  * @brief Append one owned match record to the D batch.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -263,11 +276,12 @@ batch_flush(void)
  * @param moff parameter defined by the owning module contract.
  * @param mlen parameter defined by the owning module contract.
  * @param first first-match-in-file flag.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 send_one_match(const char *R fname, size_t fname_len, size_t line,
@@ -301,6 +315,7 @@ send_one_match(const char *R fname, size_t fname_len, size_t line,
 }
 
 /**
+ * @anchor spec_scan_content
  * @brief Scan one cached file and emit matching lines.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -311,11 +326,12 @@ send_one_match(const char *R fname, size_t fname_len, size_t line,
  * @param fname file name.
  * @param fname_len FNAME byte length.
  * @param buf growable byte buffer.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 scan_content(const char *R fname, size_t fname_len, const jstr_ty *R buf)
@@ -366,6 +382,7 @@ scan_content(const char *R fname, size_t fname_len, const jstr_ty *R buf)
 }
 
 /**
+ * @anchor spec_send_kind
  * @brief Publish one control message from D to C.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -374,11 +391,12 @@ scan_content(const char *R fname, size_t fname_len, const jstr_ty *R buf)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param kind message kind discriminator.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 send_kind(far_grep_msg_kind_ty kind)
@@ -394,6 +412,7 @@ send_kind(far_grep_msg_kind_ty kind)
 }
 
 /**
+ * @anchor spec_rescan_all
  * @brief Rescan all cached files under the current D configuration.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -402,11 +421,12 @@ send_kind(far_grep_msg_kind_ty kind)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param full parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 rescan_all(int full)
@@ -419,6 +439,11 @@ rescan_all(int full)
 			scan_content(file->fname, file->fname_len, &file->content);
 			continue;
 		}
+		struct stat st;
+		if (xstat(file->fname, &st) != JSTR_RET_SUCC)
+			continue;
+		file->size = (size_t)st.st_size;
+		file->mode = st.st_mode;
 		jstr_ty tmp = (jstr_ty)JSTR_INIT;
 		if (jstr_chk(jstr_reserve_j(&tmp, file->size)) ||
 		    jstr_chk(jstr_io_readfile_len_j(&tmp, file->fname, 0, file->size))) {
@@ -433,6 +458,7 @@ rescan_all(int full)
 }
 
 /**
+ * @anchor spec_cache_add
  * @brief Add one file to the D content cache.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -448,8 +474,10 @@ rescan_all(int full)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static cached_file_ty *
 cache_add(const char *R fname, size_t fname_len, size_t size, unsigned int mode, jstr_ty *R content)
@@ -482,6 +510,7 @@ cache_add(const char *R fname, size_t fname_len, size_t size, unsigned int mode,
 }
 
 /**
+ * @anchor spec_handle_result
  * @brief Consume one raw Stage-B result in Stage D.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -490,11 +519,12 @@ cache_add(const char *R fname, size_t fname_len, size_t size, unsigned int mode,
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param res result object produced by Stage B.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 handle_result(far_result_ty *R res)
@@ -528,6 +558,7 @@ handle_result(far_result_ty *R res)
 }
 
 /**
+ * @anchor spec_retire_free_all
  * @brief Free an entire retired match list.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -536,11 +567,12 @@ handle_result(far_result_ty *R res)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param lines match list to modify or retire.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static void
 retire_free_all(grep_lines_ty *lines)
@@ -552,6 +584,7 @@ retire_free_all(grep_lines_ty *lines)
 }
 
 /**
+ * @anchor spec_retire_step
  * @brief Free a bounded slice of one retired match list.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -562,8 +595,10 @@ retire_free_all(grep_lines_ty *lines)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 static int
 retire_step(void)
@@ -587,6 +622,7 @@ retire_step(void)
 }
 
 /**
+ * @anchor spec_grep_worker_thread
  * @brief Stage-D scan/cache loop.
  *
  * @details This function is part of the grep_worker.c contract. It reads only
@@ -598,8 +634,10 @@ retire_step(void)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage D only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage D only.
  */
 far_thread_ret_ty
 grep_worker_thread(void *arg)
@@ -643,6 +681,11 @@ grep_worker_thread(void *arg)
 out:
 	if (retire_cur != NULL)
 		retire_free_all(retire_cur);
+	{
+		grep_lines_ty *pending;
+		while ((pending = pipeline_grep_retire_try_recv()) != NULL)
+			retire_free_all(pending);
+	}
 	batch_discard();
 	for (size_t i = 0; i < cache_size; ++i) {
 		free(cache[i].fname);

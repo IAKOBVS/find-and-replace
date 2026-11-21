@@ -19,8 +19,10 @@
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage A only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage A only.
  */
 far_thread_ret_ty traverse_thread(void *arg);
 

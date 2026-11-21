@@ -18,6 +18,7 @@
 #define RANGES_CAP_MIN 1
 
 /**
+ * @anchor spec_ui_replaced_buf
  * @brief Write a replacement buffer to stdout.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -30,8 +31,10 @@
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 jstr_ret_ty
 ui_replaced_buf(const char *R data, size_t size)
@@ -42,6 +45,7 @@ ui_replaced_buf(const char *R data, size_t size)
 }
 
 /**
+ * @anchor spec_ui_report_changed
  * @brief Print a per-file status report for -i/-l.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -54,8 +58,10 @@ ui_replaced_buf(const char *R data, size_t size)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 jstr_ret_ty
 ui_report_changed(const char *R fname, size_t fname_len)
@@ -76,6 +82,7 @@ ui_report_changed(const char *R fname, size_t fname_len)
 }
 
 /**
+ * @anchor spec_ui_append
  * @brief Append bytes to a growable output buffer.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -89,8 +96,10 @@ ui_report_changed(const char *R fname, size_t fname_len)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static jstr_ret_ty
 ui_append(jstr_ty *R out, const char *R data, size_t size)
@@ -101,6 +110,7 @@ ui_append(jstr_ty *R out, const char *R data, size_t size)
 }
 
 /**
+ * @anchor spec_ui_append_char
  * @brief Append one byte to a growable output buffer.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -113,8 +123,10 @@ ui_append(jstr_ty *R out, const char *R data, size_t size)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static jstr_ret_ty
 ui_append_char(jstr_ty *R out, char c)
@@ -125,6 +137,7 @@ ui_append_char(jstr_ty *R out, char c)
 }
 
 /**
+ * @anchor spec_ui_append_line_number
  * @brief Append a decimal line number to a growable buffer.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -137,8 +150,10 @@ ui_append_char(jstr_ty *R out, char c)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static jstr_ret_ty
 ui_append_line_number(jstr_ty *R out, size_t val)
@@ -153,6 +168,7 @@ ui_append_line_number(jstr_ty *R out, size_t val)
 }
 
 /**
+ * @anchor spec_ui_format_grep_line
  * @brief Format one grep match line with colors and highlight.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -171,8 +187,10 @@ ui_append_line_number(jstr_ty *R out, size_t val)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 jstr_ret_ty
 ui_format_grep_line(jstr_ty *R out, const char *R fname, size_t fname_len,
@@ -205,6 +223,7 @@ err:
 }
 
 /**
+ * @anchor spec_ui_result
  * @brief Handle one Stage-B result according to the active mode.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -217,8 +236,10 @@ err:
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 jstr_ret_ty
 ui_result(far_result_ty *R res, const args_ty *R a)
@@ -265,6 +286,7 @@ ui_result(far_result_ty *R res, const args_ty *R a)
 }
 
 /**
+ * @anchor spec_ui_result_free
  * @brief Free an owned result and its payload.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -273,11 +295,12 @@ ui_result(far_result_ty *R res, const args_ty *R a)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param res result object produced by Stage B.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 void
 ui_result_free(far_result_ty *R res)
@@ -291,6 +314,7 @@ ui_result_free(far_result_ty *R res)
 }
 
 /**
+ * @anchor spec_ui_grep_line
  * @brief Write a formatted grep line to stdout.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -305,11 +329,12 @@ ui_result_free(far_result_ty *R res)
  * @param size valid byte count.
  * @param match_off match start offset.
  * @param match_len match byte length.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 void
 ui_grep_line(const char *R fname, size_t fname_len, size_t line,
@@ -335,6 +360,7 @@ ui_grep_line(const char *R fname, size_t fname_len, size_t line,
 }
 
 /**
+ * @anchor spec_ui_ok
  * @brief Report whether stdout is still writable.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -345,8 +371,10 @@ ui_grep_line(const char *R fname, size_t fname_len, size_t line,
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 int
 ui_ok(void)
@@ -356,6 +384,7 @@ ui_ok(void)
 
 /* Append one match range to the dynamically grown matches array. */
 /**
+ * @anchor spec_match_pushback
  * @brief Append a match range to a growable match list.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -367,11 +396,12 @@ ui_ok(void)
  * @param start inclusive start offset.
  * @param end exclusive end offset.
  * @param rm parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static void
 match_pushback(matches_ty *R matches,
@@ -395,6 +425,7 @@ match_pushback(matches_ty *R matches,
 }
 
 /**
+ * @anchor spec_get_free_ram_size
  * @brief Return the system free RAM estimate used by caches.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -405,8 +436,10 @@ match_pushback(matches_ty *R matches,
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static size_t
 get_free_ram_size(void)
@@ -447,6 +480,7 @@ get_free_ram_size(void)
 }
 
 /**
+ * @anchor spec_get_file_cache_max
  * @brief Return the dynamic byte limit for the file cache.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -457,8 +491,10 @@ get_free_ram_size(void)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static size_t
 get_file_cache_max(void)
@@ -474,6 +510,7 @@ get_file_cache_max(void)
  * ftw->dirpath is a transient buffer reused across callbacks; the content
  * buffer is stolen from the shared buf so pass 2 needs no disk I/O. */
 /**
+ * @anchor spec_ui_file_pushback
  * @brief Cache a processed file, stealing its buffer when allowed.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -486,11 +523,12 @@ get_file_cache_max(void)
  * @param fname_len FNAME byte length.
  * @param st file status.
  * @param buf growable byte buffer.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 void
 ui_file_pushback(files_ty *files,
@@ -526,6 +564,7 @@ ui_file_pushback(files_ty *files,
 
 /* Return the offset of the first byte of the line containing IDX. */
 /**
+ * @anchor spec_line_get_start
  * @brief Return the byte offset of the line containing an index.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -539,8 +578,10 @@ ui_file_pushback(files_ty *files,
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static size_t
 line_get_start(const char *R data, size_t size, size_t idx)
@@ -555,6 +596,7 @@ line_get_start(const char *R data, size_t size, size_t idx)
 /* Return one past the last byte of the line containing IDX (the index of the
  * terminating '\n', or SIZE if the line is not newline-terminated). */
 /**
+ * @anchor spec_line_get_end
  * @brief Return the byte offset one past a line.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -568,8 +610,10 @@ line_get_start(const char *R data, size_t size, size_t idx)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static size_t
 line_get_end(const char *R data, size_t size, size_t idx)
@@ -589,6 +633,7 @@ typedef struct line_counter_ty {
 } line_counter_ty;
 
 /**
+ * @anchor spec_line_counter_init
  * @brief Initialize an incremental newline counter.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -598,11 +643,12 @@ typedef struct line_counter_ty {
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param st file status.
  * @param data data bytes.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static void
 line_counter_init(line_counter_ty *st, const char *R data)
@@ -613,6 +659,7 @@ line_counter_init(line_counter_ty *st, const char *R data)
 }
 
 /**
+ * @anchor spec_line_counter_get
  * @brief Return the 1-based line number for a monotonic position.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -625,8 +672,10 @@ line_counter_init(line_counter_ty *st, const char *R data)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static size_t
 line_counter_get(line_counter_ty *st, size_t idx)
@@ -646,6 +695,7 @@ line_counter_get(line_counter_ty *st, size_t idx)
  * newline is the last byte of the block rather than a surviving terminator, so
  * END-1 is returned. */
 /**
+ * @anchor spec_match_line_end
  * @brief Return the end offset of a match line, excluding consumed newline.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -660,8 +710,10 @@ line_counter_get(line_counter_ty *st, size_t idx)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static size_t
 match_line_end(const char *R data, size_t size, size_t start, size_t end)
@@ -672,6 +724,7 @@ match_line_end(const char *R data, size_t size, size_t start, size_t end)
 }
 
 /**
+ * @anchor spec_ui_size_t_width
  * @brief Return the decimal width of a size_t value.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -683,8 +736,10 @@ match_line_end(const char *R data, size_t size, size_t start, size_t end)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 unsigned short
 ui_size_t_width(size_t val)
@@ -701,6 +756,7 @@ ui_size_t_width(size_t val)
 
 /* Write VAL in decimal to stdout without using printf. */
 /**
+ * @anchor spec_ui_print_size_t
  * @brief Print a size_t value using the tool output path.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -709,11 +765,12 @@ ui_size_t_width(size_t val)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param val value to format.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 void
 ui_print_size_t(size_t val)
@@ -735,6 +792,7 @@ ui_print_size_t(size_t val)
  * the file name (wrapped in inverse video when IS_SELECTED); LINE_COLOR tints
  * the line number; colons are unmatched. */
 /**
+ * @anchor spec_print_line_prefix
  * @brief Print the file:line:-/+ prefix for a preview line.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -750,11 +808,12 @@ ui_print_size_t(size_t val)
  * @param fname_color_len parameter defined by the owning module contract.
  * @param line_color parameter defined by the owning module contract.
  * @param line_color_len parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static void
 print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_selected,
@@ -781,6 +840,7 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_sel
  * truncating/clipping to COLS - 1 columns. COL_PTR tracks the current column
  * (0-indexed). */
 /**
+ * @anchor spec_ui_print_diff_line_chars
  * @brief Print one colored diff body line.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -792,11 +852,12 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_sel
  * @param len valid byte count.
  * @param cols parameter defined by the owning module contract.
  * @param col_ptr parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 void
 ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr)
@@ -831,6 +892,7 @@ ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigne
  * the last changed line; START_LINE is the line number of the first emitted line.
  * TRAILING_NL is set when that terminating '\n' exists. */
 /**
+ * @anchor spec_print_diff_lines
  * @brief Render all preview blocks for one cached file.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -852,11 +914,12 @@ ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigne
  * @param fname_len FNAME byte length.
  * @param start_line parameter defined by the owning module contract.
  * @param trailing_nl parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static void
 print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t num_ranges,
@@ -1028,6 +1091,7 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 }
 
 /**
+ * @anchor spec_confirm_scan_regex_matches
  * @brief confirm scan regex matches.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -1038,11 +1102,12 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
  * @param buf growable byte buffer.
  * @param find_len FIND byte length.
  * @param match_budget parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static void
 confirm_scan_regex_matches(const jstr_ty *R buf, size_t find_len, size_t match_budget)
@@ -1110,6 +1175,7 @@ confirm_scan_regex_matches(const jstr_ty *R buf, size_t find_len, size_t match_b
 }
 
 /**
+ * @anchor spec_confirm_scan_fixed_matches
  * @brief confirm scan fixed matches.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -1122,11 +1188,12 @@ confirm_scan_regex_matches(const jstr_ty *R buf, size_t find_len, size_t match_b
  * @param find find string.
  * @param find_len FIND byte length.
  * @param match_budget parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static void
 confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, const char *R find, size_t find_len, size_t match_budget)
@@ -1152,6 +1219,7 @@ confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, cons
 }
 
 /**
+ * @anchor spec_ranges_reserve
  * @brief Reserve capacity in a growable range list.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -1164,8 +1232,10 @@ confirm_scan_fixed_matches(const jstr_twoway_ty *R t, const jstr_ty *R buf, cons
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 static jstr_ret_ty
 ranges_reserve(ranges_ty *ranges, size_t required_size)
@@ -1185,6 +1255,7 @@ ranges_reserve(ranges_ty *ranges, size_t required_size)
 }
 
 /**
+ * @anchor spec_ui_scan_file
  * @brief Scan one cached file and render -c preview output.
  *
  * @details This function is part of the ui.c contract. It reads only
@@ -1204,8 +1275,10 @@ ranges_reserve(ranges_ty *ranges, size_t required_size)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only; D may call ui_result_free on owned results.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
  */
 jstr_ret_ty
 ui_scan_file(const jstr_twoway_ty *R t,

@@ -6,7 +6,7 @@ in-place editing with backups. Every target kind (explicit files, recursive
 directories, stdin, and the `-c` pass 2) runs through a persistent
 A -> B -> C pipeline (C11 atomics/threads): A traverse, B process, C UI.
 A traversal is a single thread. B process is a pool over a shared SPMC work
-queue (default 2 * nproc workers, configurable with -j/FAR_THREADS). For
+queue (default nproc workers, configurable with -j/FAR_THREADS). For
 interactive grep, D is a separate grep scan/cache thread and C is the UI
 thread; main orchestrates. The non-grep path still uses main as C. Threads
 start once and are reused for every root.
@@ -90,9 +90,10 @@ header. Dependency direction: `main -> pipeline/stages`, `stages -> stage.h/io`,
 ## Tests
 
 ```
-./compile && tests/run.sh   # all deterministic suites (15 suites, 366 tests)
+./compile && tests/run.sh   # all deterministic suites (16 suites, 396 tests)
 ./test [N]                  # all tests + N fuzz iterations (default 250)
 make unit                   # compile/run generated per-function unit tests
+make doc-check              # validate Doxygen spec commands and anchors
 ./test-tsan                 # TSAN+UBSAN C unit tests in build-tsan/
 ./test-asan                 # ASAN+UBSAN C unit tests in build-asan/
 ./test-integration-sanitized [tsan|asan|all]  # integration suites under sanitizers
@@ -128,20 +129,21 @@ tests/
 | Suite | File | Tests | Coverage |
 |---|---|---|---|
 | Basic | `tests/process/basic.sh` | 17 | Fixed stdin, global, in-place/backup, explicit G, no-match, empty/find-equal/longer replace, combined `-ir` |
-| Flags | `tests/main/flags.sh` | 29 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version`, `-l`, `-q`/`--quiet`, `--exclude` CLI errors |
+| Flags | `tests/main/flags.sh` | 31 | `-F -R -E -I -Z -z -g -G -h`, flag ordering (F/R, Z/z, g/G), flags between files, `--version`, `-l`, `-q`/`--quiet`, `--exclude` CLI errors |
 | Regex | `tests/process/regex.sh` | 16 | BRE/ERE, backreferences (incl. exceeding nsub), anchors with `-Z`/`-z`, regex in in-place, escape in regex |
 | Files | `tests/traverse/files.sh` | 35 | Multi-file, recursive, `--include`/`--exclude` regexes, dash filenames, deep/many-file recursion, `-` stdin placeholder |
-| Errors | `tests/main/errors.sh` | 26 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
+| Errors | `tests/main/errors.sh` | 27 | Missing args, nonexistent file, invalid flag/regex, backup collision, long suffix, stdin+in-place/recursive, read-only, SIGXFSZ/SIGPIPE fault injection |
 | IO | `tests/io/io.sh` | 22 | Backup identity/empty/binary/multi, in-place shorter/longer/same/identical, binary, FIFO, read-only, large stdin, stdout multi-file |
 | Escape | `tests/process/escape.sh` | 9 | `\t \b \f \n \r \v \octal` in find and replace |
 | Empty | `tests/process/empty.sh` | 5 | Empty find in stdin, file, in-place, regex, global modes |
 | Misc | `tests/process/misc.sh` | 7 | Double-dash, multiline find, slash literal, overlapping, end-of-options |
 | Edge cases | `tests/process/edge-cases.sh` | 18 | Empty input, missing newlines, invalid regex, overlapping, empty lines, null bytes, massive lines, long replacements, UTF-8, read-only backup, nonexistent dir |
 | Complex regex | `tests/process/complex.sh` | 14 | Backreferences (reorder, nested groups, XML tags, alternation, max digits), IP/URL/email parsing, greedy, quantifiers |
-| Confirm | `tests/ui/confirm.sh` | 89 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
-| Grep | `tests/process/grep.sh` | 40 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
-| Unit | `tests/unit/unit.sh` | 6 | Internal unit tests (procfs/meminfo helper shim) |
-| Pipeline | `tests/pipeline/pipeline.sh` | 33 | `spsc`/`spmc`/`pipeline` lifecycle units, all-target pipeline routing, multi-worker `-j`, explicit-file batching, `-r`/file/stdin order/in-place/backup/include-exclude, partial failure + error accumulation, 200-file traversal, recursive grep (fixed/regex/empty/TUI collect), per-root flag changes, pipeline `-c` abort, `/dev/full` stdout/stderr/`-l`/grep/prompt paths |
+| Confirm | `tests/ui/confirm.sh` | 91 | `-c` preview: diff format lines, backrefs, multi-line, same-line grouping, recursive, backup, no-match, prompt yes/no, unconditional colors, interactive TUI (all 7 fields, vim motions, height capping, tab expansion, no-scroll, controls pinned, Ctrl-J/K scroll past vis_end) |
+| Grep | `tests/process/grep.sh` | 46 | `--grep`: stdin/file/recursive, exit codes 0/1/2, `-i`/`-c` conflicts, `-q`, `-` stdin placeholder, binary skip, anchors, empty find, match highlight, interactive TUI (launch, scroll, exclude, Ctrl-D, multiline, file-cache, FIND field, pinned controls, vim mode) |
+| Unit | `tests/unit/unit.sh` | 6 |
+| Terminal | `tests/terminal/test_pty_drive.sh` | 18 | Internal unit tests (procfs/meminfo helper shim) |
+| Pipeline | `tests/pipeline/pipeline.sh` | 34 | `spsc`/`spmc`/`pipeline` lifecycle units, all-target pipeline routing, multi-worker `-j`, explicit-file batching, `-r`/file/stdin order/in-place/backup/include-exclude, partial failure + error accumulation, 200-file traversal, recursive grep (fixed/regex/empty/TUI collect), per-root flag changes, pipeline `-c` abort, `/dev/full` stdout/stderr/`-l`/grep/prompt paths |
 | Fuzz | `tests/fuzz.sh` | N | Random strings with random flags; detects crashes and unexpected non-zero exits |
 
 ### Test categories
@@ -201,17 +203,17 @@ applies `--winsize` to the slave **before** forking (no race with the child's
 first render), feeds `--phase`/`--tail` keystrokes, and reports the child's
 real exit status (including a non-blocking reap on early marker-miss).
 
-### Coverage: 86.9% of executable lines
+### Coverage: 86.2% of executable lines
 
 Coverage measured via `gcov` (`./coverage`, branch + line) after running all
-363 deterministic tests: 86.9% lines (2905/3344), 93.3% branches executed,
-72.4% of branches taken both ways (12 sources: main, io, traverse, process,
+373 deterministic tests: 86.2% lines (2948/3420), 94.0% branches executed,
+73.4% of branches taken both ways (12 sources: main, io, traverse, process,
 terminal, vim, procfs, grep_worker, spsc, spmc, pipeline, ui). Remaining
 uncovered lines are allocation/thread-creation failures and rare write-error
-branches that need fault injection. Individually: `main.c` 97.2%, `io.c`
-97.3%, `traverse.c` 86.0%, `process.c` 76.2%, `terminal.c` 83.3%, `vim.c`
-98.2%, `procfs.c` 100%, `grep_worker.c` 83.9%, `spsc.c` 97.8%, `spmc.c`
-96.4%, `pipeline.c` 77.4%, `ui.c` 89.4%.
+branches that need fault injection. Individually: `main.c` 98.0%, `io.c`
+97.3%, `traverse.c` 86.8%, `process.c` 76.1%, `terminal.c` 82.3%, `vim.c`
+95.7%, `procfs.c` 100%, `grep_worker.c` 82.8%, `spsc.c` 92.6%, `spmc.c`
+96.4%, `pipeline.c` 75.7%, `ui.c` 89.2%.
 
 **Covered paths include:**
 - All flag parsing (`-F -G -g -R -E -I -Z -z -r -h`) and `--` end-of-flags
@@ -1473,7 +1475,7 @@ result order is intentionally not preserved.
 - `spmc.c/h`: bounded single-producer/multi-consumer queue with per-slot
   sequence numbers; blocking `recv` for tests and non-blocking `try_recv` for
   the worker loop.
-- Default B worker count is **2 * nproc**, no cap. `FAR_THREADS` overrides the
+- Default B worker count is **nproc**, no cap. `FAR_THREADS` overrides the
   default; `-j N` / `-jN` overrides both. Tests export `FAR_THREADS=1` unless a
   test explicitly requests `-j`.
 - A is still the single traversal producer. Each B worker has private
@@ -1496,8 +1498,8 @@ result order is intentionally not preserved.
 
 Verification: `make test FZ=20` -> 15 suites / 360 tests, 0 failed, 0 fuzz
 crashes; TSAN `spsc_unit`/`spmc_unit`/`pipeline_unit` clean; ASan multi-worker
-stdout/grep/in-place runs clean. Current coverage: 86.9% lines (2905/3344),
-93.3% branches executed, 72.4% both paths; `spmc.c` 96.4% lines.
+stdout/grep/in-place runs clean. Current coverage: 86.0% lines (2940/3420),
+93.5% branches executed, 72.8% both paths; `spmc.c` 96.4% lines.
 
 ## Session 35: regex grep zero-length-line offset fix
 
@@ -1616,3 +1618,71 @@ Converted recommended implicit states to explicit enums:
   revalidation were hardened.
 
 Verification: full suites, per-function units, TSAN+UBSAN and ASAN+UBSAN.
+
+## Session 40: temp-file traversal race and ext4 benchmark
+
+- `io_write_inplace_temp` now uses `.far_tmp_XXXXXX`; A traversal skips
+  basenames containing `FAR_TEMP_MARKER`, so it never enqueues B's temporary
+  files before they are renamed. Added `t_pipeline_skips_temp_files`.
+- `process_stdin_job` treats the jstring "empty stdin" error as empty input so
+  `--grep` on empty stdin exits 1 instead of 2.
+- Re-benchmarked on a non-tmpfs filesystem. `nproc` (6) vs `2*nproc` (12):
+  small in-place +1.6%, stdout/grep +1-6%, large in-place wall time noisy but
+  12 workers used ~29% more CPU and more context switches.
+- Recommendation: default to `nproc`, not `2*nproc`, unless target storage shows
+  a stable benefit from extra workers.
+
+## Session 41: default workers set to nproc
+
+- Changed `default_workers()` to return `nproc` instead of `2 * nproc`.
+- Updated usage text, README, and architecture docs.
+- Verified with `strace`: default startup now creates 9 worker threads on a
+  6-CPU host (A + 6 B + C + D) instead of 15.
+
+## Session 42: threading corrections and safe optimizations
+
+- B publish failures are now fatal errors instead of dropped results, so C/D
+  cannot wait forever for a missing result or EOS.
+- Shutdown joins C before D, so C never waits for a D EOS after D has stopped.
+- D re-stats uncached files before rescan re-reads, avoiding stale-size TOCTOU.
+- C-side pending retire nodes and D-side queued retire nodes are drained at
+  shutdown, avoiding leaks.
+- `root->grep_live` caches the live-grep/TTY decision per root; B no longer
+  calls `isatty()` per job.
+- Removed the dead `P.ui_live` pipeline field.
+- Verification: full suites, per-function units, TSAN+UBSAN, ASAN+UBSAN.
+
+## Session 43: Doxygen command cleanup
+
+- Replaced nonstandard `@sideeffects` and `@thread` with standard
+  `@par Side Effects:` and `@par Threading and Reentrancy:`.
+- Added unique `@anchor spec_<fn>` markers to all 177 source function docs.
+- Added `docs/Doxyfile` with `WARNINGS=YES`, `WARN_IF_DOC_ERROR=YES`, and
+  `WARN_AS_ERROR=YES`; Doxygen parses `src/` only to avoid duplicate header/source
+  `@param` warnings.
+- Added `docs/spec_check.py` and `make doc-check` to validate anchors and
+  nonstandard commands before building HTML docs.
+- Verified `make doc-check` passes with 177 unique anchors.
+
+## Session 44: coverage improvement pass
+
+- Fixed `coverage` path handling for the `src/` layout.
+- Added coverage-focused tests:
+  - `t_j_invalid_value`, `t_j_missing_value`,
+  - `t_batch_file_error_message`,
+  - grep TUI invalid FIND/include/exclude robustness tests.
+- Coverage: 86.2% lines (2948/3420), 94.0% branches executed,
+  73.4% both paths.
+
+## Session 45: spec-test compliance pass
+
+- Registered `t_grep_interactive_rescan_recompile`.
+- Wired `tests/terminal/test_pty_drive.sh` into `tests/run.sh`.
+- Fixed weak `t_grep_interactive_scroll` and `t_grep_interactive_ctrl_d` assertions.
+- Added contradiction regression tests: grep edit-during-scan, grep STOP-during-scan,
+  vim pending operator across field change, and ESC-followed-by-printable handling.
+- Converted eight placeholder per-function tests into behavioral tests.
+- Added `doc-check` and a small ASAN fuzz pass to `test-all`.
+- Enabled leak detection for ASAN integration and documented timing-sensitive skips.
+- Corrected spec text that incorrectly placed the 200 ms debounce in confirm mode.
+- Verification: 16 suites / 396 tests, 257 per-function units, doc-check, all sanitizers.

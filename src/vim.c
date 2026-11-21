@@ -10,6 +10,7 @@
 static vim_state_ty vim_st = VIM_INSERT;
 
 /**
+ * @anchor spec_vim_is_insert_mode
  * @brief Return the current line-editor mode.
  *
  * @details This function is part of the vim.c contract. It reads only
@@ -20,8 +21,10 @@ static vim_state_ty vim_st = VIM_INSERT;
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int
 vim_is_insert_mode(void)
@@ -42,6 +45,7 @@ vim_set_state(vim_state_ty state)
 }
 
 /**
+ * @anchor spec_vim_set_insert_mode
  * @brief Set the line-editor mode and clear any pending operator.
  *
  * @details This function is part of the vim.c contract. It reads only
@@ -50,11 +54,12 @@ vim_set_state(vim_state_ty state)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param mode new editor mode.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 void
 vim_set_insert_mode(int mode)
@@ -70,6 +75,7 @@ vim_cancel_pending(void)
 }
 
 /**
+ * @anchor spec_get_word_forward
  * @brief Compute the next word boundary in an editable buffer.
  *
  * @details This function is part of the vim.c contract. It reads only
@@ -82,8 +88,10 @@ vim_cancel_pending(void)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static size_t
 get_word_forward(const jstr_ty *buf, size_t pos)
@@ -105,6 +113,7 @@ get_word_forward(const jstr_ty *buf, size_t pos)
 }
 
 /**
+ * @anchor spec_get_word_backward
  * @brief Compute the previous word boundary in an editable buffer.
  *
  * @details This function is part of the vim.c contract. It reads only
@@ -117,8 +126,10 @@ get_word_forward(const jstr_ty *buf, size_t pos)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static size_t
 get_word_backward(const jstr_ty *buf, size_t pos)
@@ -141,6 +152,7 @@ get_word_backward(const jstr_ty *buf, size_t pos)
 }
 
 /**
+ * @anchor spec_delete_range
  * @brief Delete a half-open byte range from an editable buffer.
  *
  * @details This function is part of the vim.c contract. It reads only
@@ -151,11 +163,12 @@ get_word_backward(const jstr_ty *buf, size_t pos)
  * @param buf growable byte buffer.
  * @param start inclusive start offset.
  * @param end exclusive end offset.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 static void
 delete_range(jstr_ty *buf, size_t start, size_t end)
@@ -172,6 +185,7 @@ delete_range(jstr_ty *buf, size_t start, size_t end)
 }
 
 /**
+ * @anchor spec_vim_handle_key
  * @brief Apply a vim normal-mode key to the active field.
  *
  * @details This function is part of the vim.c contract. It reads only
@@ -189,8 +203,10 @@ delete_range(jstr_ty *buf, size_t start, size_t end)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int
 vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile, size_t field_count)

@@ -1,26 +1,11 @@
 #include "harness.h"
 #include "../../../../src/terminal.c"
-int
-main(void)
+int main(void)
 {
-	/* positive: function satisfies its documented public contract. */
-	SPEC_SYMBOL(grep_field_affects_recompile);
-	SECTION("positive");
-
-	/* negative: invalid inputs must be rejected or safely ignored. */
-	SPEC_SYMBOL(grep_field_affects_recompile);
-	SECTION("negative");
-	CHECK(unit_rng_next() != 0UL);
-	/* edge: zero/empty/boundary inputs are representable. */
-	SPEC_SYMBOL(grep_field_affects_recompile);
-	SECTION("edge");
-	CHECK(unit_rng_next() != 0UL);
-	/* fuzz: deterministic pseudo-random inputs must not crash the contract. */
-	SPEC_SYMBOL(grep_field_affects_recompile);
-	SECTION("fuzz");
-	for (int i = 0; i < 64; ++i) {
-		unsigned long v = unit_rng_next();
-		CHECK(v == v);
-	}
+	CHECK(grep_field_affects_recompile(GREP_FIELD_FIND) == 1);
+	CHECK(grep_field_affects_recompile(GREP_FIELD_FILES) == 1);
+	CHECK(grep_field_affects_recompile(GREP_FIELD_INCLUDE) == 1);
+	CHECK(grep_field_affects_recompile(GREP_FIELD_EXCLUDE) == 1);
+	CHECK(grep_field_affects_recompile(GREP_FIELD_COUNT) == 0);
 	UNIT_DONE();
 }

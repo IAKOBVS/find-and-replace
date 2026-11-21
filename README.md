@@ -15,7 +15,7 @@ https://github.com/IAKOBVS/jstring: for the string replacement and filesystem fu
 ## Usage:
 
 ```
-find-and-replace [FIND] [REPLACE] [OPTIONS]... [FILES]...
+find-and-replace [FIND] [REPLACE] [OPTIONS]. [FILES].
 Options:
   -G (default)
     Replace first occurrence of FIND with REPLACE.
@@ -60,7 +60,7 @@ Options:
   -v, --version
     Print version information and exit.
   -j N
-    Use N file-processing worker threads (default: 2 * nproc).
+    Use N file-processing worker threads (default: nproc).
   -q, --quiet
     Suppress status output: the per-file stderr echo from -i and the
     matching lines in --grep mode (the exit code is still returned).

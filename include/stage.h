@@ -152,6 +152,7 @@ struct root_ctx_ty {
 	size_t file_arg_count;
 	args_ty *a;
 	jstr_twoway_ty *t;
+	int grep_live;
 	atomic_bool cancel;
 	atomic_size_t total;
 	atomic_size_t jobs_done;

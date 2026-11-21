@@ -24,8 +24,10 @@ typedef enum {
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int vim_is_insert_mode(void);
 /**
@@ -37,11 +39,12 @@ int vim_is_insert_mode(void);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param mode new editor mode.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 void vim_set_insert_mode(int mode);
 
@@ -71,8 +74,10 @@ void vim_cancel_pending(void);
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int vim_handle_key(char c, jstr_ty *active_buf, size_t *cursors, size_t *active_field, int *needs_redraw, int *needs_recompile, size_t field_count);
 

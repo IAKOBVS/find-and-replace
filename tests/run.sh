@@ -29,7 +29,7 @@ wait_suites() {
 	count=0
 }
 
-for suite in main/flags main/errors process/basic process/regex process/escape process/empty process/misc process/edge-cases process/complex traverse/files io/io ui/confirm unit/unit process/grep pipeline/pipeline; do
+for suite in main/flags main/errors process/basic process/regex process/escape process/empty process/misc process/edge-cases process/complex traverse/files io/io ui/confirm unit/unit process/grep pipeline/pipeline terminal/test_pty_drive; do
 	if [ "$suite" = unit/unit ] && [ "${FAR_SKIP_UNIT_SHELL:-0}" = 1 ]; then
 		continue
 	fi

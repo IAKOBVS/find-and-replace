@@ -1,26 +1,16 @@
 #include "harness.h"
+#include <stdlib.h>
 #include "../../../../src/pipeline.c"
-int
-main(void)
+int main(void)
 {
-	/* positive: function satisfies its documented public contract. */
-	SPEC_SYMBOL(default_workers);
-	SECTION("positive");
-
-	/* negative: invalid inputs must be rejected or safely ignored. */
-	SPEC_SYMBOL(default_workers);
-	SECTION("negative");
-	CHECK(unit_rng_next() != 0UL);
-	/* edge: zero/empty/boundary inputs are representable. */
-	SPEC_SYMBOL(default_workers);
-	SECTION("edge");
-	CHECK(unit_rng_next() != 0UL);
-	/* fuzz: deterministic pseudo-random inputs must not crash the contract. */
-	SPEC_SYMBOL(default_workers);
-	SECTION("fuzz");
-	for (int i = 0; i < 64; ++i) {
-		unsigned long v = unit_rng_next();
-		CHECK(v == v);
-	}
+	unsetenv("FAR_THREADS");
+	CHECK(default_workers() >= 1);
+	setenv("FAR_THREADS", "7", 1);
+	CHECK(default_workers() == 7);
+	setenv("FAR_THREADS", "0", 1);
+	CHECK(default_workers() >= 1);
+	setenv("FAR_THREADS", "nope", 1);
+	CHECK(default_workers() >= 1);
+	unsetenv("FAR_THREADS");
 	UNIT_DONE();
 }

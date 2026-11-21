@@ -502,6 +502,20 @@ t_confirm_l_flag_leak() {
 	fi
 }
 
+t_confirm_vim_pending_field_change() {
+	td=$1; printf 'hello\n' > "$td/f"
+	pdrive --tail '\x1bd\x09w\r' --tail 'y\n' -- hello HI -c -i "$td/f"
+	[ "$(cat "$td/f")" = 'HI' ] && echo PASS > "$td/result" || \
+		echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
+}
+
+t_confirm_esc_printable() {
+	td=$1; printf 'hell\n' > "$td/f"
+	pdrive --tail '\x1bx\r' --tail 'y\n' -- hello HI -c -i "$td/f"
+	[ "$(cat "$td/f")" = 'HI' ] && echo PASS > "$td/result" || \
+		echo "FAIL: f=[$(cat "$td/f")]" > "$td/result"
+}
+
 t_confirm_interactive_l_flag() {
 	td=$1; printf 'hello\n' > "$td/f"
 	# 2 tabs to Flags, clear, set to "l"
@@ -1108,6 +1122,8 @@ t_confirm_vim_delete_dd
 t_confirm_vim_change_cw
 t_confirm_interactive_include_exclude
 t_confirm_interactive_backup
+t_confirm_vim_pending_field_change
+t_confirm_esc_printable
 t_confirm_l_flag_leak
 t_confirm_interactive_l_flag
 t_confirm_interactive_clear_filters

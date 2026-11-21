@@ -2,27 +2,13 @@
 #define main far_main_disabled
 #include "../../../../src/main.c"
 #undef main
-int
-main(void)
+int main(void)
 {
-	/* positive: function satisfies its documented public contract. */
-	SPEC_SYMBOL(err_exit_code);
-	SECTION("positive");
-
-	/* negative: invalid inputs must be rejected or safely ignored. */
-	SPEC_SYMBOL(err_exit_code);
-	SECTION("negative");
-	CHECK(unit_rng_next() != 0UL);
-	/* edge: zero/empty/boundary inputs are representable. */
-	SPEC_SYMBOL(err_exit_code);
-	SECTION("edge");
-	CHECK(unit_rng_next() != 0UL);
-	/* fuzz: deterministic pseudo-random inputs must not crash the contract. */
-	SPEC_SYMBOL(err_exit_code);
-	SECTION("fuzz");
-	for (int i = 0; i < 64; ++i) {
-		unsigned long v = unit_rng_next();
-		CHECK(v == v);
-	}
+	G.mode = 0;
+	CHECK(err_exit_code() == EXIT_FAILURE);
+	G.mode = MODE_GREP;
+	CHECK(err_exit_code() == 2);
+	G.mode = MODE_GREP | MODE_PRINT_CHANGES;
+	CHECK(err_exit_code() == 2);
 	UNIT_DONE();
 }

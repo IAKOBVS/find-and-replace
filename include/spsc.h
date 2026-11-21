@@ -33,8 +33,10 @@ typedef struct spsc_chan_ty {
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 int spsc_chan_init(spsc_chan_ty *c, void **slots, size_t cap);
 /**
@@ -46,11 +48,12 @@ int spsc_chan_init(spsc_chan_ty *c, void **slots, size_t cap);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param spin parameter defined by the owning contract.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 void spsc_backoff(unsigned int *spin);
 /**
@@ -65,8 +68,10 @@ void spsc_backoff(unsigned int *spin);
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 spsc_chan_ty *spsc_chan_new(size_t cap);
 /**
@@ -78,11 +83,12 @@ spsc_chan_ty *spsc_chan_new(size_t cap);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 void spsc_chan_free(spsc_chan_ty *c);
 /**
@@ -98,8 +104,10 @@ void spsc_chan_free(spsc_chan_ty *c);
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 int spsc_chan_send(spsc_chan_ty *c, void *v);
 /**
@@ -115,8 +123,10 @@ int spsc_chan_send(spsc_chan_ty *c, void *v);
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 int spsc_chan_try_send(spsc_chan_ty *c, void *v);
 /**
@@ -128,11 +138,12 @@ int spsc_chan_try_send(spsc_chan_ty *c, void *v);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 void *spsc_chan_recv(spsc_chan_ty *c);
 /**
@@ -144,11 +155,12 @@ void *spsc_chan_recv(spsc_chan_ty *c);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 void *spsc_chan_try_recv(spsc_chan_ty *c);
 /**
@@ -160,11 +172,12 @@ void *spsc_chan_try_recv(spsc_chan_ty *c);
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param c input character or channel.
- * @return None.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 void spsc_chan_close(spsc_chan_ty *c);
 /**
@@ -179,8 +192,10 @@ void spsc_chan_close(spsc_chan_ty *c);
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Any thread; single-producer/single-consumer discipline.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Any thread; single-producer/single-consumer discipline.
  */
 int spsc_chan_is_closed(spsc_chan_ty *c);
 

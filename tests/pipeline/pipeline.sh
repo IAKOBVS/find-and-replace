@@ -65,6 +65,16 @@ t_pipeline_j_invalid() {
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: -j 0 accepted" > "$td/result"
 }
 
+t_pipeline_skips_temp_files() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'foo\n' > "$td/sub/f"
+	printf 'foo\n' > "$td/sub/f.far_tmp_abc123"
+	rc=0; "$PROG" foo bar -i -r -j 12 "$td/sub" > /dev/null 2>&1 || rc=$?
+	a=$(cat "$td/sub/f"); tmp=$(cat "$td/sub/f.far_tmp_abc123")
+	[ "$rc" -eq 0 ] && [ "$a" = 'bar' ] && [ "$tmp" = 'foo' ] && \
+		echo PASS > "$td/result" || echo "FAIL: rc=$rc a=[$a] tmp=[$tmp]" > "$td/result"
+}
+
 t_pipeline_multi_root_order() {
 	td=$1; mkdir -p "$td/r1" "$td/r2"
 	printf 'x1\n' > "$td/r1/a"
@@ -336,6 +346,7 @@ t_pipeline_spmc_unit
 t_pipeline_multi_worker_inplace
 t_pipeline_multi_worker_explicit_batch
 t_pipeline_multi_worker_grep
+t_pipeline_skips_temp_files
 t_pipeline_j_invalid
 t_pipeline_multi_root_order
 t_pipeline_recursive_inplace

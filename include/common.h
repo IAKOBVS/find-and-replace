@@ -12,6 +12,8 @@
  * pure overhead. 0 = skip freeing in cleanup() paths (leaks are reclaimed by
  * the OS); set to 1 to enable them (e.g. for valgrind/ASan debugging). */
 #define DO_FREE 0
+#define FAR_TEMP_MARKER ".far_tmp_"
+#define FAR_TEMP_SUFFIX ".far_tmp_XXXXXX"
 
 #include <jstr/jstr.h>
 #include <jstr/io.h>

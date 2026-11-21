@@ -56,7 +56,6 @@ typedef struct pipeline_state_ty {
 	far_thread_ty a_thread;
 	far_thread_ty c_thread;
 	far_thread_ty d_thread;
-	int ui_live;
 } pipeline_state_ty;
 
 typedef enum {
@@ -72,6 +71,7 @@ static atomic_ulong root_epoch;
 static atomic_int pipe_life;
 
 /**
+ * @anchor spec_parse_env_workers
  * @brief Parse the FAR_THREADS environment value.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -83,8 +83,10 @@ static atomic_int pipe_life;
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 static size_t
 parse_env_workers(const char *s)
@@ -100,6 +102,7 @@ parse_env_workers(const char *s)
 }
 
 /**
+ * @anchor spec_default_workers
  * @brief Compute the default B worker count.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -110,8 +113,10 @@ parse_env_workers(const char *s)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 static size_t
 default_workers(void)
@@ -122,10 +127,11 @@ default_workers(void)
 	long n = sysconf(_SC_NPROCESSORS_ONLN);
 	if (n < 1)
 		n = 1;
-	return (size_t)n * 2;
+	return (size_t)n;
 }
 
 /**
+ * @anchor spec_pipeline_set_workers
  * @brief Set the requested B worker count before startup.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -134,11 +140,12 @@ default_workers(void)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param count parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 void
 pipeline_set_workers(size_t count)
@@ -151,6 +158,7 @@ pipeline_set_workers(size_t count)
 }
 
 /**
+ * @anchor spec_pipeline_worker_count
  * @brief Return the active or requested B worker count.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -161,8 +169,10 @@ pipeline_set_workers(size_t count)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 size_t
 pipeline_worker_count(void)
@@ -175,6 +185,7 @@ pipeline_worker_count(void)
 }
 
 /**
+ * @anchor spec_pipeline_root_set
  * @brief Publish the current root and increment its epoch.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -183,11 +194,12 @@ pipeline_worker_count(void)
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
  * @param root per-root pipeline context.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 void
 pipeline_root_set(root_ctx_ty *root)
@@ -197,6 +209,7 @@ pipeline_root_set(root_ctx_ty *root)
 }
 
 /**
+ * @anchor spec_pipeline_root_get
  * @brief Return the currently published root.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -207,8 +220,10 @@ pipeline_root_set(root_ctx_ty *root)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 root_ctx_ty *
 pipeline_root_get(void)
@@ -217,6 +232,7 @@ pipeline_root_get(void)
 }
 
 /**
+ * @anchor spec_pipeline_root_epoch
  * @brief Return the current root epoch.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -227,8 +243,10 @@ pipeline_root_get(void)
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 unsigned long
 pipeline_root_epoch(void)
@@ -237,6 +255,7 @@ pipeline_root_epoch(void)
 }
 
 /**
+ * @anchor spec_pipeline_stopping
  * @brief Report whether worker shutdown was requested.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -247,8 +266,10 @@ pipeline_root_epoch(void)
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_stopping(void)
@@ -257,6 +278,7 @@ pipeline_stopping(void)
 }
 
 /**
+ * @anchor spec_pipeline_cmd_recv
  * @brief Receive the next root command from main.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -267,8 +289,10 @@ pipeline_stopping(void)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 root_ctx_ty *
 pipeline_cmd_recv(void)
@@ -277,6 +301,7 @@ pipeline_cmd_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_work_send
  * @brief Publish one work job into the shared SPMC queue.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -288,8 +313,10 @@ pipeline_cmd_recv(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_work_send(far_job_ty *job)
@@ -298,6 +325,7 @@ pipeline_work_send(far_job_ty *job)
 }
 
 /**
+ * @anchor spec_pipeline_work_try_recv
  * @brief Attempt to claim one work job.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -308,8 +336,10 @@ pipeline_work_send(far_job_ty *job)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_job_ty *
 pipeline_work_try_recv(void)
@@ -318,6 +348,7 @@ pipeline_work_try_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_done_send
  * @brief Publish one result to the caller’s private C queue.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -330,8 +361,10 @@ pipeline_work_try_recv(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_done_send(size_t worker, far_result_ty *res)
@@ -342,6 +375,7 @@ pipeline_done_send(size_t worker, far_result_ty *res)
 }
 
 /**
+ * @anchor spec_pipeline_done_try_recv
  * @brief Attempt to consume a result from one worker queue.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -353,8 +387,10 @@ pipeline_done_send(size_t worker, far_result_ty *res)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_result_ty *
 pipeline_done_try_recv(size_t worker)
@@ -365,6 +401,7 @@ pipeline_done_try_recv(size_t worker)
 }
 
 /**
+ * @anchor spec_pipeline_grep_work_send
  * @brief Publish one raw result to the caller’s D queue.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -377,8 +414,10 @@ pipeline_done_try_recv(size_t worker)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_grep_work_send(size_t worker, far_result_ty *res)
@@ -389,6 +428,7 @@ pipeline_grep_work_send(size_t worker, far_result_ty *res)
 }
 
 /**
+ * @anchor spec_pipeline_grep_work_try_recv
  * @brief Attempt to consume a raw result from one D queue.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -400,8 +440,10 @@ pipeline_grep_work_send(size_t worker, far_result_ty *res)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_result_ty *
 pipeline_grep_work_try_recv(size_t worker)
@@ -412,6 +454,7 @@ pipeline_grep_work_try_recv(size_t worker)
 }
 
 /**
+ * @anchor spec_pipeline_grep_msg_send
  * @brief Publish one D match batch to C.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -423,8 +466,10 @@ pipeline_grep_work_try_recv(size_t worker)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_grep_msg_send(far_grep_msg_ty *msg)
@@ -433,6 +478,7 @@ pipeline_grep_msg_send(far_grep_msg_ty *msg)
 }
 
 /**
+ * @anchor spec_pipeline_grep_msg_recv
  * @brief Block on the next D match message.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -443,8 +489,10 @@ pipeline_grep_msg_send(far_grep_msg_ty *msg)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_grep_msg_ty *
 pipeline_grep_msg_recv(void)
@@ -453,6 +501,7 @@ pipeline_grep_msg_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_grep_msg_try_recv
  * @brief Attempt to consume a D match message.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -463,8 +512,10 @@ pipeline_grep_msg_recv(void)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_grep_msg_ty *
 pipeline_grep_msg_try_recv(void)
@@ -473,6 +524,7 @@ pipeline_grep_msg_try_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_grep_cfg_send
  * @brief Publish a grep configuration snapshot to D.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -484,8 +536,10 @@ pipeline_grep_msg_try_recv(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_grep_cfg_send(grep_cfg_ty *cfg)
@@ -494,6 +548,7 @@ pipeline_grep_cfg_send(grep_cfg_ty *cfg)
 }
 
 /**
+ * @anchor spec_pipeline_grep_cfg_recv
  * @brief Block on the next grep configuration snapshot.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -504,8 +559,10 @@ pipeline_grep_cfg_send(grep_cfg_ty *cfg)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 grep_cfg_ty *
 pipeline_grep_cfg_recv(void)
@@ -514,6 +571,7 @@ pipeline_grep_cfg_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_grep_cfg_try_recv
  * @brief Attempt to consume a grep configuration snapshot.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -524,8 +582,10 @@ pipeline_grep_cfg_recv(void)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 grep_cfg_ty *
 pipeline_grep_cfg_try_recv(void)
@@ -534,6 +594,7 @@ pipeline_grep_cfg_try_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_grep_retire_try_send
  * @brief Attempt to hand a retired match list to D.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -545,8 +606,10 @@ pipeline_grep_cfg_try_recv(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_grep_retire_try_send(grep_lines_ty *lines)
@@ -555,6 +618,7 @@ pipeline_grep_retire_try_send(grep_lines_ty *lines)
 }
 
 /**
+ * @anchor spec_pipeline_grep_retire_try_recv
  * @brief Attempt to consume a retired match list in D.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -565,8 +629,10 @@ pipeline_grep_retire_try_send(grep_lines_ty *lines)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 grep_lines_ty *
 pipeline_grep_retire_try_recv(void)
@@ -575,6 +641,7 @@ pipeline_grep_retire_try_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_ui_cmd_recv
  * @brief Block on the next UI command.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -585,8 +652,10 @@ pipeline_grep_retire_try_recv(void)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_ui_cmd_ty *
 pipeline_ui_cmd_recv(void)
@@ -595,6 +664,7 @@ pipeline_ui_cmd_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_ui_cmd_try_recv
  * @brief Attempt to consume a UI command.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -605,8 +675,10 @@ pipeline_ui_cmd_recv(void)
  * @return Pointer to the result object, or `NULL` on failure/end-of-stream.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 far_ui_cmd_ty *
 pipeline_ui_cmd_try_recv(void)
@@ -615,6 +687,7 @@ pipeline_ui_cmd_try_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_ui_ack_send
  * @brief Acknowledge a UI root or END command.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -626,8 +699,10 @@ pipeline_ui_cmd_try_recv(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_ui_ack_send(int status)
@@ -636,6 +711,7 @@ pipeline_ui_ack_send(int status)
 }
 
 /**
+ * @anchor spec_pipeline_ui_ack_recv
  * @brief Wait for a UI acknowledgement.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -646,8 +722,10 @@ pipeline_ui_ack_send(int status)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_ui_ack_recv(void)
@@ -659,6 +737,7 @@ pipeline_ui_ack_recv(void)
 }
 
 /**
+ * @anchor spec_pipeline_ui_finish
  * @brief  Request END and wait for acknowledgement.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -669,8 +748,10 @@ pipeline_ui_ack_recv(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_ui_finish(void)
@@ -684,6 +765,7 @@ pipeline_ui_finish(void)
 }
 
 /**
+ * @anchor spec_free_state
  * @brief Release pipeline-owned dynamic arrays.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -691,11 +773,12 @@ pipeline_ui_finish(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 static void
 free_state(void)
@@ -710,6 +793,7 @@ free_state(void)
 }
 
 /**
+ * @anchor spec_stop_ui_and_grep
  * @brief Stop and join C and D during startup rollback.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -717,27 +801,29 @@ free_state(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 static void
 stop_ui_and_grep(void)
 {
-	grep_cfg_ty gstop;
-	gstop.kind = GREP_CFG_STOP;
-	(void)spsc_chan_send(&P.grep_cfg, &gstop);
-	FAR_THREAD_JOIN(P.d_thread);
 	far_ui_cmd_ty stop;
 	stop.kind = FAR_UI_STOP;
 	stop.root = NULL;
 	(void)spsc_chan_send(&P.ui_cmd, &stop);
 	FAR_THREAD_JOIN(P.c_thread);
+	grep_cfg_ty gstop;
+	gstop.kind = GREP_CFG_STOP;
+	(void)spsc_chan_send(&P.grep_cfg, &gstop);
+	FAR_THREAD_JOIN(P.d_thread);
 }
 
 /**
+ * @anchor spec_pipeline_start
  * @brief Initialize queues and start all stage threads once.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -748,8 +834,10 @@ stop_ui_and_grep(void)
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_start(void)
@@ -833,12 +921,12 @@ pipeline_start(void)
 		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 		return -1;
 	}
-	P.ui_live = 0;
 	atomic_store_explicit(&pipe_life, PIPE_RUNNING, memory_order_release);
 	return 0;
 }
 
 /**
+ * @anchor spec_pipeline_shutdown
  * @brief Stop and join all stage threads and release state.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -846,11 +934,12 @@ pipeline_start(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 void
 pipeline_shutdown(void)
@@ -863,12 +952,12 @@ pipeline_shutdown(void)
 	for (size_t i = 0; i < P.worker_count; ++i)
 		FAR_THREAD_JOIN(P.b_threads[i]);
 	stop_ui_and_grep();
-	P.ui_live = 0;
 	free_state();
 	atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 }
 
 /**
+ * @anchor spec_process_result
  * @brief Apply one Stage-B data result in Stage C.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -880,11 +969,12 @@ pipeline_shutdown(void)
  * @param root per-root pipeline context.
  * @param failed parameter defined by the owning module contract.
  * @param canceled parameter defined by the owning module contract.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 static void
 process_result(far_result_ty *R res, root_ctx_ty *R root, int *R failed, int *R canceled)
@@ -912,6 +1002,7 @@ process_result(far_result_ty *R res, root_ctx_ty *R root, int *R failed, int *R 
 }
 
 /**
+ * @anchor spec_pipeline_run
  * @brief Run one target root through the persistent pipeline.
  *
  * @details This function is part of the pipeline.c contract. It reads only
@@ -923,8 +1014,10 @@ process_result(far_result_ty *R res, root_ctx_ty *R root, int *R failed, int *R 
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Named stage/main as documented in ARCHITECTURE.md.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Named stage/main as documented in ARCHITECTURE.md.
  */
 int
 pipeline_run(root_ctx_ty *R root)
@@ -938,6 +1031,8 @@ pipeline_run(root_ctx_ty *R root)
 	atomic_init(&root->eos_taken, false);
 	atomic_init(&root->eos_sent, false);
 	atomic_init(&root->phase, ROOT_STARTING);
+	root->grep_live = (G.mode & MODE_GREP) && G.grep_collect &&
+	                  isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 	atomic_init(&root->ftw_ret, JSTR_RET_SUCC);
 	atomic_init(&root->prod_errs, 0);
 	root->seq = 0;
@@ -949,7 +1044,6 @@ pipeline_run(root_ctx_ty *R root)
 			return JSTR_RET_ERR;
 		if (jstr_unlikely(spsc_chan_send(&P.cmd, root) != 0))
 			return JSTR_RET_ERR;
-		P.ui_live = 1;
 		const int status = pipeline_ui_ack_recv();
 		if (status < 0)
 			return JSTR_RET_ERR;

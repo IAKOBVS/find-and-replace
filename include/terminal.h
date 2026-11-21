@@ -56,8 +56,10 @@
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 int terminal_active(void);
 /**
@@ -71,8 +73,10 @@ int terminal_active(void);
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 unsigned short terminal_cols(void);
 /**
@@ -86,8 +90,10 @@ unsigned short terminal_cols(void);
  * @return Computed count, width, or 1-based position; `0` when no value is available.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 unsigned short terminal_rows(void);
 
@@ -128,7 +134,7 @@ typedef enum {
 
 /**
  * @brief Run the confirm TUI until selection or abort.
- * @details Edits all seven fields with a 200 ms idle debounce; renders bounded
+ * @details Edits all seven fields with a grep-only 200 ms idle debounce; renders bounded
  *          previews and recompiles filters/live find as fields change.
  * @pre Terminal raw mode is active and all field buffers are initialized.
  * @param t Compiled matcher used for live preview.
@@ -141,8 +147,10 @@ typedef enum {
  * @param backup_buf Editable backup suffix buffer.
  * @return `JSTR_RET_SUCC` on selection or clean quit.
  * @post G reflects the final field values.
- * @sideeffects Writes terminal escape sequences; mutates G preview state.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Writes terminal escape sequences; mutates G preview state.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 jstr_ret_ty confirm_interactive_loop(jstr_twoway_ty *R t,
                                      jstr_ty *R find_buf,
@@ -167,8 +175,10 @@ jstr_ret_ty confirm_interactive_loop(jstr_twoway_ty *R t,
  * @param exclude_buf Editable exclude regex buffer.
  * @return `JSTR_RET_SUCC` on quit/selection.
  * @post Selected match is emitted by the caller when appropriate.
- * @sideeffects Writes terminal escape sequences; sends config to D.
- * @thread Stage C UI thread.
+ * @par Side Effects:
+ *   Writes terminal escape sequences; sends config to D.
+ * @par Threading and Reentrancy:
+ *   Stage C UI thread.
  */
 jstr_ret_ty grep_interactive_loop(jstr_twoway_ty *R t,
                                    jstr_ty *R find_buf,
@@ -188,8 +198,10 @@ jstr_ret_ty grep_interactive_loop(jstr_twoway_ty *R t,
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
  *       on failure, caller-owned inputs remain valid.
- * @sideeffects Only objects, queues, files, and global state named by the owning contract are modified.
- * @thread Stage C only.
+ * @par Side Effects:
+ *   Only objects, queues, files, and global state named by the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
  */
 far_thread_ret_ty terminal_ui_thread(void *arg);
 

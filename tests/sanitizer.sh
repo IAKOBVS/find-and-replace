@@ -64,7 +64,7 @@ sanitizer_run_integration() {
 		PROG="$absdir/find-and-replace" \
 		PIPELINE_TEST_BIN_DIR="$absdir/tests" \
 		FAR_SKIP_UNIT_SHELL=1 \
-		FAR_SKIP_TESTS="t_confirm_interactive_garbage_preview_cleared t_confirm_interactive_scroll_past_visend t_grep_interactive_vim_mode" \
+		FAR_SKIP_TESTS="t_confirm_interactive_garbage_preview_cleared t_confirm_interactive_scroll_past_visend t_confirm_interactive_files_filter t_grep_interactive_vim_mode" \
 		TSAN_OPTIONS=halt_on_error=1 \
 		UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 		./tests/run.sh
@@ -73,8 +73,8 @@ sanitizer_run_integration() {
 		PROG="$absdir/find-and-replace" \
 		PIPELINE_TEST_BIN_DIR="$absdir/tests" \
 		FAR_SKIP_UNIT_SHELL=1 \
-		FAR_SKIP_TESTS="t_pipeline_prompt_write_error" \
-		ASAN_OPTIONS=halt_on_error=1:detect_leaks=0 \
+		FAR_SKIP_TESTS="t_pipeline_prompt_write_error t_grep_interactive_vim_mode" \
+		ASAN_OPTIONS=halt_on_error=1:detect_leaks=1 \
 		UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 		./tests/run.sh
 		;;

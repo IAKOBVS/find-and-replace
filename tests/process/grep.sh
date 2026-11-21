@@ -181,6 +181,27 @@ t_grep_nonexistent_file() {
 	[ "$rc" -eq 2 ] && echo PASS > "$td/result" || echo "FAIL: nonexistent file in --grep should exit 2 (rc=$rc)" > "$td/result"
 }
 
+t_grep_interactive_invalid_find() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'hit\n' > "$td/sub/a.txt"
+	pdrive --phase 15 --phase 5b@50 --phase 03@400 -- hit x --grep -r "$td/sub"
+	case "$(cat "$td/rc")" in sig:*|timeout) echo "FAIL: abnormal rc=$(cat "$td/rc")" > "$td/result" ;; *) echo PASS > "$td/result" ;; esac
+}
+
+t_grep_interactive_invalid_include() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'hit\n' > "$td/sub/a.txt"
+	pdrive --phase 09 --phase 09@50 --phase 5b@50 --phase 03@400 -- hit x --grep -r "$td/sub"
+	case "$(cat "$td/rc")" in sig:*|timeout) echo "FAIL: abnormal rc=$(cat "$td/rc")" > "$td/result" ;; *) echo PASS > "$td/result" ;; esac
+}
+
+t_grep_interactive_invalid_exclude() {
+	td=$1; mkdir -p "$td/sub"
+	printf 'hit\n' > "$td/sub/a.txt"
+	pdrive --phase 09 --phase 09@50 --phase 09@50 --phase 5b@50 --phase 03@400 -- hit x --grep -r "$td/sub"
+	case "$(cat "$td/rc")" in sig:*|timeout) echo "FAIL: abnormal rc=$(cat "$td/rc")" > "$td/result" ;; *) echo PASS > "$td/result" ;; esac
+}
+
 t_grep_interactive_regex() {
 	td=$1
 	printf 'hello\nworld\n' > "$td/f"
@@ -221,12 +242,10 @@ pdrive --noready --phase 0d --tail '' -- hello x --grep "$td/f"
 
 t_grep_interactive_scroll() {
 	td=$1
-	printf 'aaa\nbbb\nccc\n' > "$td/f"
-	# Start grep TUI, Alt-J to scroll down (select second match), Enter
-pdrive --phase 1b6a --phase 0d --tail '' -- 'a' x --grep "$td/f"
+	printf 'aaa\naba\naca\n' > "$td/f"
+	pdrive --phase 1b6a --phase 0d --tail '' -- 'a' x --grep "$td/f"
 	out=$(strip_ansi < "$td/out")
-	# The output should contain at least one of the match lines
-	if printf '%s\n' "$out" | grep -qF ':'; then
+	if printf '%s\n' "$out" | grep -qF '2:aba'; then
 		echo PASS > "$td/result"
 	else
 		echo "FAIL: out=[$out]" > "$td/result"
@@ -263,13 +282,13 @@ pdrive --noready --phase 0d --tail '' -- alpha x --grep --exclude 'f1$' "$td/f1"
 t_grep_interactive_ctrl_d() {
 	td=$1
 	printf 'hello\n' > "$td/f"
-	# Ctrl-D should exit the grep TUI; just verify it starts and exits
-pdrive --phase 04 --tail '' -- hello x --grep "$td/f"
+	pdrive --phase 04 --tail '' -- hello x --grep "$td/f"
 	out=$(strip_ansi < "$td/out")
-	if printf '%s\n' "$out" | grep -qF '1:hello'; then
+	rc=$(cat "$td/rc" 2>/dev/null)
+	if printf '%s\n' "$out" | grep -qF 'Aborted.' && [ -n "$rc" ] && [ "$rc" -ne 0 ]; then
 		echo PASS > "$td/result"
 	else
-		echo "FAIL: out=[$out]" > "$td/result"
+		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
 	fi
 }
 
@@ -489,6 +508,29 @@ t_grep_regex_highlight() {
 # Regression: grep_rescan never recompiled the twoway searcher when the find
 # string changed in the TUI.  Typing enough chars to cross the twoway
 # threshold (>2 chars) caused a segfault from stale shift tables.
+t_grep_interactive_edit_during_scan() {
+	td=$1; mkdir -p "$td/sub"
+	for i in 1 2 3 4; do yes 'hit hix' | head -c 200000 > "$td/sub/f$i"; done
+	pdrive --phase 15 --phase 68@50 --phase 69@50 --phase 78@50 \
+	       --phase 0d@400 --tail '' -- hit x --grep -r "$td/sub"
+	rc=$(cat "$td/rc" 2>/dev/null)
+	case "$rc" in
+	0|1) echo PASS > "$td/result" ;;
+	*) echo "FAIL: rc=$rc" > "$td/result" ;;
+	esac
+}
+
+t_grep_interactive_stop_during_scan() {
+	td=$1; mkdir -p "$td/sub"
+	for i in 1 2 3 4; do yes 'hit hix' | head -c 200000 > "$td/sub/f$i"; done
+	pdrive --timeout 5 --phase 04 --tail '' -- hit x --grep -r "$td/sub"
+	rc=$(cat "$td/rc" 2>/dev/null)
+	case "$rc" in
+	0|1) echo PASS > "$td/result" ;;
+	*) echo "FAIL: rc=$rc" > "$td/result" ;;
+	esac
+}
+
 t_grep_interactive_rescan_recompile() {
 	td=$1
 	printf 'there is no point\nfoo bar\n' > "$td/f"
@@ -527,6 +569,9 @@ t_grep_binary
 t_grep_dash_stdin_placeholder
 t_grep_exclude_cli
 t_grep_nonexistent_file
+t_grep_interactive_invalid_find
+t_grep_interactive_invalid_include
+t_grep_interactive_invalid_exclude
 t_grep_interactive_regex
 t_grep_regex_empty_lines
 t_grep_regex_empty_line_anchor
@@ -545,6 +590,9 @@ t_grep_interactive_controls_fixed
 t_grep_interactive_vim_mode
 t_grep_interactive_large_batch
 t_grep_interactive_no_blank_while_typing
+t_grep_interactive_edit_during_scan
+t_grep_interactive_stop_during_scan
+t_grep_interactive_rescan_recompile
 t_grep_interactive_blank_after_debounce
 t_grep_match_highlight
 t_grep_regex_highlight

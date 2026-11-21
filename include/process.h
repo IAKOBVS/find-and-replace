@@ -27,8 +27,10 @@
  * @param res Result object to populate.
  * @return `JSTR_RET_SUCC` always; errors are reported in RES->err.
  * @post On success RES describes one job; BUF is valid or NULL if transferred.
- * @sideeffects May write files; does not touch stdio or Stage-C caches.
- * @thread Stage B worker.
+ * @par Side Effects:
+ *   May write files; does not touch stdio or Stage-C caches.
+ * @par Threading and Reentrancy:
+ *   Stage B worker.
  */
 jstr_ret_ty process_job(const jstr_twoway_ty *R t, jstr_ty **R buf,
                         const char *R fname, size_t fname_len,
@@ -52,8 +54,10 @@ jstr_ret_ty process_job(const jstr_twoway_ty *R t, jstr_ty **R buf,
  * @param err_size ERR_BUF capacity.
  * @return `JSTR_RET_SUCC` on success; `JSTR_RET_ERR` on compile/backref error.
  * @post On success G.regex/T reflect the current flags.
- * @sideeffects Mutates G regex/mode state.
- * @thread Main or Stage C only.
+ * @par Side Effects:
+ *   Mutates G regex/mode state.
+ * @par Threading and Reentrancy:
+ *   Main or Stage C only.
  */
 jstr_ret_ty far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len, const char *R rplc, size_t rplc_len, int force_recompile, char *err_buf, size_t err_size);
 
@@ -65,8 +69,10 @@ jstr_ret_ty far_compile(jstr_twoway_ty *R t, const char *R find, size_t find_len
  * @param arg Worker index encoded as a pointer.
  * @return `FAR_THREAD_RETURN` when shutdown is complete.
  * @post All accepted jobs have published results or errors.
- * @sideeffects Reads files, writes files, publishes queue results.
- * @thread Stage B worker only.
+ * @par Side Effects:
+ *   Reads files, writes files, publishes queue results.
+ * @par Threading and Reentrancy:
+ *   Stage B worker only.
  */
 far_thread_ret_ty process_thread(void *arg);
 
@@ -80,10 +86,11 @@ far_thread_ret_ty process_thread(void *arg);
  * @param fname_len FNAME byte length.
  * @param find Find string.
  * @param find_len FIND byte length.
- * @return None.
  * @post G.grep_lines contains all matches from BUF.
- * @sideeffects Mutates G.grep_lines and G.grep_matched.
- * @thread Stage B worker.
+ * @par Side Effects:
+ *   Mutates G.grep_lines and G.grep_matched.
+ * @par Threading and Reentrancy:
+ *   Stage B worker.
  */
 void grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf,
                        const char *R fname, size_t fname_len,
@@ -100,10 +107,11 @@ void grep_collect_file(const jstr_twoway_ty *R t, const jstr_ty *R buf,
  * @param find Find string.
  * @param find_len FIND byte length.
  * @param limit Maximum number of matches.
- * @return None.
  * @post At most LIMIT matches are appended.
- * @sideeffects Mutates G.grep_lines and G.grep_matched.
- * @thread Stage B worker.
+ * @par Side Effects:
+ *   Mutates G.grep_lines and G.grep_matched.
+ * @par Threading and Reentrancy:
+ *   Stage B worker.
  */
 void grep_collect_file_n(const jstr_twoway_ty *R t, const jstr_ty *R buf,
                          const char *R fname, size_t fname_len,

@@ -53,6 +53,13 @@ t_inplace_backup_collision() {
 	[ "$rc" -ne 0 ] && echo PASS > "$td/result" || echo "FAIL: should error when backup file exists (rc=$rc)" > "$td/result"
 }
 
+t_batch_file_error_message() {
+	td=$1; printf 'foo\n' > "$td/good"; printf 'foo\n' > "$td/bad"; chmod 000 "$td/bad"
+	rc=0; "$PROG" foo bar -i -q "$td/good" "$td/bad" > /dev/null 2> "$td/err" || rc=$?
+	[ "$rc" -ne 0 ] && grep -q 'error processing 2 files' "$td/err" && \
+		echo PASS > "$td/result" || echo "FAIL: rc=$rc err=[$(cat "$td/err")]" > "$td/result"
+}
+
 t_nonexistent_among_valid() {
 	td=$1; printf 'good\n' > "$td/good"
 	rc=0; "$PROG" good replaced -i "$td/good" "$td/nope" > /dev/null 2>&1 || rc=$?
@@ -210,6 +217,7 @@ t_missing_replace
 t_include_without_arg
 t_exclude_without_arg
 t_inplace_backup_collision
+t_batch_file_error_message
 t_nonexistent_among_valid
 t_invalid_regex
 t_long_backup_suffix

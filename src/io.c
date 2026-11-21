@@ -4,6 +4,7 @@
 #include "io.h"
 
 /**
+ * @anchor spec_xstat
  * @brief Wrap stat(2) and normalize its result.
  *
  * @details This function is part of the io.c contract. It reads only
@@ -16,8 +17,10 @@
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B or main; filesystem operations are independent.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B or main; filesystem operations are independent.
  */
 JSTR_FUNC
 jstr_ret_ty
@@ -29,6 +32,7 @@ xstat(const char *R file, struct stat *R buf)
 }
 
 /**
+ * @anchor spec_file_exists
  * @brief Test whether a path exists.
  *
  * @details This function is part of the io.c contract. It reads only
@@ -40,8 +44,10 @@ xstat(const char *R file, struct stat *R buf)
  * @return Nonzero when the condition holds; zero otherwise.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B or main; filesystem operations are independent.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B or main; filesystem operations are independent.
  */
 int
 file_exists(const char *R fname)
@@ -50,6 +56,7 @@ file_exists(const char *R fname)
 }
 
 /**
+ * @anchor spec_io_write_inplace_backup
  * @brief Replace a file in place while preserving a backup.
  *
  * @details This function is part of the io.c contract. It reads only
@@ -64,8 +71,10 @@ file_exists(const char *R fname)
  * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B or main; filesystem operations are independent.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B or main; filesystem operations are independent.
  */
 jstr_ret_ty
 io_write_inplace_backup(const jstr_ty *R buf, const char *R fname, size_t fname_len, const struct stat *st)
@@ -91,6 +100,7 @@ out:
 }
 
 /**
+ * @anchor spec_io_write_inplace_temp
  * @brief Replace a file in place through a temporary file.
  *
  * @details This function is part of the io.c contract. It reads only
@@ -101,20 +111,21 @@ out:
  * @param buf growable byte buffer.
  * @param fname file name.
  * @param fname_len FNAME byte length.
- * @return None.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
- * @sideeffects Only the objects, queues, files, and global state named in the owning contract are modified.
- * @thread Stage B or main; filesystem operations are independent.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage B or main; filesystem operations are independent.
  */
 void
 io_write_inplace_temp(const jstr_ty *R buf, const char *R fname, size_t fname_len)
 {
 	char bak[JSTR_IO_PATH_MAX];
-	if (jstr_unlikely(fname_len + S_LEN(".XXXXXX") >= sizeof(bak)))
-		jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(".XXXXXX"), sizeof(bak));
+	if (jstr_unlikely(fname_len + S_LEN(FAR_TEMP_SUFFIX) >= sizeof(bak)))
+		jstr_errdie("Filename (%s) is too large to create a backup file (%zu >= %zu).\n", fname, fname_len + S_LEN(FAR_TEMP_SUFFIX), sizeof(bak));
 	char *p = jstr_mempcpy(bak, fname, fname_len);
-	p = jstr_stpcpy_len(p, S_LITERAL(".XXXXXX"));
+	p = jstr_stpcpy_len(p, S_LITERAL(FAR_TEMP_SUFFIX));
 	const int fd_tmp = mkstemp(bak);
 	if (jstr_unlikely(fd_tmp == -1))
 		jstr_errdie("Can't make a file (%s) to temporarily write replacements to.\n", bak);

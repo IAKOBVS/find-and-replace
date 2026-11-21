@@ -14,7 +14,7 @@ def main() -> int:
 
     try:
         text = subprocess.check_output(
-            ["make", "-B", "-n"], cwd=root, text=True, stderr=subprocess.DEVNULL
+            ["make", "-B", "-n", "CCACHE="], cwd=root, text=True, stderr=subprocess.DEVNULL
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         print(f"generate-compile-commands: make -B -n failed: {exc}", file=sys.stderr)

@@ -21,7 +21,7 @@ sudo ./install # copies binary to $HOME/.local/bin (dir must exist)
 
 - The build system is a **Makefile** (`make`). `./compile` and `./test` are thin
   wrappers that delegate to `make`:
-  - `./compile` → `make` (compiles the 12 TUs with `-MMD/-MP` dependency
+  - `./compile` → `make` (uses `ccache` automatically when installed; compiles the 12 TUs with `-MMD/-MP` dependency
     tracking and `-pthread`, links against the globally-installed
     `/usr/local/lib/libjstr.so`, and builds the C pty test driver
     `tests/pty_drive` + `tests/test_pty_drive` and the unit tests under `tests/pipeline/`)

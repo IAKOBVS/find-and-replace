@@ -1,0 +1,10 @@
+#!/bin/sh
+# Build and run the C unit tests with AddressSanitizer + UndefinedBehaviorSanitizer.
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+. "$DIR/tests/sanitizer.sh"
+
+echo "=== Building build-asan (ASAN + UBSAN)"
+sanitizer_build asan build-asan
+sanitizer_run_unit asan build-asan

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Build and run the C unit tests with ThreadSanitizer + UndefinedBehaviorSanitizer.
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+. "$DIR/tests/sanitizer.sh"
+
+echo "=== Building build-tsan (TSAN + UBSAN)"
+sanitizer_build tsan build-tsan
+sanitizer_run_unit tsan build-tsan

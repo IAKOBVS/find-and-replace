@@ -1,0 +1,33 @@
+#!/bin/sh
+# Run the integration suites against sanitizer builds.
+# Usage: ./test-integration-sanitized [tsan|asan|all]   (default: all)
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+. "$DIR/tests/sanitizer.sh"
+
+kind=${1:-all}
+case "$kind" in
+tsan|asan) kinds="$kind" ;;
+all) kinds="tsan asan" ;;
+*)
+	echo "usage: $0 [tsan|asan|all]" >&2
+	exit 2
+	;;
+esac
+
+fail=0
+for k in $kinds; do
+	case "$k" in
+	tsan) dir=build-tsan ;;
+	asan) dir=build-asan ;;
+	esac
+	if ! sanitizer_build "$k" "$dir"; then
+		fail=1
+		continue
+	fi
+	if ! sanitizer_run_integration "$k" "$dir"; then
+		fail=1
+	fi
+done
+exit "$fail"

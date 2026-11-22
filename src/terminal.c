@@ -1482,10 +1482,8 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 	int needs_rescan = 1;
 	int first_draw = 1;
 	grep_ui_phase_ty phase = GREP_UI_LIVE;
-	int end_requested = 0;
 	int pending_enter = 0;
 	int quit = 0;
-	int rescanning = 0;
 	unsigned long grep_gen = 0;
 	unsigned long full_rescan_gen = 0;
 	root_ctx_ty *current_root = root;
@@ -1509,10 +1507,8 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			if (ucmd->kind == FAR_UI_ROOT) {
 				current_root = ucmd->root;
 				phase = GREP_UI_LIVE;
-				end_requested = 0;
 				needs_redraw = 1;
 			} else if (ucmd->kind == FAR_UI_END) {
-				end_requested = 1;
 				if (phase == GREP_UI_LIVE) {
 					phase = GREP_UI_END_PENDING;
 				} else {
@@ -1571,7 +1567,6 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			if (msg->kind == FAR_GREP_DONE) {
 				if (phase == GREP_UI_FINAL && msg->gen == full_rescan_gen)
 					phase = GREP_UI_READY;
-				rescanning = 0;
 				needs_redraw = 1;
 			}
 			grep_msg_release(msg);
@@ -1586,21 +1581,18 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			if (G.grep_lines.size != last_match_count || files_matched != last_files_matched)
 				visible_dirty = 1;
 		}
+		if (pending_enter && G.grep_lines.size > 0 && G.selected_line < G.grep_lines.size) {
+			restore_terminal();
+			grep_emit_selected();
+			pipeline_ui_ack_send(0);
+			return JSTR_RET_SUCC;
+		}
 		if (visible_dirty && grep_now_ms() - last_redraw >= GREP_REDRAW_MS)
 			needs_redraw = 1;
 		if (quit) {
 			phase = GREP_UI_QUIT;
 			pipeline_ui_ack_send(0);
 			break;
-		}
-		if (pending_enter && phase == GREP_UI_READY && !rescanning && !needs_rescan && end_requested) {
-			if (G.grep_lines.size > 0) {
-				restore_terminal();
-				grep_emit_selected();
-				pipeline_ui_ack_send(0);
-				return JSTR_RET_SUCC;
-			}
-			pending_enter = 0;
 		}
 		if (needs_rescan && rescan_due != 0 && grep_now_ms() >= rescan_due)
 			needs_redraw = 1;
@@ -1624,7 +1616,6 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				G.total_lines = 0;
 				G.selected_line = 0;
 				G.scroll_offset = 0;
-				rescanning = 1;
 				rescan_due = 0;
 				grep_send_cfg(phase == GREP_UI_FINAL ? GREP_CFG_FULL : GREP_CFG_UPDATE,
 				              grep_gen,
@@ -1723,16 +1714,13 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 
 		switch (key) {
 		case KEY_ENTER:
-			pending_enter = 1;
-			if (phase == GREP_UI_READY && !rescanning && !needs_rescan && end_requested) {
-				if (G.grep_lines.size > 0) {
-					restore_terminal();
-					grep_emit_selected();
-					pipeline_ui_ack_send(0);
-					return JSTR_RET_SUCC;
-				}
-				pending_enter = 0;
+			if (G.grep_lines.size > 0 && G.selected_line < G.grep_lines.size) {
+				restore_terminal();
+				grep_emit_selected();
+				pipeline_ui_ack_send(0);
+				return JSTR_RET_SUCC;
 			}
+			pending_enter = 1;
 			break;
 
 		case KEY_ALT_J:

@@ -69,6 +69,9 @@ Options:
     matched, 1 if none, 2 on error. No files are modified. Cannot be
     combined with -i or -c. Matching lines from named files are
     prefixed with FILE:, lines from stdin are printed bare.
+    On a terminal, --grep opens a match browser: ESC-j/ESC-k select a
+    match line, Enter prints that FILE:LINE:content to stdout and exits.
+    Up/Down and Ctrl-J/K change the active field.
 
 FIND and REPLACE shall be placed in that exact order.
 

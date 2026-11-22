@@ -565,6 +565,28 @@ t_grep_interactive_exit_code_match() {
 	fi
 }
 
+t_grep_interactive_enter_during_scan() {
+	td=$1
+	mkdir -p "$td/dir"
+	# Large enough that the live scan is still running when Enter arrives.
+	i=1
+	while [ "$i" -le 8 ]; do
+		awk 'BEGIN { for (j = 1; j <= 100000; j++) print "hit line " j }' > "$td/dir/f$i"
+		i=$((i + 1))
+	done
+	# Enter must select the highlighted match and emit it to stdout immediately.
+	# Ctrl-D 50 ms later makes the old deferred-Enter path fail: it quit before
+	# the scan END could flush the pending Enter.
+	pdrive --ready '-- [INSERT] --' --phase 0d@0 --phase 04@50 --tail '' -- hit x --grep -r "$td/dir"
+	rc=$(cat "$td/rc" 2>/dev/null)
+	out=$(sed -n '/\x1b\[?1049l/,$p' "$td/out" | strip_ansi)
+	if [ "$rc" = "0" ] && printf '%s\n' "$out" | grep -qE ':[0-9]+:hit line'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	fi
+}
+
 t_grep_c_conflict_before_tui() {
 	td=$1
 	printf 'hello\n' > "$td/f"
@@ -627,6 +649,7 @@ t_grep_interactive_edit_during_scan
 t_grep_interactive_stop_during_scan
 t_grep_interactive_rescan_recompile
 t_grep_interactive_exit_code_match
+t_grep_interactive_enter_during_scan
 t_grep_c_conflict_before_tui
 t_grep_interactive_blank_after_debounce
 t_grep_match_highlight

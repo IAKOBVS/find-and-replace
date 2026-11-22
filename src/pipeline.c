@@ -911,10 +911,8 @@ pipeline_ui_ack_recv(void)
 int
 pipeline_ui_finish(void)
 {
-	far_ui_cmd_ty cmd;
-	cmd.kind = FAR_UI_END;
-	cmd.root = NULL;
-	if (jstr_unlikely(spsc_chan_send(&P.ui_cmd, &cmd) != 0))
+	static const far_ui_cmd_ty cmd = { .kind = FAR_UI_END, .root = NULL };
+	if (jstr_unlikely(spsc_chan_send(&P.ui_cmd, (void *)&cmd) != 0))
 		return -1;
 	return pipeline_ui_ack_recv();
 }

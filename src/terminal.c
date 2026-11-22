@@ -1171,6 +1171,7 @@ grep_emit_selected(void)
 	if (G.grep_lines.size == 0 || G.selected_line >= G.grep_lines.size)
 		return;
 	const grep_line_ty *gl = &G.grep_lines.data[G.selected_line];
+	G.grep_matched = 1;
 	(void)jstr_io_fwrite(COLOR_RED, 1, S_LEN(COLOR_RED), stdout);
 	(void)jstr_io_fwrite(gl->fname, 1, gl->fname_len, stdout);
 	(void)jstr_io_fwrite(COLOR_RESET, 1, S_LEN(COLOR_RESET), stdout);
@@ -1578,6 +1579,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				break;
 		}
 		if (got_match) {
+			G.grep_matched = 1;
 			G.total_lines = G.grep_lines.size;
 			if (G.total_lines > 0 && G.selected_line >= G.total_lines)
 				G.selected_line = G.total_lines - 1;

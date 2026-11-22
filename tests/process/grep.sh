@@ -549,6 +549,39 @@ pdrive --phase 68657265206973206e6f20706f696e74 --phase 04 --tail '' -- t x --gr
 	esac
 }
 
+t_grep_interactive_exit_code_match() {
+	td=$1
+	printf 'hello\nworld\n' > "$td/f"
+	# Enter accepts the selected match; the process must exit 0 when a match
+	# was found, just like non-interactive --grep.  Previously the tty collect
+	# path never set G.grep_matched, so main returned EXIT_FAILURE (1).
+	pdrive --phase 0d --tail '' -- hello x --grep "$td/f"
+	rc=$(cat "$td/rc" 2>/dev/null)
+	out=$(strip_ansi < "$td/out")
+	if [ "$rc" = "0" ] && printf '%s\n' "$out" | grep -qF '1:hello'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc out=[$out]" > "$td/result"
+	fi
+}
+
+t_grep_c_conflict_before_tui() {
+	td=$1
+	printf 'hello\n' > "$td/f"
+	# --grep cannot be combined with -c.  The conflict must be rejected as
+	# soon as the flags are parsed, before any target is processed or the
+	# interactive TUI is opened and Enter emits a misleading selected line.
+	pdrive --noready --timeout 3 -- hello x --grep -c -r "$td/f"
+	rc=$(cat "$td/rc" 2>/dev/null)
+	if [ "$rc" = "2" ] &&
+	   grep -qF 'cannot be combined' "$td/out" &&
+	   ! grep -qF "$(printf '\033[?1049h')" "$td/out"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: rc=$rc" > "$td/result"
+	fi
+}
+
 TESTS="
 t_grep_stdin
 t_grep_no_match
@@ -593,6 +626,8 @@ t_grep_interactive_no_blank_while_typing
 t_grep_interactive_edit_during_scan
 t_grep_interactive_stop_during_scan
 t_grep_interactive_rescan_recompile
+t_grep_interactive_exit_code_match
+t_grep_c_conflict_before_tui
 t_grep_interactive_blank_after_debounce
 t_grep_match_highlight
 t_grep_regex_highlight

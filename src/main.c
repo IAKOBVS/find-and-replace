@@ -135,6 +135,28 @@ err_exit_code()
 	return (G.mode & MODE_GREP) ? 2 : EXIT_FAILURE;
 }
 
+/**
+ * @anchor spec_check_grep_conflicts
+ * @brief Reject flag combinations that are invalid in grep mode.
+ *
+ * @details Called at each flag parse site so an invalid combination fails
+ *          before any target is processed or an interactive TUI is opened.
+ * @pre G reflects all flags parsed so far.
+ * @return None; exits with the grep-specific error code on conflict.
+ * @par Side Effects:
+ *   Writes a diagnostic to stderr and exits on conflict.
+ * @par Threading and Reentrancy:
+ *   Main thread only.
+ */
+static void
+check_grep_conflicts(void)
+{
+	if (jstr_unlikely((G.mode & MODE_GREP) && ((G.mode & MODE_CONFIRM) || G.output_mode != OUT_STDOUT))) {
+		fprintf(stderr, "find-and-replace error: --grep cannot be combined with -i or -c.\n");
+		exit(err_exit_code());
+	}
+}
+
 /* Default flags. Idempotent: assigns (never ORs) so calling it again cannot
  * leak state from an earlier call. */
 /**
@@ -298,6 +320,7 @@ parse_single_flags(const char *arg)
 			break;
 		case 'c':
 			G.mode |= MODE_CONFIRM;
+			check_grep_conflicts();
 			break;
 		case 'g':
 			G.n = (size_t)-1;
@@ -384,6 +407,7 @@ parse_long_flag(char **argv, unsigned int *i_ptr, parser_state_ty *state)
 	}
 	if (!strcmp(arg + 2, "grep")) {
 		G.mode |= MODE_GREP;
+		check_grep_conflicts();
 		if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))
 			G.grep_collect = 1;
 		return 1;
@@ -997,6 +1021,7 @@ main(int argc, char **argv)
 					G.bak_suffix_len = strlen(G.bak_suffix);
 					G.output_mode = OUT_BACKUP;
 				}
+				check_grep_conflicts();
 				continue;
 			}
 			if (ARG[1] == '-') {

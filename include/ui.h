@@ -259,6 +259,80 @@ unsigned short ui_size_t_width(size_t val);
  */
 void ui_print_diff_line_chars(const char *s, size_t len, unsigned short cols, unsigned short *col_ptr);
 /**
+ * @brief Start capturing rendered confirm preview lines.
+ *
+ * @details Contract for the public declaration in ui.h. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI and no capture is active.
+ * @post The preview cache is empty and capture mode is active.
+ * @par Side Effects:
+ *   Only the preview cache and documented global state are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void ui_preview_capture_begin(void);
+/**
+ * @brief Finish capturing rendered confirm preview lines.
+ *
+ * @details Contract for the public declaration in ui.h. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Capture mode is active.
+ * @param total_matches number of matches found during the capture.
+ * @param files_matched number of files with matches during the capture.
+ * @post The cache is valid and scroll-only redraws can replay it.
+ * @par Side Effects:
+ *   Only the preview cache and documented global state are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void ui_preview_capture_end(size_t total_matches, size_t files_matched);
+/**
+ * @brief Report whether the cached preview covers a scroll window.
+ *
+ * @details Contract for the public declaration in ui.h. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI.
+ * @param scroll_offset first cached line to display.
+ * @param max_preview_lines visible line count.
+ * @return Nonzero when the cache covers the window; zero otherwise.
+ * @post No state is modified.
+ * @par Side Effects:
+ *   None.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+int ui_preview_cache_covers(size_t scroll_offset, size_t max_preview_lines);
+/**
+ * @brief Replay cached confirm preview lines for a scroll window.
+ *
+ * @details Contract for the public declaration in ui.h. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre The cache is valid and covers the requested window.
+ * @param scroll_offset first cached line to display.
+ * @param selected_line currently selected preview line.
+ * @param max_preview_lines visible line count.
+ * @post The requested preview lines are rendered with current selection styling.
+ * @par Side Effects:
+ *   Only stdout and the UI render buffer are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void ui_preview_cache_render(size_t scroll_offset, size_t selected_line,
+                             size_t max_preview_lines);
+/**
+ * @brief Invalidate the rendered confirm preview cache.
+ *
+ * @details Contract for the public declaration in ui.h. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI.
+ * @post Scroll-only redraws can no longer replay stale preview lines.
+ * @par Side Effects:
+ *   Only the preview cache and documented global state are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void ui_preview_cache_clear(void);
+/**
  * @brief Print a size_t value using the tool output path.
  *
  * @details Contract for the public declaration in ui.h. It reads only

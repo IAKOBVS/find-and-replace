@@ -1891,8 +1891,11 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 	vim_set_insert_mode(1);
 	int needs_redraw = 1;
 	int needs_recompile = 1;
+	int needs_rescan = 1;
 	int is_valid = 1;
 	int first_draw = 1;
+	unsigned short last_rows = 0;
+	unsigned short last_cols = 0;
 	size_t active_field = FIELD_FIND;
 	size_t cursors[FIELD_COUNT];
 
@@ -1917,6 +1920,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				break;
 			jstr_unescape_copy(&G.find_plain, find_buf);
 			jstr_unescape_copy(&G.rplc_plain, rplc_buf);
+			const unsigned short rows = get_terminal_rows();
+			const unsigned short cols = terminal_cols();
+			if (rows != last_rows || cols != last_cols) {
+				last_rows = rows;
+				last_cols = cols;
+				needs_rescan = 1;
+				ui_preview_cache_clear();
+			}
 			if (first_draw) {
 				term_clear_and_home();
 				first_draw = 0;
@@ -1942,15 +1953,16 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				else
 					last_err_buf[0] = '\0';
 				needs_recompile = 0;
+				needs_rescan = 1;
 				G.scroll_offset = 0;
 				G.selected_line = 0;
 			}
 
 			size_t total_matches = 0;
 			size_t files_matched = 0;
-			const unsigned short rows = get_terminal_rows();
 
 			if (!is_valid) {
+				ui_preview_cache_clear();
 				/* Clear entire screen once on compile error to wipe out previous previews/ghost lines */
 				term_clear_and_home();
 				/* Print regex compilation error in red */
@@ -1970,36 +1982,42 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				else
 					G.max_preview_lines = 1;
 
-				/* If compile succeeded, run previews on all cached files */
-				G.matches_found = 0;
-				G.preview_lines_printed = 0;
-				G.preview_full = 0;
-				for (unsigned int k = 0; k < G.files.size; ++k) {
-					file_ty *file = &G.files.data[k];
-					/* File filtering by the Files substring filter and the
-					 * Include/Exclude basename regexes */
-					if (!interactive_file_pass(file, files_buf))
-						continue;
-					size_t file_matches = 0;
-					const char *ptn = (G.find_plain.size > 0 && G.find_plain.data) ? G.find_plain.data : "";
-					ui_scan_file(t, &file->content, file->fname, file->fname_len, ptn, G.find_plain.size, G.rplc_plain.data ? G.rplc_plain.data : "", G.rplc_plain.size, &file_matches);
-					if (file_matches > 0) {
-						total_matches += file_matches;
-						files_matched++;
+				if (needs_rescan || !ui_preview_cache_covers(G.scroll_offset, G.max_preview_lines)) {
+					ui_preview_capture_begin();
+					G.matches_found = 0;
+					for (unsigned int k = 0; k < G.files.size; ++k) {
+						file_ty *file = &G.files.data[k];
+						/* File filtering by the Files substring filter and the
+						 * Include/Exclude basename regexes */
+						if (!interactive_file_pass(file, files_buf))
+							continue;
+						size_t file_matches = 0;
+						const char *ptn = (G.find_plain.size > 0 && G.find_plain.data) ? G.find_plain.data : "";
+						ui_scan_file(t, &file->content, file->fname, file->fname_len, ptn, G.find_plain.size, G.rplc_plain.data ? G.rplc_plain.data : "", G.rplc_plain.size, &file_matches);
+						if (file_matches > 0) {
+							total_matches += file_matches;
+							files_matched++;
+						}
+					/* The match budget ran out: further files would only feed a
+					 * preview that is already full. Stop scanning so a -g global
+					 * scan on a large tree stays cheap per keystroke. */
+					if (G.preview_full)
+						break;
 					}
-				/* The match budget ran out: further files would only feed a
-				 * preview that is already full. Stop scanning so a -g global
-				 * scan on a large tree stays cheap per keystroke. */
-				if (G.preview_full)
-					break;
+					ui_preview_capture_end(total_matches, files_matched);
+					ui_preview_cache_render(G.scroll_offset, G.selected_line, G.max_preview_lines);
+					needs_rescan = 0;
+				} else {
+					ui_preview_cache_render(G.scroll_offset, G.selected_line, G.max_preview_lines);
+					total_matches = G.preview_cache_matches;
+					files_matched = G.preview_cache_files;
 				}
-				G.total_lines = G.preview_lines_printed;
 				if (G.selected_line >= G.total_lines && G.total_lines > 0)
 					G.selected_line = G.total_lines - 1;
-			if (G.preview_lines_printed >= G.max_preview_lines || G.preview_full) {
-				(void)jstr_io_fwrite(". (some previews omitted)", 1, S_LEN(". (some previews omitted)"), stdout);
-				term_clear_line_end();
-				(void)jstr_io_putchar('\n');
+				if (G.preview_cache_omitted) {
+					(void)jstr_io_fwrite(". (some previews omitted)", 1, S_LEN(". (some previews omitted)"), stdout);
+					term_clear_line_end();
+					(void)jstr_io_putchar('\n');
 				}
 			}
 
@@ -2101,6 +2119,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->size--;
 				active_buf->data[active_buf->size] = '\0';
 				needs_redraw = 1;
+				needs_rescan = 1;
 				if (field_affects_recompile(active_field))
 					needs_recompile = 1;
 			}
@@ -2126,6 +2145,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				active_buf->data[active_buf->size] = '\0';
 				cursors[active_field]--;
 				needs_redraw = 1;
+				needs_rescan = 1;
 				if (field_affects_recompile(active_field))
 					needs_recompile = 1;
 			}
@@ -2136,6 +2156,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				jstr_empty_j(active_buf);
 				cursors[active_field] = 0;
 				needs_redraw = 1;
+				needs_rescan = 1;
 				if (field_affects_recompile(active_field))
 					needs_recompile = 1;
 			}
@@ -2155,11 +2176,14 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 					active_buf->data[active_buf->size] = '\0';
 					cursors[active_field]++;
 					needs_redraw = 1;
+					needs_rescan = 1;
 					if (field_affects_recompile(active_field))
 						needs_recompile = 1;
 				}
 			} else {
 				vim_handle_key(c, active_buf, cursors, &active_field, &needs_redraw, &needs_recompile, FIELD_COUNT);
+				if (needs_recompile)
+					needs_rescan = 1;
 				jstr_ty *new_active_buf = field_buf(find_buf, rplc_buf, flags_buf, files_buf, include_buf, exclude_buf, backup_buf, active_field);
 
 				if (!vim_is_insert_mode() && new_active_buf && new_active_buf->size > 0 && cursors[active_field] >= new_active_buf->size)

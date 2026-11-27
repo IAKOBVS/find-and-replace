@@ -170,6 +170,11 @@ typedef struct global_ty {
 	size_t scroll_offset;
 	size_t selected_line;
 	size_t total_lines;
+	/* Rendered preview cache reused by scroll-only redraws. */
+	size_t preview_cache_matches;
+	size_t preview_cache_files;
+	int preview_cache_valid;
+	int preview_cache_omitted;
 	/* Grep TUI match collection (no budget limit). */
 	grep_lines_ty grep_lines;
 	/* Cold configuration, read only during startup and traversal. */

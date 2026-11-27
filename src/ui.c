@@ -17,8 +17,42 @@
 #define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
 #define MEMINFO_BUF_SIZE (4096 + 1)
 #define RANGES_CAP_MIN 1
+#define PREVIEW_CACHE_LINE_MAX 4096
 
 static jstr_ty render_buf;
+
+typedef struct {
+	jstr_ty bytes;
+	size_t prefix_len;
+	const char *fname;
+	size_t fname_len;
+	size_t line;
+	const char *fname_color;
+	unsigned int fname_color_len;
+	const char *line_color;
+	unsigned int line_color_len;
+	int selected;
+} preview_cache_line_ty;
+
+typedef struct {
+	preview_cache_line_ty *lines;
+	size_t size;
+	size_t cap;
+	int full;
+} preview_cache_ty;
+
+static preview_cache_ty preview_cache;
+static int preview_capturing;
+static int preview_replaying;
+static size_t capture_prefix_len;
+static const char *capture_fname;
+static size_t capture_fname_len;
+static size_t capture_line;
+static const char *capture_fname_color;
+static unsigned int capture_fname_color_len;
+static const char *capture_line_color;
+static unsigned int capture_line_color_len;
+static int capture_selected;
 
 /**
  * @anchor spec_ui_replaced_buf
@@ -241,6 +275,201 @@ render_append_size(size_t val)
 }
 
 /**
+ * @anchor spec_preview_scan_log
+ * @brief Record one preview scan when the test scan log is enabled.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI.
+ * @post When FAR_PREVIEW_SCAN_LOG is set, one byte is appended to that file.
+ * @par Side Effects:
+ *   Only the optional log file is modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+static void
+preview_scan_log(void)
+{
+	const char *R path = getenv("FAR_PREVIEW_SCAN_LOG");
+	if (jstr_unlikely(path != NULL)) {
+		FILE *fp = fopen(path, "ab");
+		if (fp != NULL) {
+			(void)fputc('S', fp);
+			(void)fclose(fp);
+		}
+	}
+}
+
+/**
+ * @anchor spec_preview_cache_reset
+ * @brief Empty the preview cache while reusing its allocations.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI.
+ * @post The cache has zero entries and is not full.
+ * @par Side Effects:
+ *   Only the preview cache is modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+static void
+preview_cache_reset(void)
+{
+	for (size_t i = 0; i < preview_cache.size; ++i)
+		jstr_empty_j(&preview_cache.lines[i].bytes);
+	preview_cache.size = 0;
+	preview_cache.full = 0;
+}
+
+/**
+ * @anchor spec_preview_cache_push_line
+ * @brief Store the current render buffer as one cached preview line.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Capture mode is active and the render buffer holds one complete line.
+ * @post The line is cached unless the cache has reached its line limit.
+ * @par Side Effects:
+ *   Only the preview cache is modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+static void
+preview_cache_push_line(void)
+{
+	if (render_buf.size == 0)
+		return;
+	if (preview_cache.size >= PREVIEW_CACHE_LINE_MAX) {
+		preview_cache.full = 1;
+		return;
+	}
+	if (preview_cache.size == preview_cache.cap) {
+		const size_t cap = (preview_cache.cap > 0) ? preview_cache.cap * 2 : 8;
+		const size_t new_cap = (cap < PREVIEW_CACHE_LINE_MAX) ? cap : PREVIEW_CACHE_LINE_MAX;
+		preview_cache_line_ty *lines = realloc(preview_cache.lines, new_cap * sizeof *lines);
+		DIE_IF(jstr_unlikely(lines == NULL), "%s", "Out of memory.\n");
+		memset(lines + preview_cache.cap, 0, (new_cap - preview_cache.cap) * sizeof *lines);
+		preview_cache.lines = lines;
+		preview_cache.cap = new_cap;
+	}
+	preview_cache_line_ty *line = &preview_cache.lines[preview_cache.size++];
+	DIE_IF(jstr_chk(jstr_assign_len_j(&line->bytes, render_buf.data, render_buf.size)), "%s", "Out of memory.\n");
+	line->prefix_len = capture_prefix_len;
+	line->fname = capture_fname;
+	line->fname_len = capture_fname_len;
+	line->line = capture_line;
+	line->fname_color = capture_fname_color;
+	line->fname_color_len = capture_fname_color_len;
+	line->line_color = capture_line_color;
+	line->line_color_len = capture_line_color_len;
+	line->selected = capture_selected;
+}
+
+/**
+ * @anchor spec_ui_preview_capture_begin
+ * @brief Begin a fresh rendered preview capture.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI and no capture is active.
+ * @post The cache is empty, capture mode is active, and preview counters are reset.
+ * @par Side Effects:
+ *   Only the preview cache and documented global state are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void
+ui_preview_capture_begin(void)
+{
+	preview_cache_reset();
+	preview_capturing = 1;
+	preview_replaying = 0;
+	G.preview_cache_valid = 0;
+	G.preview_cache_omitted = 0;
+	G.preview_cache_matches = 0;
+	G.preview_cache_files = 0;
+	G.preview_lines_printed = 0;
+	G.preview_full = 0;
+	G.total_lines = 0;
+}
+
+/**
+ * @anchor spec_ui_preview_capture_end
+ * @brief Complete the current preview capture.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Capture mode is active.
+ * @param total_matches number of matches found during the capture.
+ * @param files_matched number of files with matches during the capture.
+ * @post The cache is valid for scroll-only replay.
+ * @par Side Effects:
+ *   Only the preview cache and documented global state are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void
+ui_preview_capture_end(size_t total_matches, size_t files_matched)
+{
+	preview_capturing = 0;
+	preview_replaying = 0;
+	G.preview_cache_matches = total_matches;
+	G.preview_cache_files = files_matched;
+	G.total_lines = G.preview_lines_printed;
+	G.preview_cache_omitted = G.preview_full || preview_cache.full ||
+	                          G.preview_lines_printed > G.max_preview_lines;
+	G.preview_cache_valid = 1;
+}
+
+/**
+ * @anchor spec_ui_preview_cache_covers
+ * @brief Report whether cached lines cover a scroll window.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI.
+ * @param scroll_offset first cached line to display.
+ * @param max_preview_lines visible line count.
+ * @return Nonzero when the cache covers the window; zero otherwise.
+ * @post No state is modified.
+ * @par Side Effects:
+ *   None.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+int
+ui_preview_cache_covers(size_t scroll_offset, size_t max_preview_lines)
+{
+	if (jstr_unlikely(!G.preview_cache_valid))
+		return 0;
+	if (max_preview_lines == 0)
+		return 1;
+	if (scroll_offset < preview_cache.size)
+		return 1;
+	return preview_cache.full && scroll_offset == preview_cache.size;
+}
+
+/**
+ * @anchor spec_ui_preview_cache_clear
+ * @brief Invalidate the rendered preview cache.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre Stage C owns the UI.
+ * @post Scroll-only redraws can no longer replay stale preview lines.
+ * @par Side Effects:
+ *   Only documented global state is modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void
+ui_preview_cache_clear(void)
+{
+	G.preview_cache_valid = 0;
+}
+
+/**
  * @anchor spec_render_flush
  * @brief Write the preview render buffer to stdout and empty it.
  *
@@ -261,6 +490,11 @@ render_flush(void)
 {
 	if (jstr_unlikely(render_buf.size == 0))
 		return;
+	if (preview_capturing && !preview_replaying) {
+		preview_cache_push_line();
+		jstr_empty_j(&render_buf);
+		return;
+	}
 	if (ui_ok())
 		(void)jstr_io_fwrite(render_buf.data, 1, render_buf.size, stdout);
 	jstr_empty_j(&render_buf);
@@ -978,6 +1212,59 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_sel
 	render_append_size(line);
 	render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
 	render_append_char(':');
+	capture_prefix_len = render_buf.size;
+	capture_fname = fname;
+	capture_fname_len = fname_len;
+	capture_line = line;
+	capture_fname_color = fname_color;
+	capture_fname_color_len = fname_color_len;
+	capture_line_color = line_color;
+	capture_line_color_len = line_color_len;
+	capture_selected = is_selected;
+}
+
+/**
+ * @anchor spec_ui_preview_cache_render
+ * @brief Replay cached preview lines for one scroll window.
+ *
+ * @details This function is part of the ui.c contract. It reads only the
+ *          inputs named below and writes only the documented outputs.
+ * @pre The cache is valid and covers the requested window.
+ * @param scroll_offset first cached line to display.
+ * @param selected_line currently selected preview line.
+ * @param max_preview_lines visible line count.
+ * @post The requested preview lines are rendered with current selection styling.
+ * @par Side Effects:
+ *   Only stdout and the UI render buffer are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only.
+ */
+void
+ui_preview_cache_render(size_t scroll_offset, size_t selected_line,
+                        size_t max_preview_lines)
+{
+	if (jstr_unlikely(!G.preview_cache_valid || !ui_ok()))
+		return;
+	size_t end = scroll_offset + max_preview_lines;
+	if (end < scroll_offset)
+		end = preview_cache.size;
+	if (end > preview_cache.size)
+		end = preview_cache.size;
+	if (scroll_offset >= end)
+		return;
+	preview_replaying = 1;
+	for (size_t i = scroll_offset; i < end; ++i) {
+		const preview_cache_line_ty *R line = &preview_cache.lines[i];
+		print_line_prefix(line->fname, line->fname_len, line->line,
+		                  i == selected_line, line->fname_color,
+		                  line->fname_color_len, line->line_color,
+		                  line->line_color_len);
+		if (line->prefix_len <= line->bytes.size)
+			render_append(line->bytes.data + line->prefix_len,
+			              line->bytes.size - line->prefix_len);
+		render_flush();
+	}
+	preview_replaying = 0;
 }
 
 /* Print S of LEN bytes, expanding tab characters to 8-column stops and
@@ -1079,14 +1366,18 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 	size_t line = start_line;
 	const char *nl;
 	unsigned short cols = 0;
-	const size_t vis_end = G.scroll_offset + G.max_preview_lines;
-	const int has_scroll = terminal_active() && (G.scroll_offset > 0 || G.total_lines > G.max_preview_lines);
+	const int capturing = preview_capturing && !preview_replaying;
+	const size_t vis_end = capturing ? SIZE_MAX : G.scroll_offset + G.max_preview_lines;
+	const int has_scroll = !capturing && terminal_active() &&
+	                       (G.scroll_offset > 0 || G.total_lines > G.max_preview_lines);
 	if (terminal_active())
 		cols = terminal_cols();
 	int render = 1;
 	size_t r_idx = 0;
 
 	while ((nl = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
+		if (render && capturing && preview_cache.full)
+			render = 0;
 		if (render && terminal_active() && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
 			render = 0;
 		if (!render) {
@@ -1157,6 +1448,8 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 	}
 
 	if (p < end) {
+		if (render && capturing && preview_cache.full)
+			render = 0;
 		if (render && terminal_active() && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
 			render = 0;
 		if (!render) {
@@ -1219,6 +1512,8 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 				G.preview_lines_printed++;
 		}
 	} else if (trailing_nl) {
+		if (render && capturing && preview_cache.full)
+			render = 0;
 		if (render && terminal_active() && G.max_preview_lines > 0 && G.preview_lines_printed >= vis_end)
 			render = 0;
 		if (!render) {
@@ -1436,9 +1731,11 @@ ui_scan_file(const jstr_twoway_ty *R t,
                      size_t find_len,
                      const char *R rplc,
                      size_t rplc_len,
-                     size_t *R out_matches)
+                      size_t *R out_matches)
 {
+	preview_scan_log();
 	int backref = 0;
+
 	const unsigned char *rplc_backref1 = NULL;
 	const unsigned char *rplc_backref1_e = NULL;
 	if (G.mode & MODE_USE_REGEX) {

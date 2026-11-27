@@ -364,6 +364,21 @@ t_confirm_interactive_preview_truncated() {
 	fi
 }
 
+t_confirm_interactive_scroll_no_rescan() {
+	td=$1
+	i=1; while [ "$i" -le 30 ]; do printf 'line %s\n' "$i"; i=$((i + 1)); done > "$td/f"
+	: > "$td/scans"
+	phases=""
+	i=0; while [ "$i" -lt 12 ]; do phases="$phases --phase 1b6a@0"; i=$((i + 1)); done
+	pdrive --winsize 24x80 --env "FAR_PREVIEW_SCAN_LOG=$td/scans" $phases --tail '\x03' -- line X -g -c -i "$td/f"
+	scans=$(wc -c < "$td/scans" | tr -d ' ')
+	if [ "$scans" -eq 1 ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: expected one preview scan for 12 scroll-only redraws, got $scans" > "$td/result"
+	fi
+}
+
 t_confirm_interactive_no_pre_tui_dump() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	esc=$(printf '\033')
@@ -1128,6 +1143,7 @@ t_confirm_interactive_escape_live_preview
 t_confirm_non_interactive_backref_mismatch
 t_confirm_interactive_stats
 t_confirm_interactive_preview_truncated
+t_confirm_interactive_scroll_no_rescan
 t_confirm_interactive_no_pre_tui_dump
 t_confirm_interactive_height_capping
 t_confirm_interactive_tab_expansion

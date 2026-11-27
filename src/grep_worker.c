@@ -28,11 +28,12 @@ typedef struct cached_file_ty {
 	cache_state_ty state;
 } cached_file_ty;
 
-static cached_file_ty *cache;
-static size_t cache_size;
-static size_t cache_cap;
-static size_t cache_bytes;
-static size_t cache_max;
+static _Thread_local size_t d_worker;
+static _Thread_local cached_file_ty *cache;
+static _Thread_local size_t cache_size;
+static _Thread_local size_t cache_cap;
+static _Thread_local size_t cache_bytes;
+static _Thread_local size_t cache_max;
 
 typedef struct grep_cfg_state_ty {
 	unsigned long gen;
@@ -57,17 +58,17 @@ typedef struct grep_cfg_state_ty {
 	int ready;
 } grep_cfg_state_ty;
 
-static grep_cfg_state_ty C;
-static size_t sent_matches;
-static size_t data_seen;
-static size_t pending_eos_total;
-static int pending_eos;
-static grep_line_ty batch[GREP_BATCH_MAX];
-static size_t batch_n;
-static size_t batch_files;
-static unsigned long batch_gen;
-static grep_lines_ty *retire_cur;
-static size_t retire_at;
+static _Thread_local grep_cfg_state_ty C;
+static _Thread_local size_t sent_matches;
+static _Thread_local size_t data_seen;
+static _Thread_local size_t pending_eos_total;
+static _Thread_local int pending_eos;
+static _Thread_local grep_line_ty batch[GREP_BATCH_MAX];
+static _Thread_local size_t batch_n;
+static _Thread_local size_t batch_files;
+static _Thread_local unsigned long batch_gen;
+static _Thread_local grep_lines_ty *retire_cur;
+static _Thread_local size_t retire_at;
 
 static void batch_discard(void);
 
@@ -229,7 +230,7 @@ batch_discard(void)
 static far_grep_msg_ty *
 grep_msg_alloc(void)
 {
-	far_grep_msg_ty *msg = pipeline_grep_msg_return_try_recv();
+	far_grep_msg_ty *msg = pipeline_grep_msg_return_try_recv(d_worker);
 	if (msg == NULL)
 		msg = (far_grep_msg_ty *)calloc(1, sizeof *msg);
 	if (jstr_unlikely(msg == NULL))
@@ -255,7 +256,7 @@ grep_msg_release(far_grep_msg_ty *msg)
 {
 	if (msg == NULL)
 		return;
-	if (pipeline_grep_msg_return_try_send(msg) != 0)
+	if (pipeline_grep_msg_return_try_send(d_worker, msg) != 0)
 		free(msg);
 }
 
@@ -286,7 +287,7 @@ batch_flush(void)
 	memcpy(msg->lines, batch, batch_n * sizeof *msg->lines);
 	msg->count = batch_n;
 	msg->files_matched = batch_files;
-	if (pipeline_grep_msg_send(msg) != 0) {
+	if (pipeline_grep_msg_send(d_worker, msg) != 0) {
 		for (size_t i = 0; i < batch_n; ++i)
 			free(batch[i].owner);
 		grep_msg_release(msg);
@@ -441,7 +442,7 @@ send_kind(far_grep_msg_kind_ty kind)
 	far_grep_msg_ty *const msg = grep_msg_alloc();
 	msg->kind = kind;
 	msg->gen = C.gen;
-	if (pipeline_grep_msg_send(msg) != 0)
+	if (pipeline_grep_msg_send(d_worker, msg) != 0)
 		grep_msg_release(msg);
 }
 
@@ -638,7 +639,7 @@ static int
 retire_step(void)
 {
 	if (retire_cur == NULL) {
-		retire_cur = pipeline_grep_retire_try_recv();
+		retire_cur = pipeline_grep_retire_try_recv(d_worker);
 		retire_at = 0;
 		if (retire_cur == NULL)
 			return 0;
@@ -651,10 +652,34 @@ retire_step(void)
 		grep_lines_ty *const done = retire_cur;
 		retire_cur = NULL;
 		free(done->data);
-		if (pipeline_retire_node_return_try_send(done) != 0)
+		if (pipeline_retire_node_return_try_send(d_worker, done) != 0)
 			free(done);
 	}
 	return 1;
+}
+
+/**
+ * @anchor spec_grep_worker_log_start
+ * @brief Append one byte to the optional D-worker startup log.
+ *
+ * @details Used by integration tests to verify the configured D worker count.
+ *          Failure to open or write the log is ignored.
+ * @par Side Effects:
+ *   Appends to the file named by `FAR_GREP_WORKER_LOG` when set.
+ * @par Threading and Reentrancy:
+ *   Called once by each Stage D worker at startup.
+ */
+static void
+grep_worker_log_start(void)
+{
+	const char *const path = getenv("FAR_GREP_WORKER_LOG");
+	if (path == NULL)
+		return;
+	FILE *const fp = fopen(path, "ab");
+	if (fp == NULL)
+		return;
+	(void)fputc('x', fp);
+	(void)fclose(fp);
 }
 
 /**
@@ -678,13 +703,17 @@ retire_step(void)
 far_thread_ret_ty
 grep_worker_thread(void *arg)
 {
-	(void)arg;
+	d_worker = (size_t)(uintptr_t)arg;
+	grep_worker_log_start();
 	cache_max = procfs_mem_available() / 2;
+	const size_t workers = pipeline_worker_count();
+	if (workers != 0)
+		cache_max /= workers;
 	unsigned int spin = 0;
 	for (;;) {
 		int did = 0;
 		grep_cfg_ty *cfg;
-		while ((cfg = pipeline_grep_cfg_try_recv()) != NULL) {
+		while ((cfg = pipeline_grep_cfg_try_recv(d_worker)) != NULL) {
 			const int full = cfg->kind == GREP_CFG_FULL;
 			const int stop = cfg->kind == GREP_CFG_STOP;
 			if (stop)
@@ -696,12 +725,10 @@ grep_worker_thread(void *arg)
 		}
 		if (retire_step())
 			did = 1;
-		for (size_t w = 0; w < pipeline_worker_count(); ++w) {
-			far_result_ty *res;
-			while ((res = pipeline_grep_work_try_recv(w)) != NULL) {
-				handle_result(res);
-				did = 1;
-			}
+		far_result_ty *res;
+		while ((res = pipeline_grep_work_try_recv(d_worker)) != NULL) {
+			handle_result(res);
+			did = 1;
 		}
 		if (pending_eos && data_seen >= pending_eos_total) {
 			send_kind(FAR_GREP_EOS);
@@ -717,14 +744,14 @@ grep_worker_thread(void *arg)
 out:
 	{
 		far_grep_msg_ty *msg;
-		while ((msg = pipeline_grep_msg_return_try_recv()) != NULL)
+		while ((msg = pipeline_grep_msg_return_try_recv(d_worker)) != NULL)
 			free(msg);
 	}
 	if (retire_cur != NULL)
 		retire_free_all(retire_cur);
 	{
 		grep_lines_ty *pending;
-		while ((pending = pipeline_grep_retire_try_recv()) != NULL)
+		while ((pending = pipeline_grep_retire_try_recv(d_worker)) != NULL)
 			retire_free_all(pending);
 	}
 	batch_discard();

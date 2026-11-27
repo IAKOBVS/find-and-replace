@@ -1245,15 +1245,16 @@ typedef enum {
 typedef struct grep_retire_node_ty {
 	grep_lines_ty lines;
 	retire_owner_ty owner;
+	size_t worker;
 	struct grep_retire_node_ty *next;
 } grep_retire_node_ty;
 
 static grep_retire_node_ty *grep_retire_pending;
 
 static grep_retire_node_ty *
-retire_node_alloc(void)
+retire_node_alloc(size_t worker)
 {
-	grep_retire_node_ty *node = (grep_retire_node_ty *)pipeline_retire_node_return_try_recv();
+	grep_retire_node_ty *node = (grep_retire_node_ty *)pipeline_retire_node_return_try_recv(worker);
 	if (node == NULL)
 		node = (grep_retire_node_ty *)malloc(sizeof *node);
 	else
@@ -1286,7 +1287,7 @@ grep_retire_flush(void)
 		grep_retire_node_ty *const node = grep_retire_pending;
 		grep_retire_node_ty *const next = node->next;
 		node->owner = RETIRE_IN_FLIGHT;
-		if (pipeline_grep_retire_try_send(&node->lines) != 0) {
+		if (pipeline_grep_retire_try_send(node->worker, &node->lines) != 0) {
 			node->owner = RETIRE_C_PENDING;
 			break;
 		}
@@ -1304,6 +1305,7 @@ grep_retire_flush(void)
  *          All pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
+ * @param worker Owning Stage D worker index.
  * @param lines match list to modify or retire.
  * @post On success, all documented outputs, ownership transfers, and counters are updated;
  *       on failure, the caller retains ownership of caller-owned inputs.
@@ -1313,14 +1315,14 @@ grep_retire_flush(void)
  *   Stage C only.
  */
 static void
-grep_lines_discard(grep_lines_ty *R lines)
+grep_lines_discard(size_t worker, grep_lines_ty *R lines)
 {
 	if (lines->data == NULL) {
 		lines->size = 0;
 		lines->cap = 0;
 		return;
 	}
-	grep_retire_node_ty *const node = retire_node_alloc();
+	grep_retire_node_ty *const node = retire_node_alloc(worker);
 	if (jstr_unlikely(!node)) {
 		for (size_t i = 0; i < lines->size; ++i)
 			free(lines->data[i].owner);
@@ -1328,7 +1330,8 @@ grep_lines_discard(grep_lines_ty *R lines)
 	} else {
 		node->lines = *lines;
 		node->owner = RETIRE_IN_FLIGHT;
-		if (pipeline_grep_retire_try_send(&node->lines) != 0) {
+		node->worker = worker;
+		if (pipeline_grep_retire_try_send(worker, &node->lines) != 0) {
 			node->owner = RETIRE_C_PENDING;
 			node->next = grep_retire_pending;
 			grep_retire_pending = node;
@@ -1392,9 +1395,9 @@ grep_lines_reserve(grep_lines_ty *R lines, size_t extra)
  *   Stage C only.
  */
 static void
-grep_msg_release(far_grep_msg_ty *msg)
+grep_msg_release(size_t worker, far_grep_msg_ty *msg)
 {
-	if (pipeline_grep_msg_return_try_send(msg) != 0)
+	if (pipeline_grep_msg_return_try_send(worker, msg) != 0)
 		free(msg);
 }
 
@@ -1465,29 +1468,32 @@ grep_send_cfg(grep_cfg_kind_ty kind, unsigned long gen, size_t limit,
               const jstr_ty *R find_buf, const jstr_ty *R files_buf,
               const jstr_ty *R include_buf, const jstr_ty *R exclude_buf)
 {
-	grep_cfg_ty *const cfg = (grep_cfg_ty *)calloc(1, sizeof *cfg);
-	if (jstr_unlikely(!cfg))
-		jstr_errdie("%s", "Out of memory.\n");
-	cfg->kind = kind;
-	cfg->gen = gen;
-	cfg->limit = limit;
-	cfg->use_regex = (G.mode & MODE_USE_REGEX) != 0;
-	cfg->cflags = G.cflags;
-	cfg->eflags = G.eflags;
-	cfg->find = grep_dup(find_buf);
-	cfg->find_len = cfg->find != NULL ? find_buf->size : 0;
-	cfg->files = grep_dup(files_buf);
-	cfg->files_len = cfg->files != NULL ? files_buf->size : 0;
-	cfg->include = grep_dup(include_buf);
-	cfg->include_len = cfg->include != NULL ? include_buf->size : 0;
-	cfg->exclude = grep_dup(exclude_buf);
-	cfg->exclude_len = cfg->exclude != NULL ? exclude_buf->size : 0;
-	if (pipeline_grep_cfg_send(cfg) != 0) {
-		free(cfg->find);
-		free(cfg->files);
-		free(cfg->include);
-		free(cfg->exclude);
-		free(cfg);
+	const size_t workers = pipeline_worker_count();
+	for (size_t worker = 0; worker < workers; ++worker) {
+		grep_cfg_ty *const cfg = (grep_cfg_ty *)calloc(1, sizeof *cfg);
+		if (jstr_unlikely(!cfg))
+			jstr_errdie("%s", "Out of memory.\n");
+		cfg->kind = kind;
+		cfg->gen = gen;
+		cfg->limit = limit;
+		cfg->use_regex = (G.mode & MODE_USE_REGEX) != 0;
+		cfg->cflags = G.cflags;
+		cfg->eflags = G.eflags;
+		cfg->find = grep_dup(find_buf);
+		cfg->find_len = cfg->find != NULL ? find_buf->size : 0;
+		cfg->files = grep_dup(files_buf);
+		cfg->files_len = cfg->files != NULL ? files_buf->size : 0;
+		cfg->include = grep_dup(include_buf);
+		cfg->include_len = cfg->include != NULL ? include_buf->size : 0;
+		cfg->exclude = grep_dup(exclude_buf);
+		cfg->exclude_len = cfg->exclude != NULL ? exclude_buf->size : 0;
+		if (pipeline_grep_cfg_send(worker, cfg) != 0) {
+			free(cfg->find);
+			free(cfg->files);
+			free(cfg->include);
+			free(cfg->exclude);
+			free(cfg);
+		}
 	}
 }
 
@@ -1539,6 +1545,9 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 	int quit = 0;
 	unsigned long grep_gen = 0;
 	unsigned long full_rescan_gen = 0;
+	const size_t grep_workers = pipeline_worker_count();
+	size_t grep_eos_seen = 0;
+	size_t grep_done_seen = 0;
 	root_ctx_ty *current_root = root;
 	long long last_redraw = grep_now_ms();
 	size_t files_matched = 0;
@@ -1560,6 +1569,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			if (ucmd->kind == FAR_UI_ROOT) {
 				current_root = ucmd->root;
 				phase = GREP_UI_LIVE;
+				grep_eos_seen = 0;
 				needs_redraw = 1;
 			} else if (ucmd->kind == FAR_UI_END) {
 				if (phase == GREP_UI_LIVE) {
@@ -1581,48 +1591,65 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 		int got_match = 0;
 		const long long msg_deadline = grep_now_us() + 1000;
 		for (;;) {
-			msg = pipeline_grep_msg_try_recv();
+			size_t msg_worker = 0;
+			msg = NULL;
+			for (size_t worker = 0; worker < grep_workers; ++worker) {
+				msg = pipeline_grep_msg_try_recv(worker);
+				if (msg != NULL) {
+					msg_worker = worker;
+					break;
+				}
+			}
 			if (msg == NULL)
 				break;
 			if (msg->kind == FAR_GREP_EOS) {
-				if (phase == GREP_UI_END_PENDING) {
-					phase = GREP_UI_FINAL;
-					needs_rescan = 1;
-					rescan_due = 0;
-				} else if (phase == GREP_UI_LIVE) {
-					phase = GREP_UI_READY;
+				++grep_eos_seen;
+				if (grep_eos_seen >= grep_workers) {
+					if (phase == GREP_UI_END_PENDING) {
+						phase = GREP_UI_FINAL;
+						needs_rescan = 1;
+						rescan_due = 0;
+					} else if (phase == GREP_UI_LIVE) {
+						phase = GREP_UI_READY;
+					}
+					current_root = NULL;
+					pipeline_ui_ack_send(0);
+					needs_redraw = 1;
 				}
-				current_root = NULL;
-				pipeline_ui_ack_send(0);
-				needs_redraw = 1;
-				free(msg);
+				grep_msg_release(msg_worker, msg);
 				continue;
 			}
 			if (msg->kind == FAR_GREP_ERROR) {
 				if (current_root != NULL)
 					++current_root->a->err_count;
-				free(msg);
+				grep_msg_release(msg_worker, msg);
 				continue;
 			}
 			if (msg->gen != grep_gen) {
 				for (size_t i = 0; i < msg->count; ++i)
 					free(msg->lines[i].owner);
-				grep_msg_release(msg);
+				grep_msg_release(msg_worker, msg);
 				continue;
 			}
 			if (msg->kind == FAR_GREP_MATCH) {
 				grep_lines_append_batch(&G.grep_lines, msg->lines, msg->count);
 				files_matched += msg->files_matched;
 				got_match = 1;
-				grep_msg_release(msg);
+				grep_msg_release(msg_worker, msg);
 				continue;
 			}
 			if (msg->kind == FAR_GREP_DONE) {
-				if (phase == GREP_UI_FINAL && msg->gen == full_rescan_gen)
-					phase = GREP_UI_READY;
-				needs_redraw = 1;
+				if (phase == GREP_UI_FINAL && msg->gen == full_rescan_gen) {
+					++grep_done_seen;
+					if (grep_done_seen >= grep_workers) {
+						phase = GREP_UI_READY;
+						needs_redraw = 1;
+					}
+				} else {
+					needs_redraw = 1;
+				}
 			}
-			grep_msg_release(msg);
+			grep_msg_release(msg_worker, msg);
 			if (grep_now_us() >= msg_deadline)
 				break;
 		}
@@ -1664,7 +1691,8 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				++grep_gen;
 				if (phase == GREP_UI_FINAL)
 					full_rescan_gen = grep_gen;
-				grep_lines_discard(&G.grep_lines);
+				grep_done_seen = 0;
+				grep_lines_discard(0, &G.grep_lines);
 				files_matched = 0;
 				G.total_lines = 0;
 				G.selected_line = 0;

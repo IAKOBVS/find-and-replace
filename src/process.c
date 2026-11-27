@@ -578,14 +578,24 @@ maybe_send_eos(root_ctx_ty *R root, size_t worker)
 	if (atomic_load_explicit(&root->jobs_done, memory_order_acquire) <
 	    atomic_load_explicit(&root->total, memory_order_acquire))
 		return;
-	if (atomic_exchange_explicit(&root->eos_sent, true, memory_order_acq_rel))
-		return;
-	atomic_store_explicit(&root->phase, ROOT_EOS, memory_order_release);
 	far_result_ty *const eos = result_alloc(worker);
 	eos->kind = FAR_RES_EOS;
+	if (root->grep_live) {
+		if (!pipeline_worker_eos_mark(worker, pipeline_root_epoch()))
+			return;
+		atomic_store_explicit(&root->phase, ROOT_EOS, memory_order_release);
+		eos->total = 0;
+		if (pipeline_grep_work_send(worker, eos) != 0)
+			jstr_errdie("%s", "Can't publish root EOS.\n");
+		return;
+	}
+	if (atomic_exchange_explicit(&root->eos_sent, true, memory_order_acq_rel)) {
+		ui_result_free(eos);
+		return;
+	}
+	atomic_store_explicit(&root->phase, ROOT_EOS, memory_order_release);
 	eos->total = atomic_load_explicit(&root->total, memory_order_acquire);
-	const int send_ret = root->grep_live ? pipeline_grep_work_send(worker, eos) : pipeline_done_send(worker, eos);
-	if (send_ret != 0)
+	if (pipeline_done_send(worker, eos) != 0)
 		jstr_errdie("%s", "Can't publish root EOS.\n");
 }
 

@@ -111,6 +111,16 @@ root_ctx_ty *pipeline_root_get(void);
  */
 unsigned long pipeline_root_epoch(void);
 /**
+ * @brief Claim this worker's EOS slot for one root epoch.
+ *
+ * @param worker Owning B worker index.
+ * @param epoch Current root epoch.
+ * @return Nonzero when this caller owns the EOS; zero when already claimed.
+ * @par Threading and Reentrancy:
+ *   Stage B workers; one atomic per worker.
+ */
+int pipeline_worker_eos_mark(size_t worker, unsigned long epoch);
+/**
  * @brief Report whether worker shutdown was requested.
  *
  * @details Contract for the public declaration in pipeline.h. It reads only
@@ -313,6 +323,7 @@ far_result_ty *pipeline_grep_work_try_recv(size_t worker);
  *          Pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
+ * @param worker Owning Stage D worker index.
  * @param msg owned message object.
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
@@ -322,7 +333,7 @@ far_result_ty *pipeline_grep_work_try_recv(size_t worker);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-int pipeline_grep_msg_send(far_grep_msg_ty *msg);
+int pipeline_grep_msg_send(size_t worker, far_grep_msg_ty *msg);
 /**
  * @brief Block on the next D match message.
  *
@@ -339,7 +350,7 @@ int pipeline_grep_msg_send(far_grep_msg_ty *msg);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-far_grep_msg_ty *pipeline_grep_msg_recv(void);
+far_grep_msg_ty *pipeline_grep_msg_recv(size_t worker);
 /**
  * @brief Attempt to consume a D match message.
  *
@@ -356,7 +367,7 @@ far_grep_msg_ty *pipeline_grep_msg_recv(void);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-far_grep_msg_ty *pipeline_grep_msg_try_recv(void);
+far_grep_msg_ty *pipeline_grep_msg_try_recv(size_t worker);
 /**
  * @brief Publish a grep configuration snapshot to D.
  *
@@ -365,6 +376,7 @@ far_grep_msg_ty *pipeline_grep_msg_try_recv(void);
  *          Pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
+ * @param worker Owning Stage D worker index.
  * @param cfg configuration snapshot.
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
@@ -374,7 +386,7 @@ far_grep_msg_ty *pipeline_grep_msg_try_recv(void);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-int pipeline_grep_cfg_send(grep_cfg_ty *cfg);
+int pipeline_grep_cfg_send(size_t worker, grep_cfg_ty *cfg);
 /**
  * @brief Block on the next grep configuration snapshot.
  *
@@ -391,7 +403,7 @@ int pipeline_grep_cfg_send(grep_cfg_ty *cfg);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-grep_cfg_ty *pipeline_grep_cfg_recv(void);
+grep_cfg_ty *pipeline_grep_cfg_recv(size_t worker);
 /**
  * @brief Attempt to consume a grep configuration snapshot.
  *
@@ -408,7 +420,7 @@ grep_cfg_ty *pipeline_grep_cfg_recv(void);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-grep_cfg_ty *pipeline_grep_cfg_try_recv(void);
+grep_cfg_ty *pipeline_grep_cfg_try_recv(size_t worker);
 /**
  * @brief Attempt to hand a retired match list to D.
  *
@@ -417,6 +429,7 @@ grep_cfg_ty *pipeline_grep_cfg_try_recv(void);
  *          Pointer inputs must remain valid for the call duration.
  *          Failures never leave a partially published queue item, file, or result.
  * @pre The owning module is initialized and all documented preconditions hold.
+ * @param worker Owning Stage D worker index.
  * @param lines match list to modify or retire.
  * @return Zero on success; nonzero on failure, except documented predicates.
  * @post On success, documented outputs, ownership transfers, and counters are updated;
@@ -426,7 +439,7 @@ grep_cfg_ty *pipeline_grep_cfg_try_recv(void);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-int pipeline_grep_retire_try_send(grep_lines_ty *lines);
+int pipeline_grep_retire_try_send(size_t worker, grep_lines_ty *lines);
 /**
  * @brief Attempt to consume a retired match list in D.
  *
@@ -443,7 +456,7 @@ int pipeline_grep_retire_try_send(grep_lines_ty *lines);
  * @par Threading and Reentrancy:
  *   Stage or main as documented in docs/ARCHITECTURE.md.
  */
-grep_lines_ty *pipeline_grep_retire_try_recv(void);
+grep_lines_ty *pipeline_grep_retire_try_recv(size_t worker);
 /**
  * @brief Block on the next UI command.
  *
@@ -531,14 +544,14 @@ int pipeline_ui_ack_recv(void);
  */
 int pipeline_ui_finish(void);
 
-#endif /* PIPELINE_H */
-
 /* Result-object recycling between C/D consumers and B workers. */
 int pipeline_result_return_try_send(size_t worker, far_result_ty *res);
 far_result_ty *pipeline_result_return_try_recv(size_t worker);
 
-int pipeline_grep_msg_return_try_send(far_grep_msg_ty *msg);
-far_grep_msg_ty *pipeline_grep_msg_return_try_recv(void);
+int pipeline_grep_msg_return_try_send(size_t worker, far_grep_msg_ty *msg);
+far_grep_msg_ty *pipeline_grep_msg_return_try_recv(size_t worker);
 
-int pipeline_retire_node_return_try_send(void *node);
-void *pipeline_retire_node_return_try_recv(void);
+int pipeline_retire_node_return_try_send(size_t worker, void *node);
+void *pipeline_retire_node_return_try_recv(size_t worker);
+
+#endif /* PIPELINE_H */

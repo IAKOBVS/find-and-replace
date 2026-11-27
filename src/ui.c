@@ -18,6 +18,8 @@
 #define MEMINFO_BUF_SIZE (4096 + 1)
 #define RANGES_CAP_MIN 1
 
+static jstr_ty render_buf;
+
 /**
  * @anchor spec_ui_replaced_buf
  * @brief Write a replacement buffer to stdout.
@@ -166,6 +168,145 @@ ui_append_line_number(jstr_ty *R out, size_t val)
 		val /= 10;
 	} while (val > 0);
 	return ui_append(out, buf + i, sizeof buf - i);
+}
+
+/**
+ * @anchor spec_render_append
+ * @brief Append bytes to the preview render buffer.
+ *
+ * @details This function is part of the ui.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @param data data bytes.
+ * @param size valid byte count.
+ * @post On success, all documented outputs, ownership transfers, and counters are updated;
+ *       on failure, the caller retains ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
+ */
+static inline void
+render_append(const char *R data, size_t size)
+{
+	DIE_IF(jstr_chk(ui_append(&render_buf, data, size)), "%s", "Out of memory.\n");
+}
+
+/**
+ * @anchor spec_render_append_char
+ * @brief Append one byte to the preview render buffer.
+ *
+ * @details This function is part of the ui.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @param c input character or channel.
+ * @post On success, all documented outputs, ownership transfers, and counters are updated;
+ *       on failure, the caller retains ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
+ */
+static inline void
+render_append_char(char c)
+{
+	DIE_IF(jstr_chk(ui_append_char(&render_buf, c)), "%s", "Out of memory.\n");
+}
+
+/**
+ * @anchor spec_render_append_size
+ * @brief Append a decimal size to the preview render buffer.
+ *
+ * @details This function is part of the ui.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @param val value to format.
+ * @post On success, all documented outputs, ownership transfers, and counters are updated;
+ *       on failure, the caller retains ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
+ */
+static inline void
+render_append_size(size_t val)
+{
+	DIE_IF(jstr_chk(ui_append_line_number(&render_buf, val)), "%s", "Out of memory.\n");
+}
+
+/**
+ * @anchor spec_render_flush
+ * @brief Write the preview render buffer to stdout and empty it.
+ *
+ * @details This function is part of the ui.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @post On success, all documented outputs, ownership transfers, and counters are updated;
+ *       on failure, the caller retains ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
+ */
+static inline void
+render_flush(void)
+{
+	if (jstr_unlikely(render_buf.size == 0))
+		return;
+	if (ui_ok())
+		(void)jstr_io_fwrite(render_buf.data, 1, render_buf.size, stdout);
+	jstr_empty_j(&render_buf);
+}
+
+/**
+ * @anchor spec_render_diff_line_chars
+ * @brief Append one clipped diff body segment to the render buffer.
+ *
+ * @details This function is part of the ui.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @param s input string.
+ * @param len valid byte count.
+ * @param cols terminal column count.
+ * @param col_ptr current column, updated on return.
+ * @post On success, all documented outputs, ownership transfers, and counters are updated;
+ *       on failure, the caller retains ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
+ */
+static inline void
+render_diff_line_chars(const char *R s, size_t len, unsigned short cols, unsigned short *R col_ptr)
+{
+	unsigned short col = *col_ptr;
+	const unsigned short limit = (cols > 1) ? (cols - 1) : 0;
+	for (size_t i = 0; i < len; ++i) {
+		const char c = s[i];
+		if (c == '\t') {
+			const unsigned short next_tab = (unsigned short)((col + 8) & ~7);
+			while (col < next_tab) {
+				if (col < limit)
+					render_append_char(' ');
+				col++;
+			}
+		} else {
+			if (col < limit)
+				render_append_char(c);
+			col++;
+		}
+	}
+	*col_ptr = col;
 }
 
 /**
@@ -824,18 +965,19 @@ print_line_prefix(const char *R fname, size_t fname_len, size_t line, int is_sel
 {
 	if (jstr_unlikely(!ui_ok()))
 		return;
-	(void)jstr_io_fwrite(fname_color, 1, fname_color_len, stdout);
+	jstr_empty_j(&render_buf);
+	render_append(fname_color, fname_color_len);
 	if (is_selected)
-		(void)jstr_io_fwrite(COLOR_NEGATIVE, 1, S_LEN(COLOR_NEGATIVE), stdout);
-	(void)jstr_io_fwrite(fname, 1, fname_len, stdout);
+		render_append(COLOR_NEGATIVE, S_LEN(COLOR_NEGATIVE));
+	render_append(fname, fname_len);
 	if (is_selected)
-		(void)jstr_io_fwrite(COLOR_POSITIVE, 1, S_LEN(COLOR_POSITIVE), stdout);
-	(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-	(void)jstr_io_putchar(':');
-	(void)jstr_io_fwrite(line_color, 1, line_color_len, stdout);
-	ui_print_size_t(line);
-	(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
-	(void)jstr_io_putchar(':');
+		render_append(COLOR_POSITIVE, S_LEN(COLOR_POSITIVE));
+	render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
+	render_append_char(':');
+	render_append(line_color, line_color_len);
+	render_append_size(line);
+	render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
+	render_append_char(':');
 }
 
 /* Print S of LEN bytes, expanding tab characters to 8-column stops and
@@ -988,26 +1130,27 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 
 			if (want_highlight != in_highlight) {
 				if (want_highlight)
-					(void)jstr_io_fwrite(match_color, 1, match_color_len, stdout);
+					render_append(match_color, match_color_len);
 				else
-					(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
+					render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
 				in_highlight = want_highlight;
 			}
 
 			size_t seg_len = next_boundary - curr;
 			if (terminal_active())
-				ui_print_diff_line_chars(data + curr, seg_len, cols, &col);
+				render_diff_line_chars(data + curr, seg_len, cols, &col);
 			else
-				(void)jstr_io_fwrite(data + curr, 1, seg_len, stdout);
+				render_append(data + curr, seg_len);
 
 			curr = next_boundary;
 		}
 
 		if (in_highlight)
-			(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
+			render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
 		if (terminal_active())
-			(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
-		(void)jstr_io_putchar('\n');
+			render_append(ANSI_CLEAR_LINE_END, S_LEN(ANSI_CLEAR_LINE_END));
+		render_append_char('\n');
+		render_flush();
 		if (terminal_active())
 			G.preview_lines_printed++;
 		p = nl + 1;
@@ -1051,26 +1194,27 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 
 				if (want_highlight != in_highlight) {
 					if (want_highlight)
-						(void)jstr_io_fwrite(match_color, 1, match_color_len, stdout);
+						render_append(match_color, match_color_len);
 					else
-						(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
+						render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
 					in_highlight = want_highlight;
 				}
 
 				size_t seg_len = next_boundary - curr;
 				if (terminal_active())
-					ui_print_diff_line_chars(data + curr, seg_len, cols, &col);
+					render_diff_line_chars(data + curr, seg_len, cols, &col);
 				else
-					(void)jstr_io_fwrite(data + curr, 1, seg_len, stdout);
+					render_append(data + curr, seg_len);
 
 				curr = next_boundary;
 			}
 
 			if (in_highlight)
-				(void)jstr_io_fwrite(TUI_CONFIRM_UNMATCHED, 1, S_LEN(TUI_CONFIRM_UNMATCHED), stdout);
+				render_append(TUI_CONFIRM_UNMATCHED, S_LEN(TUI_CONFIRM_UNMATCHED));
 			if (terminal_active())
-				(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
-			(void)jstr_io_putchar('\n');
+				render_append(ANSI_CLEAR_LINE_END, S_LEN(ANSI_CLEAR_LINE_END));
+			render_append_char('\n');
+			render_flush();
 			if (terminal_active())
 				G.preview_lines_printed++;
 		}
@@ -1084,8 +1228,9 @@ print_diff_lines(const char *R data, size_t len, const range_ty *ranges, size_t 
 		} else {
 			print_line_prefix(fname, fname_len, line, G.preview_lines_printed == G.selected_line, fname_color, fname_color_len, line_color, line_color_len);
 			if (terminal_active())
-				(void)jstr_io_fwrite(ANSI_CLEAR_LINE_END, 1, S_LEN(ANSI_CLEAR_LINE_END), stdout);
-			(void)jstr_io_putchar('\n');
+				render_append(ANSI_CLEAR_LINE_END, S_LEN(ANSI_CLEAR_LINE_END));
+			render_append_char('\n');
+			render_flush();
 			if (terminal_active())
 				G.preview_lines_printed++;
 		}

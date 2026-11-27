@@ -39,6 +39,22 @@ t_confirm_colored_default() {
 	esac
 }
 
+t_confirm_preview_exact_bytes() {
+	td=$1; printf 'XhelloX world\n' > "$td/f"
+	"$PROG" hello bye -c -i "$td/f" < /dev/null > "$td/out" 2>/dev/null
+	red=$(printf '\033[31m')
+	green=$(printf '\033[32m')
+	neg=$(printf '\033[7m')
+	pos=$(printf '\033[27m')
+	reset=$(printf '\033[0m')
+	{
+		printf '%s%s%s%s%s:%s1%s:X%shello%sX world\n' "$red" "$neg" "$td/f" "$pos" "$reset" "$red" "$reset" "$red" "$reset"
+		printf '%s%s%s%s%s:%s1%s:X%sbye%sX world\n' "$green" "$neg" "$td/f" "$pos" "$reset" "$green" "$reset" "$green" "$reset"
+		printf 'Confirm changes? [y/N]: '
+	} > "$td/exp"
+	cmp -s "$td/out" "$td/exp" && echo PASS > "$td/result" || echo "FAIL: preview bytes changed; expected [$(od -An -tx1 -v "$td/exp")] got [$(od -An -tx1 -v "$td/out")]" > "$td/result"
+}
+
 t_confirm_match_colored_line_plain() {
 	# Style inversion: the preview line BODY is plain (uncolored) and only
 	# the matched substring carries the side's color (- red / + green).
@@ -1080,6 +1096,7 @@ t_confirm_interactive_scroll_past_visend() {
 TESTS="
 t_confirm_yes
 t_confirm_colored_default
+t_confirm_preview_exact_bytes
 t_confirm_match_colored_line_plain
 t_confirm_abort
 t_confirm_no_inplace_err

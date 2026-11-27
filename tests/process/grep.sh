@@ -440,6 +440,24 @@ t_grep_interactive_large_batch() {
 	fi
 }
 
+# Regression: interactive grep scanning stayed on one Stage-D thread even when
+# -j requested more process workers.
+t_grep_interactive_parallel_d() {
+	td=$1
+	mkdir -p "$td/sub"
+	printf 'hit\n' > "$td/sub/a"
+	printf 'hit\n' > "$td/sub/b"
+	rm -f "$td/workers"
+	pdrive --env "FAR_GREP_WORKER_LOG=$td/workers" --phase 0d --tail '' -- \
+	       hit x --grep -j 4 -r "$td/sub"
+	n=$(wc -c 2>/dev/null < "$td/workers") || n=0
+	if [ "$n" -eq 4 ]; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: D workers=$n" > "$td/result"
+	fi
+}
+
 # Regression: regex grep sliced the buffer at a zero-length line but the
 # regex engine was given the NUL-terminated buffer position, so it matched
 # into later lines and produced offsets larger than the line. That underflowed
@@ -668,6 +686,7 @@ t_grep_interactive_find_field
 t_grep_interactive_controls_fixed
 t_grep_interactive_vim_mode
 t_grep_interactive_large_batch
+t_grep_interactive_parallel_d
 t_grep_interactive_no_blank_while_typing
 t_grep_interactive_edit_during_scan
 t_grep_interactive_stop_during_scan

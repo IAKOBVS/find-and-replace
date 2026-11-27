@@ -1638,11 +1638,8 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			if (term_state == TERM_RAW)
 				cols = get_terminal_cols();
 			const size_t vis_end = G.scroll_offset + max_preview_lines;
-			for (size_t k = 0; k < G.grep_lines.size && k < vis_end; ++k) {
-				if (k < G.scroll_offset)
-					continue;
+			for (size_t k = G.scroll_offset; k < G.grep_lines.size && k < vis_end; ++k)
 				grep_print_line(&G.grep_lines.data[k], k == G.selected_line, cols);
-			}
 			if (G.grep_lines.size > vis_end) {
 				(void)jstr_io_fwrite(". (more matches below)", 1, S_LEN(". (more matches below)"), stdout);
 				term_clear_line_end();

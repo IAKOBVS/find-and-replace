@@ -1149,7 +1149,9 @@ pipeline_shutdown(void)
 	for (size_t i = 0; i < P.worker_count; ++i)
 		FAR_THREAD_JOIN(P.process_threads[i]);
 	stop_ui_and_grep();
+#if DO_FREE
 	free_state();
+#endif
 	atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 }
 

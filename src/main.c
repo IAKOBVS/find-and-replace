@@ -133,7 +133,7 @@ static const char *usage =
  *   Main thread only.
  */
 static int
-err_exit_code()
+err_exit_code(void)
 {
 	return (G.mode & MODE_GREP) ? 2 : EXIT_FAILURE;
 }
@@ -179,7 +179,7 @@ check_grep_conflicts(void)
  *   Main thread only.
  */
 static void
-init_defaults()
+init_defaults(void)
 {
 	/* Anchors match on newlines. */
 	G.cflags = JSTR_RE_CF_NEWLINE;
@@ -247,7 +247,7 @@ file_filter_pass(const file_ty *R file, const jstr_ty *R files_buf)
  *   Main thread only.
  */
 static void
-cleanup()
+cleanup(void)
 {
 	pipeline_shutdown();
 #if DO_FREE /* We don't need to free since we're exiting. */

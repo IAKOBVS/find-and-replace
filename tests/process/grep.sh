@@ -252,6 +252,29 @@ t_grep_interactive_scroll() {
 	fi
 }
 
+t_grep_interactive_deep_scroll_overdraw() {
+	td=$1
+	i=0
+	while [ "$i" -lt 40 ]; do
+		i=$((i + 1))
+		printf 'm%02d\n' "$i"
+	done > "$td/f"
+	keys=
+	i=0
+	while [ "$i" -lt 30 ]; do
+		keys="${keys}1b4a"
+		i=$((i + 1))
+	done
+	pdrive --phase "${keys}@50" --phase '0d@100' --tail '' -- m x --grep "$td/f"
+	out=$(strip_ansi < "$td/out")
+	if printf '%s\n' "$out" | grep -qF '15:m15' &&
+	   ! printf '%s\n' "$out" | grep -qF '39:m39'; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: out=[$out]" > "$td/result"
+	fi
+}
+
 t_grep_interactive_ctrl_j_k_nav() {
 	td=$1
 	printf 'hello\nworld\n' > "$td/f"
@@ -635,6 +658,7 @@ t_grep_interactive_regex_empty_lines
 t_grep_interactive_recursive
 t_grep_interactive_basic
 t_grep_interactive_scroll
+t_grep_interactive_deep_scroll_overdraw
 t_grep_interactive_ctrl_j_k_nav
 t_grep_interactive_exclude
 t_grep_interactive_ctrl_d

@@ -745,6 +745,16 @@ t_terminal_cols_env() {
 	fi
 }
 
+t_confirm_interactive_resize() {
+	td=$1; printf 'hello world\n' > "$td/f"
+	pdrive --winsize 24x80 --resize 12x40 --phase 1b5b44@200 --tail '\x03' -- hello bye -c -i "$td/f"
+	if grep -Fq "$(printf '\033[6;')" "$td/out"; then
+		echo PASS > "$td/result"
+	else
+		echo "FAIL: resized layout cursor anchor missing from [$(sed 's/\x1b\[[0-9;]*m//g' "$td/out" 2>/dev/null | tr '\n' ' ' | cut -c1-200)]" > "$td/result"
+	fi
+}
+
 t_interactive_signal_term() {
 	td=$1; printf 'hello world\n' > "$td/f"
 	pdrive --signal TERM -- hello HI -c -i "$td/f"
@@ -1169,6 +1179,7 @@ t_vim_insert_motions
 t_vim_jk_field_nav
 t_terminal_size_zero
 t_terminal_cols_env
+t_confirm_interactive_resize
 t_interactive_signal_term
 t_interactive_file_deleted_rename_fail
 t_interactive_invalid_flag_char

@@ -27,6 +27,9 @@ static const char *env_cols;
 static const char *env_lines;
 static int ui_stop_requested;
 static int esc_char_pending;
+static volatile sig_atomic_t term_size_dirty = 1;
+static unsigned short cached_rows;
+static unsigned short cached_cols;
 
 #define TERM_ROWS_FALLBACK 24
 #define TERM_COLS_FALLBACK 80
@@ -82,6 +85,29 @@ handle_signal(int sig)
 	(void)sig;
 	restore_terminal();
 	_exit(EXIT_FAILURE);
+}
+
+/**
+ * @anchor spec_handle_winch
+ * @brief Mark cached terminal dimensions stale on SIGWINCH.
+ *
+ * @details This function is part of the terminal.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @param sig signal number; ignored.
+ * @post The next terminal_cols or terminal_rows call refreshes both dimensions.
+ * @par Side Effects:
+ *   Only the terminal-size cache state is modified.
+ * @par Threading and Reentrancy:
+ *   Async signal handler; only sig_atomic_t state is written.
+ */
+static void
+handle_winch(int sig)
+{
+	(void)sig;
+	term_size_dirty = 1;
 }
 
 /**
@@ -327,9 +353,11 @@ setup_terminal(void)
 		return;
 	}
 	atexit(restore_terminal);
+	term_size_dirty = 1;
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 	signal(SIGQUIT, handle_signal);
+	signal(SIGWINCH, handle_winch);
 }
 
 /**
@@ -575,6 +603,31 @@ get_terminal_rows(void)
 			return (unsigned short)l;
 	}
 	return TERM_ROWS_FALLBACK; /* standard default fallback */
+}
+
+/**
+ * @anchor spec_refresh_terminal_size
+ * @brief Refresh cached terminal dimensions when SIGWINCH marked them stale.
+ *
+ * @details This function is part of the terminal.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre Stage C owns the UI.
+ * @post Both cached dimensions are current and the dirty flag is clear.
+ * @par Side Effects:
+ *   Only the terminal-size cache is modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; the dirty flag is signal-safe.
+ */
+static void
+refresh_terminal_size(void)
+{
+	if (jstr_unlikely(term_size_dirty)) {
+		term_size_dirty = 0;
+		cached_rows = get_terminal_rows();
+		cached_cols = get_terminal_cols();
+	}
 }
 
 typedef struct {
@@ -1144,7 +1197,7 @@ grep_print_line(const grep_line_ty *gl, int is_selected, unsigned short cols)
 static size_t
 grep_match_cap(void)
 {
-	const unsigned short rows = get_terminal_rows();
+	const unsigned short rows = terminal_rows();
 	const size_t control_lines = GREP_FIELD_COUNT + 3;
 	return rows > control_lines ? rows - control_lines : 1;
 }
@@ -1624,7 +1677,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 				needs_rescan = 0;
 			}
 
-			const unsigned short rows = get_terminal_rows();
+			const unsigned short rows = terminal_rows();
 			const size_t control_lines = GREP_FIELD_COUNT + 3;
 			size_t max_preview_lines;
 			if (rows > control_lines)
@@ -1636,7 +1689,7 @@ grep_interactive_loop(jstr_twoway_ty *R t,
 			/* Print matching lines in the scroll window. */
 			unsigned short cols = 0;
 			if (term_state == TERM_RAW)
-				cols = get_terminal_cols();
+				cols = terminal_cols();
 			const size_t vis_end = G.scroll_offset + max_preview_lines;
 			for (size_t k = G.scroll_offset; k < G.grep_lines.size && k < vis_end; ++k)
 				grep_print_line(&G.grep_lines.data[k], k == G.selected_line, cols);
@@ -1920,7 +1973,7 @@ confirm_interactive_loop(jstr_twoway_ty *R t,
 				break;
 			jstr_unescape_copy(&G.find_plain, find_buf);
 			jstr_unescape_copy(&G.rplc_plain, rplc_buf);
-			const unsigned short rows = get_terminal_rows();
+			const unsigned short rows = terminal_rows();
 			const unsigned short cols = terminal_cols();
 			if (rows != last_rows || cols != last_cols) {
 				last_rows = rows;
@@ -2245,7 +2298,8 @@ terminal_active(void)
 unsigned short
 terminal_cols(void)
 {
-	return get_terminal_cols();
+	refresh_terminal_size();
+	return cached_cols;
 }
 
 /**
@@ -2268,7 +2322,8 @@ terminal_cols(void)
 unsigned short
 terminal_rows(void)
 {
-	return get_terminal_rows();
+	refresh_terminal_size();
+	return cached_rows;
 }
 
 /**

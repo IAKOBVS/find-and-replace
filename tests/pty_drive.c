@@ -381,7 +381,8 @@ static int is_known_opt(const char *arg)
 	if (strcmp(arg, "--phase") == 0 || strcmp(arg, "--tail") == 0 ||
 	    strcmp(arg, "--ready") == 0 || strcmp(arg, "--out") == 0 ||
 	    strcmp(arg, "--rc") == 0 || strcmp(arg, "--prog") == 0 ||
-	    strcmp(arg, "--winsize") == 0 || strcmp(arg, "--signal") == 0 ||
+	    strcmp(arg, "--winsize") == 0 || strcmp(arg, "--resize") == 0 ||
+	    strcmp(arg, "--signal") == 0 ||
 	    strcmp(arg, "--delay") == 0 || strcmp(arg, "--env") == 0 ||
 	    strcmp(arg, "--timeout") == 0 || strcmp(arg, "--after-ready") == 0 ||
 	    strcmp(arg, "--ready-timeout") == 0)
@@ -393,6 +394,7 @@ static int is_known_opt(const char *arg)
 	    strncmp(arg, "--rc=", 5) == 0 ||
 	    strncmp(arg, "--prog=", 7) == 0 ||
 	    strncmp(arg, "--winsize=", 10) == 0 ||
+	    strncmp(arg, "--resize=", 9) == 0 ||
 	    strncmp(arg, "--signal=", 9) == 0 ||
 	    strncmp(arg, "--delay=", 8) == 0 ||
 	    strncmp(arg, "--env=", 6) == 0 ||
@@ -409,6 +411,7 @@ int main(int argc, char **argv)
 	const char *out_path = NULL;
 	const char *rc_path = NULL;
 	const char *winsize_str = NULL;
+	const char *resize_str = NULL;
 	const char *ready_marker = NULL;
 	double ready_timeout_s = 10.0;
 	const char *after_ready = NULL;
@@ -475,6 +478,10 @@ int main(int argc, char **argv)
 			winsize_str = argv[++i];
 		else if (strncmp(argv[i], "--winsize=", 10) == 0)
 			winsize_str = argv[i] + 10;
+		else if (strcmp(argv[i], "--resize") == 0 && i + 1 < argc)
+			resize_str = argv[++i];
+		else if (strncmp(argv[i], "--resize=", 9) == 0)
+			resize_str = argv[i] + 9;
 		else if (strcmp(argv[i], "--ready") == 0 && i + 1 < argc)
 			ready_marker = argv[++i];
 		else if (strncmp(argv[i], "--ready=", 8) == 0)
@@ -610,6 +617,18 @@ int main(int argc, char **argv)
 	if (after_ready != NULL) {
 		int ret = system(after_ready);
 		(void)ret;
+	}
+
+	if (resize_str != NULL) {
+		int r = 0;
+		int c = 0;
+		if (split_winsize(resize_str, &r, &c) == 0) {
+			struct winsize ws;
+			memset(&ws, 0, sizeof(ws));
+			ws.ws_row = (unsigned short)r;
+			ws.ws_col = (unsigned short)c;
+			ioctl(master_fd, TIOCSWINSZ, &ws);
+		}
 	}
 
 	for (i = 0; i < action_count; i++) {

@@ -17,6 +17,7 @@
 #define FREE_RAM_FALLBACK (1 * JSTR_IO_GIB)
 #define MEMINFO_BUF_SIZE (4096 + 1)
 #define RANGES_CAP_MIN 1
+#define MATCHES_PREALLOC_MAX 4096
 #define PREVIEW_CACHE_LINE_MAX 4096
 
 static jstr_ty render_buf;
@@ -759,6 +760,42 @@ ui_ok(void)
 	return !ferror(stdout);
 }
 
+/**
+ * @anchor spec_matches_reserve
+ * @brief Reserve capacity in a growable match list.
+ *
+ * @details This function is part of the ui.c contract. It reads only
+ *          the inputs named below and writes only the documented outputs.
+ *          All pointer inputs must remain valid for the call duration.
+ *          Failures never leave a partially published queue item, file, or result.
+ * @pre The owning module is initialized and all documented preconditions hold.
+ * @param matches match/range list.
+ * @param required_cap minimum number of match slots to make available.
+ * @return `JSTR_RET_SUCC` on success; otherwise a typed error code.
+ * @post On success, `matches->cap` is at least `required_cap`, `matches->size`
+ *       and existing entries are unchanged; on failure, the caller retains
+ *       ownership of caller-owned inputs.
+ * @par Side Effects:
+ *   Only the objects, queues, files, and global state named in the owning contract are modified.
+ * @par Threading and Reentrancy:
+ *   Stage C only; D may call ui_result_free on owned results.
+ */
+static jstr_ret_ty
+matches_reserve(matches_ty *R matches, size_t required_cap)
+{
+	if (matches->cap >= required_cap)
+		return JSTR_RET_SUCC;
+	size_t cap = matches->cap == 0 ? MATCHES_CAP_MIN : matches->cap;
+	while (cap < required_cap)
+		cap *= 2;
+	match_ty *const new_matches = (match_ty *)realloc(matches->data, cap * sizeof(match_ty));
+	if (jstr_unlikely(new_matches == NULL))
+		return JSTR_RET_ERR;
+	matches->data = new_matches;
+	matches->cap = cap;
+	return JSTR_RET_SUCC;
+}
+
 /* Append one match range to the dynamically grown matches array. */
 /**
  * @anchor spec_match_pushback
@@ -786,12 +823,9 @@ match_pushback(matches_ty *R matches,
                   size_t end,
                   const regmatch_t *rm)
 {
-	if (matches->size >= matches->cap) {
-		matches->cap = (matches->cap == 0 ? MATCHES_CAP_MIN : matches->cap * 2);
-		match_ty *const new_matches = (match_ty *)realloc(matches->data, matches->cap * sizeof(match_ty));
-		DIE_IF(!new_matches, "%s", "Out of memory allocating matches.\n");
-		matches->data = new_matches;
-	}
+	if (jstr_unlikely(matches->size >= matches->cap))
+		DIE_IF(matches_reserve(matches, matches->size + 1) != JSTR_RET_SUCC,
+		       "%s", "Out of memory allocating matches.\n");
 	(matches->data)[matches->size].start = start;
 	(matches->data)[matches->size].end = end;
 	if (rm)
@@ -1749,6 +1783,11 @@ ui_scan_file(const jstr_twoway_ty *R t,
 	}
 	G.matches.size = 0;
 	const size_t match_budget = (G.max_preview_lines > 0) ? (size_t)G.max_preview_lines * PREVIEW_MATCH_BUDGET_FACTOR : SIZE_MAX;
+	if (match_budget != SIZE_MAX) {
+		const size_t reserve_cap = JSTR_MIN(match_budget, (size_t)MATCHES_PREALLOC_MAX);
+		DIE_IF(matches_reserve(&G.matches, reserve_cap) != JSTR_RET_SUCC,
+		       "%s", "Out of memory allocating matches.\n");
+	}
 	if (G.mode & MODE_USE_REGEX)
 		confirm_scan_regex_matches(buf, find_len, match_budget);
 	else

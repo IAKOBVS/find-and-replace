@@ -60,13 +60,13 @@ typedef struct pipeline_state_ty {
 	alignas(64) spsc_chan_ty retire_node_return;
 	alignas(64) void *retire_node_return_slots[PIPELINE_RETIRE_NODE_RETURN_DEPTH];
 	b_worker_ty *workers;
-	far_thread_ty *b_threads;
+	far_thread_ty *process_threads;
 	size_t worker_count;
 	size_t requested_workers;
 	int workers_heap_owned;
-	far_thread_ty a_thread;
-	far_thread_ty c_thread;
-	far_thread_ty d_thread;
+	far_thread_ty traversal_thread;
+	far_thread_ty ui_thread;
+	far_thread_ty grep_scan_thread;
 } pipeline_state_ty;
 
 typedef enum {
@@ -82,7 +82,7 @@ static atomic_ulong root_epoch;
 static atomic_int pipe_life;
 
 static alignas(64) b_worker_ty static_workers[PIPELINE_STATIC_WORKERS];
-static alignas(64) far_thread_ty static_b_threads[PIPELINE_STATIC_WORKERS];
+static alignas(64) far_thread_ty static_process_threads[PIPELINE_STATIC_WORKERS];
 static alignas(64) spmc_slot_ty static_work_slots[PIPELINE_DEPTH];
 
 /**
@@ -955,11 +955,11 @@ free_state(void)
 	}
 	if (P.workers_heap_owned) {
 		free(P.workers);
-		free(P.b_threads);
+		free(P.process_threads);
 		free(P.work_slots);
 	}
 	P.workers = NULL;
-	P.b_threads = NULL;
+	P.process_threads = NULL;
 	P.work_slots = NULL;
 	P.worker_count = 0;
 }
@@ -987,11 +987,11 @@ stop_ui_and_grep(void)
 	stop.kind = FAR_UI_STOP;
 	stop.root = NULL;
 	(void)spsc_chan_send(&P.ui_cmd, &stop);
-	FAR_THREAD_JOIN(P.c_thread);
+	FAR_THREAD_JOIN(P.ui_thread);
 	grep_cfg_ty gstop;
 	gstop.kind = GREP_CFG_STOP;
 	(void)spsc_chan_send(&P.grep_cfg, &gstop);
-	FAR_THREAD_JOIN(P.d_thread);
+	FAR_THREAD_JOIN(P.grep_scan_thread);
 }
 
 /**
@@ -1028,15 +1028,15 @@ pipeline_start(void)
 	atomic_init(&root_epoch, 0);
 	if (P.worker_count <= PIPELINE_STATIC_WORKERS) {
 		P.workers = static_workers;
-		P.b_threads = static_b_threads;
+		P.process_threads = static_process_threads;
 		P.work_slots = static_work_slots;
 		P.workers_heap_owned = 0;
 	} else {
 		P.workers = (b_worker_ty *)calloc(P.worker_count, sizeof *P.workers);
-		P.b_threads = (far_thread_ty *)calloc(P.worker_count, sizeof *P.b_threads);
+		P.process_threads = (far_thread_ty *)calloc(P.worker_count, sizeof *P.process_threads);
 		P.work_slots = (spmc_slot_ty *)calloc(PIPELINE_DEPTH, sizeof *P.work_slots);
 		P.workers_heap_owned = 1;
-		if (jstr_unlikely(!P.workers || !P.b_threads || !P.work_slots)) {
+		if (jstr_unlikely(!P.workers || !P.process_threads || !P.work_slots)) {
 			free_state();
 			atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 			return -1;
@@ -1063,23 +1063,23 @@ pipeline_start(void)
 			return -1;
 		}
 	}
-	if (jstr_unlikely(FAR_THREAD_CREATE(&P.d_thread, grep_worker_thread, NULL) != FAR_THREAD_SUCCESS)) {
+	if (jstr_unlikely(FAR_THREAD_CREATE(&P.grep_scan_thread, grep_worker_thread, NULL) != FAR_THREAD_SUCCESS)) {
 		free_state();
 		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 		return -1;
 	}
-	if (jstr_unlikely(FAR_THREAD_CREATE(&P.c_thread, terminal_ui_thread, NULL) != FAR_THREAD_SUCCESS)) {
+	if (jstr_unlikely(FAR_THREAD_CREATE(&P.ui_thread, terminal_ui_thread, NULL) != FAR_THREAD_SUCCESS)) {
 		grep_cfg_ty stop;
 		stop.kind = GREP_CFG_STOP;
 		(void)spsc_chan_send(&P.grep_cfg, &stop);
-		FAR_THREAD_JOIN(P.d_thread);
+		FAR_THREAD_JOIN(P.grep_scan_thread);
 		free_state();
 		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 		return -1;
 	}
 	size_t started = 0;
 	for (; started < P.worker_count; ++started) {
-		if (jstr_unlikely(FAR_THREAD_CREATE(&P.b_threads[started], process_thread, (void *)(uintptr_t)started) != FAR_THREAD_SUCCESS))
+		if (jstr_unlikely(FAR_THREAD_CREATE(&P.process_threads[started], process_thread, (void *)(uintptr_t)started) != FAR_THREAD_SUCCESS))
 			break;
 	}
 	if (started != P.worker_count) {
@@ -1087,18 +1087,18 @@ pipeline_start(void)
 		pipeline_root_set(NULL);
 		spmc_chan_close(&P.work);
 		for (size_t i = 0; i < started; ++i)
-			FAR_THREAD_JOIN(P.b_threads[i]);
+			FAR_THREAD_JOIN(P.process_threads[i]);
 		stop_ui_and_grep();
 		free_state();
 		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
 		return -1;
 	}
-	if (jstr_unlikely(FAR_THREAD_CREATE(&P.a_thread, traverse_thread, NULL) != FAR_THREAD_SUCCESS)) {
+	if (jstr_unlikely(FAR_THREAD_CREATE(&P.traversal_thread, traverse_thread, NULL) != FAR_THREAD_SUCCESS)) {
 		atomic_store_explicit(&pipe_life, PIPE_STOPPING, memory_order_release);
 		pipeline_root_set(NULL);
 		spmc_chan_close(&P.work);
 		for (size_t i = 0; i < P.worker_count; ++i)
-			FAR_THREAD_JOIN(P.b_threads[i]);
+			FAR_THREAD_JOIN(P.process_threads[i]);
 		stop_ui_and_grep();
 		free_state();
 		atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);
@@ -1131,9 +1131,9 @@ pipeline_shutdown(void)
 		return;
 	atomic_store_explicit(&pipe_life, PIPE_STOPPING, memory_order_release);
 	(void)spsc_chan_send(&P.cmd, NULL);
-	FAR_THREAD_JOIN(P.a_thread);
+	FAR_THREAD_JOIN(P.traversal_thread);
 	for (size_t i = 0; i < P.worker_count; ++i)
-		FAR_THREAD_JOIN(P.b_threads[i]);
+		FAR_THREAD_JOIN(P.process_threads[i]);
 	stop_ui_and_grep();
 	free_state();
 	atomic_store_explicit(&pipe_life, PIPE_STOPPED, memory_order_release);

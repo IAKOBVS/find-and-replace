@@ -82,7 +82,9 @@ static JSTR_IO_FTW_FUNC(traverse_enqueue, ftw, args)
 	const char *base = jstr_memrchr(ftw->dirpath, '/', (size_t)ftw->dirpath_len);
 	base = (base != NULL && *(base + 1)) ? base + 1 : ftw->dirpath;
 	const size_t base_len = (size_t)(ftw->dirpath + ftw->dirpath_len - base);
-	if (jstr_strstr_len(base, base_len, FAR_TEMP_MARKER, S_LEN(FAR_TEMP_MARKER)) != NULL)
+	if (base_len >= S_LEN(FAR_TEMP_SUFFIX) &&
+	    memcmp(base + base_len - S_LEN(FAR_TEMP_SUFFIX),
+	           FAR_TEMP_MARKER, S_LEN(FAR_TEMP_MARKER)) == 0)
 		return 0;
 	return traverse_emit(root, ftw->dirpath, (size_t)ftw->dirpath_len,
 	                     ftw->st, FAR_JOB_FILE, NULL);

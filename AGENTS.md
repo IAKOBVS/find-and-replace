@@ -1625,8 +1625,9 @@ Verification: full suites, per-function units, TSAN+UBSAN and ASAN+UBSAN.
 ## Session 40: temp-file traversal race and ext4 benchmark
 
 - `io_write_inplace_temp` now uses `.far_tmp_XXXXXX`; A traversal skips
-  basenames containing `FAR_TEMP_MARKER`, so it never enqueues B's temporary
-  files before they are renamed. Added `t_pipeline_skips_temp_files`.
+  basenames ending in `FAR_TEMP_MARKER` plus six characters, so it never
+  enqueues B's temporary files before they are renamed. Added
+  `t_pipeline_skips_temp_files`.
 - `process_stdin_job` treats the jstring "empty stdin" error as empty input so
   `--grep` on empty stdin exits 1 instead of 2.
 - Re-benchmarked on a non-tmpfs filesystem. `nproc` (6) vs `2*nproc` (12):
@@ -1707,8 +1708,8 @@ Verification: full suites, per-function units, TSAN+UBSAN and ASAN+UBSAN.
 
 - Added `PIPELINE_STATIC_WORKERS = 8` in `src/pipeline.c`. When the requested
   worker count is at most 8, `pipeline_start()` points `P.workers`,
-  `P.b_threads`, and `P.work_slots` at module-static arrays (`static_workers`,
-  `static_b_threads`, `static_work_slots`) for the `b_worker_ty` records, B
+  `P.process_threads`, and `P.work_slots` at module-static arrays (`static_workers`,
+  `static_process_threads`, `static_work_slots`) for the `b_worker_ty` records, B
   thread handles, and SPMC work slots; no heap allocation is needed for them.
 - Worker counts above 8 fall back to `calloc` for the same three arrays with no
   cap, so `-j N` / `FAR_THREADS` remain fully runtime-configurable.

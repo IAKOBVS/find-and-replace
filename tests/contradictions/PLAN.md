@@ -93,7 +93,7 @@ Buggy behavior:
 
 - D is stopped before C.
 - C waits for EOS that D can no longer send.
-- `FAR_THREAD_JOIN(c_thread)` hangs.
+- `FAR_THREAD_JOIN(ui_thread)` hangs.
 
 Fixed behavior:
 
